@@ -37,7 +37,7 @@ This project implements the following security practices:
 
 ## Security Best Practices for Users
 
-When deploying Lacuna:
+When deploying Sovra:
 
 1. Keep dependencies up to date
 2. Use environment variables for sensitive configuration

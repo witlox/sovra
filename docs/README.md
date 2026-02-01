@@ -58,10 +58,10 @@ Learn how to:
 
 ### Where should I deploy Sovra?
 
-- **AWS**: Use [AWS deployment guide](../deployment/aws.md)
-- **Azure**: Use [Azure deployment guide](../deployment/azure.md)
-- **On-premises**: Use [on-premises guide](../deployment/on-premises.md)
-- **Air-gap**: Use [air-gap guide](../deployment/air-gap.md)
+- **AWS**: Use [AWS deployment guide](deployment/aws.md)
+- **Azure**: Use [Azure deployment guide](deployment/azure.md)
+- **On-premises**: Use [on-premises guide](deployment/on-premises.md)
+- **Air-gap**: Use [air-gap guide](deployment/air-gap.md)
 
 ### How secure is Sovra?
 
@@ -76,7 +76,7 @@ Learn how to:
 Yes. Sovra supports:
 - **CONFIDENTIAL**: Connected mode
 - **SECRET**: Air-gap mode
-- See [Air-Gap Deployment](../deployment/air-gap.md)
+- See [Air-Gap Deployment](deployment/air-gap.md)
 
 ### What clouds does Sovra support?
 
@@ -108,4 +108,4 @@ After getting started:
 
 ## Contributing
 
-Want to contribute? See [Contributing Guide](../../CONTRIBUTING.md)
+Want to contribute? See [Contributing Guide](../CONTRIBUTING.md)

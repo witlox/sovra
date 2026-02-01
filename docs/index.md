@@ -89,8 +89,7 @@ Security best practices:
 
 Deep dive into design:
 
-- [**Architecture Overview**](../ARCHITECTURE) - System architecture
-- [**Technology Decisions**](../TECHNOLOGY_DECISION) - Why Go, mTLS, etc.
+- [**Architecture Overview**](../ARCHITECTURE.md) - System architecture
 - [**ADRs**](architecture/adr/) - Architecture Decision Records
 
 ---
@@ -99,7 +98,7 @@ Deep dive into design:
 
 Help build Sovra:
 
-- [**Contributing Guide**](../CONTRIBUTING) - How to contribute
+- [**Contributing Guide**](../CONTRIBUTING.md) - How to contribute
 - [**Development Setup**](development/setup) - Developer environment
 - [**Testing Guide**](development/testing) - Writing tests
 - [**Code Style**](development/code-style) - Coding standards
@@ -117,4 +116,4 @@ Help build Sovra:
 
 ## License
 
-Sovra is licensed under [AGPL-3.0](../LICENSE).
+Sovra is licensed under [Apache-2.0](../LICENSE).

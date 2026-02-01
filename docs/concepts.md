@@ -59,7 +59,7 @@ sovra-cli workspace create \
   ...
 ```
 
-**Important:** See [CRK Management Guide](../security/crk-management.md) for comprehensive information on:
+**Important:** See [CRK Management Guide](crk-management.md) for comprehensive information on:
 - How Shamir Secret Sharing works
 - Share storage strategies
 - Key ceremonies

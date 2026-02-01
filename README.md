@@ -39,7 +39,7 @@ sovra-cli edge-node register --control-plane https://sovra.example.org
 sovra-cli federation establish --partner https://partner.example.org
 ```
 
-See [Quick Start Guide](docs/getting-started/quickstart.md)
+See [Quick Start Guide](docs/quickstart.md)
 
 ---
 
