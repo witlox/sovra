@@ -69,7 +69,7 @@ Learn how to:
 - mTLS for all communications
 - Customer-controlled root keys (Shamir 5-of-3)
 - Immutable audit logs
-- See [Security](../security/) for details
+- See [Security](security/) for details
 
 ### Can I use Sovra for classified data?
 
@@ -93,17 +93,16 @@ All major clouds plus on-premises:
 
 After getting started:
 
-1. **[Deploy edge nodes](../deployment/edge-node.md)** in your infrastructure
-2. **[Configure federation](../federation/)** with partner organizations
-3. **[Set up monitoring](../operations/monitoring.md)** for production
-4. **[Create workspaces](../federation/cross-domain-sharing.md)** for data sharing
+1. **[Deploy edge nodes](deployment/edge-node.md)** in your infrastructure
+2. **[Configure federation](federation/)** with partner organizations
+3. **[Set up monitoring](operations/monitoring.md)** for production
+4. **[Create workspaces](federation/cross-domain-sharing.md)** for data sharing
 
 ## Getting Help
 
 - **Documentation**: You're reading it!
 - **GitHub Issues**: [Report bugs](https://github.com/sovra-project/sovra/issues)
 - **Discussions**: [Ask questions](https://github.com/sovra-project/sovra/discussions)
-- **Security**: security@sovra-project.org
 
 <!-- FAQ guide coming soon -->
 
