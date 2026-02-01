@@ -65,7 +65,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Documentation
 
-- [Getting Started](docs/getting-started.md)
+- [Getting Started](docs/README.md)
 - [Deployment](docs/deployment/)
 - [Federation](docs/federation/)
 - [Operations](docs/operations/)
