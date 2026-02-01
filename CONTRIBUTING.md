@@ -4,7 +4,23 @@ First off, thank you for considering contributing to Sovra! It's people like you
 
 ## Code of Conduct
 
-This project and everyone participating in it is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
+### Our Pledge
+
+We pledge to make participation in this project a harassment-free experience for everyone, regardless of age, body size, disability, ethnicity, gender identity and expression, level of experience, nationality, personal appearance, race, religion, or sexual identity and orientation.
+
+### Our Standards
+
+**Positive behavior includes:**
+- Using welcoming and inclusive language
+- Being respectful of differing viewpoints
+- Gracefully accepting constructive criticism
+- Focusing on what is best for the community
+- Showing empathy towards other community members
+
+**Unacceptable behavior includes:**
+- Harassment, trolling, or discriminatory comments
+- Publishing others' private information
+- Other conduct inappropriate in a professional setting
 
 ## How Can I Contribute?
 
