@@ -296,10 +296,10 @@ Both organizations see audit logs.
 
 ## Next Steps
 
-- [Deploy on AWS](../deployment/aws.md)
-- [Cross-Domain Sharing Guide](../federation/cross-domain-sharing.md)
-- [Operations Guide](../operations/monitoring.md)
-- [Security Best Practices](../security/best-practices.md)
+- [Deploy on AWS](deployment/aws.md)
+- [Cross-Domain Sharing Guide](federation/cross-domain-sharing.md)
+- [Operations Guide](operations/monitoring.md)
+- [Security Best Practices](security/best-practices.md)
 
 ---
 

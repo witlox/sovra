@@ -246,8 +246,8 @@ Expected response:
 ## Next Steps
 
 - [Quick Start Guide](quickstart.md)
-- [Deploy Edge Nodes](../deployment/edge-node.md)
-- [Configure Federation](../federation/README.md)
+- [Deploy Edge Nodes](deployment/edge-node.md)
+- [Configure Federation](federation/README.md)
 
 ---
 

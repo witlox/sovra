@@ -373,9 +373,9 @@ Layer 6: Monitoring (anomaly detection)
 
 ## Next Steps
 
-- [Quick Start Guide](quickstart)
-- [Installation Guide](installation)
-- [Deployment Guide](../deployment/)
+- [Quick Start Guide](quickstart.md)
+- [Installation Guide](installation.md)
+- [Deployment Guide](deployment/)
 
 ---
 
