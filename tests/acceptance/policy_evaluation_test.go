@@ -4,6 +4,7 @@ package acceptance
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/sovra-project/sovra/pkg/models"
 	"github.com/sovra-project/sovra/tests/mocks"
@@ -32,17 +33,17 @@ func TestPolicyEnforcement(t *testing.T) {
 						default allow = false
 						
 						allow {
-							input.action == "encrypt"
-							input.user.role == "researcher"
+							input.operation == "encrypt"
+							input.role == "researcher"
 						}
 						
 						allow {
-							input.action == "decrypt"
-							input.user.role == "researcher"
+							input.operation == "decrypt"
+							input.role == "researcher"
 						}
 						
 						allow {
-							input.user.role == "admin"
+							input.role == "admin"
 						}
 					`,
 				}
@@ -51,8 +52,9 @@ func TestPolicyEnforcement(t *testing.T) {
 			}).
 			When("a researcher attempts to encrypt data", func() {
 				input := models.PolicyInput{
-					Action: "encrypt",
-					User:   models.PolicyUser{ID: "user-1", Role: "researcher"},
+					Operation: "encrypt",
+					Actor:     "user-1@eth.ch",
+					Role:      "researcher",
 				}
 				allowed, err := engine.Evaluate(ctx, input)
 				require.NoError(t, err)
@@ -64,8 +66,9 @@ func TestPolicyEnforcement(t *testing.T) {
 			And("when a guest attempts the same action, it should be denied", func() {
 				engine.DenyNext = true
 				input := models.PolicyInput{
-					Action: "encrypt",
-					User:   models.PolicyUser{ID: "user-2", Role: "guest"},
+					Operation: "encrypt",
+					Actor:     "user-2@eth.ch",
+					Role:      "guest",
 				}
 				allowed, _ := engine.Evaluate(ctx, input)
 				assert.False(t, allowed)
@@ -97,12 +100,12 @@ func TestTimeBasedPolicies(t *testing.T) {
 							hour := time.clock([time.now_ns(), "UTC"])[0]
 							hour >= 9
 							hour < 17
-							input.action == "decrypt"
+							input.operation == "decrypt"
 						}
 						
 						# Admins can access anytime
 						allow {
-							input.user.role == "admin"
+							input.role == "admin"
 						}
 					`,
 				}
@@ -112,8 +115,10 @@ func TestTimeBasedPolicies(t *testing.T) {
 			When("access is attempted during business hours", func() {
 				// The mock always allows unless DenyNext is set
 				input := models.PolicyInput{
-					Action: "decrypt",
-					User:   models.PolicyUser{ID: "user-1", Role: "researcher"},
+					Operation: "decrypt",
+					Actor:     "user-1@eth.ch",
+					Role:      "researcher",
+					Time:      time.Now(),
 				}
 				allowed, _ := engine.Evaluate(ctx, input)
 				// Result depends on current time in real implementation
@@ -124,8 +129,9 @@ func TestTimeBasedPolicies(t *testing.T) {
 			}).
 			And("admins should always have access regardless of time", func() {
 				input := models.PolicyInput{
-					Action: "decrypt",
-					User:   models.PolicyUser{ID: "admin-1", Role: "admin"},
+					Operation: "decrypt",
+					Actor:     "admin-1@eth.ch",
+					Role:      "admin",
 				}
 				allowed, _ := engine.Evaluate(ctx, input)
 				assert.True(t, allowed)
@@ -155,7 +161,7 @@ func TestPurposeBasedPolicies(t *testing.T) {
 						valid_purposes := {"research", "clinical", "quality_improvement"}
 						
 						allow {
-							input.action == "decrypt"
+							input.operation == "decrypt"
 							valid_purposes[input.purpose]
 						}
 					`,
@@ -165,9 +171,10 @@ func TestPurposeBasedPolicies(t *testing.T) {
 			}).
 			When("access is requested with valid purpose 'research'", func() {
 				input := models.PolicyInput{
-					Action:  "decrypt",
-					Purpose: "research",
-					User:    models.PolicyUser{ID: "user-1", Role: "researcher"},
+					Operation: "decrypt",
+					Purpose:   "research",
+					Actor:     "user-1@eth.ch",
+					Role:      "researcher",
 				}
 				allowed, _ := engine.Evaluate(ctx, input)
 				assert.True(t, allowed)
@@ -194,8 +201,9 @@ func TestPolicyViolationAuditing(t *testing.T) {
 			When("an unauthorized access attempt is made", func() {
 				engine.DenyNext = true
 				input := models.PolicyInput{
-					Action: "delete",
-					User:   models.PolicyUser{ID: "user-1", Role: "guest"},
+					Operation: "delete",
+					Actor:     "guest-user@eth.ch",
+					Role:      "guest",
 				}
 				allowed, _ := engine.Evaluate(ctx, input)
 				assert.False(t, allowed)
@@ -208,14 +216,14 @@ func TestPolicyViolationAuditing(t *testing.T) {
 					Actor:     "guest-user@eth.ch",
 					Result:    models.AuditEventResultDenied,
 					Metadata: map[string]any{
-						"action":     "delete",
+						"operation":  "delete",
 						"policy_id":  "policy-123",
 						"reason":     "role not authorized",
 					},
 				})
 			}).
 			Then("a policy violation audit event should be created", func() {
-				events, _ := audit.Query(ctx, "", "", models.AuditEventTypePolicyViolation, testutil.TestContext(t).Deadline())
+				events, _ := audit.Query(ctx, "", "", models.AuditEventTypePolicyViolation, time.Time{}, time.Now(), 100, 0)
 				// Would have events in production
 				_ = events
 			})
@@ -278,15 +286,17 @@ func TestCrossOrgPolicies(t *testing.T) {
 					Rego: `
 						package sovra.workspace
 						default allow = false
-						allow { input.user.role == "researcher" }
+						allow { input.role == "researcher" }
 					`,
 				}
 				engine.LoadPolicy(ctx, policy)
 			}).
 			When("ETH researcher accesses the workspace", func() {
 				input := models.PolicyInput{
-					Action: "decrypt",
-					User:   models.PolicyUser{ID: "eth-user", OrgID: "org-eth", Role: "researcher"},
+					Operation: "decrypt",
+					Actor:     "eth-user@eth.ch",
+					Role:      "researcher",
+					Metadata:  map[string]any{"org_id": "org-eth"},
 				}
 				allowed, _ := engine.Evaluate(ctx, input)
 				assert.True(t, allowed)
@@ -296,8 +306,10 @@ func TestCrossOrgPolicies(t *testing.T) {
 			}).
 			And("Basel researcher should have equal access", func() {
 				input := models.PolicyInput{
-					Action: "decrypt",
-					User:   models.PolicyUser{ID: "basel-user", OrgID: "org-basel", Role: "researcher"},
+					Operation: "decrypt",
+					Actor:     "basel-user@unibas.ch",
+					Role:      "researcher",
+					Metadata:  map[string]any{"org_id": "org-basel"},
 				}
 				allowed, _ := engine.Evaluate(ctx, input)
 				assert.True(t, allowed)
@@ -317,8 +329,9 @@ func BenchmarkPolicyEvaluation(b *testing.B) {
 
 	b.Run("Evaluate", func(b *testing.B) {
 		input := models.PolicyInput{
-			Action: "encrypt",
-			User:   models.PolicyUser{ID: "user-1", Role: "researcher"},
+			Operation: "encrypt",
+			Actor:     "user-1@eth.ch",
+			Role:      "researcher",
 		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {

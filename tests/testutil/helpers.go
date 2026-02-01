@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sovra-project/sovra/pkg/models"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +20,6 @@ func TestOrg(id string) *models.Organization {
 	return &models.Organization{
 		ID:        id,
 		Name:      "Test Organization " + id,
-		Domain:    id + ".example.com",
 		CreatedAt: time.Now(),
 	}
 }
@@ -58,12 +58,11 @@ func TestWorkspace(name, ownerOrgID string) *models.Workspace {
 		Name:           name,
 		OwnerOrgID:     ownerOrgID,
 		Classification: models.ClassificationConfidential,
+		ParticipantOrgs: []string{ownerOrgID},
+		DEKWrapped:     make(map[string][]byte),
 		Status:         models.WorkspaceStatusActive,
-		Participants: []models.WorkspaceParticipant{
-			{OrgID: ownerOrgID, Role: "owner", JoinedAt: time.Now()},
-		},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 }
 
@@ -97,7 +96,7 @@ func TestPolicy(name, workspaceID string) *models.Policy {
 // TestAuditEvent creates a test audit event.
 func TestAuditEvent(orgID, workspace string, eventType models.AuditEventType) *models.AuditEvent {
 	return &models.AuditEvent{
-		ID:        "audit-" + orgID,
+		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
 		OrgID:     orgID,
 		Workspace: workspace,

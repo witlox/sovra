@@ -96,21 +96,21 @@ func (m *CRKReconstructor) Reconstruct(ctx context.Context, shares []*models.CRK
 		return nil, errors.ErrCRKThresholdNotMet
 	}
 
-	// Check for duplicate shares
+	// Check all shares from same CRK first
+	crkID := shares[0].CRKID
+	for _, s := range shares[1:] {
+		if s.CRKID != crkID {
+			return nil, errors.ErrCRKInvalid
+		}
+	}
+
+	// Then check for duplicate shares
 	seen := make(map[int]bool)
 	for _, s := range shares {
 		if seen[s.Index] {
 			return nil, errors.ErrShareDuplicate
 		}
 		seen[s.Index] = true
-	}
-
-	// Check all shares from same CRK
-	crkID := shares[0].CRKID
-	for _, s := range shares[1:] {
-		if s.CRKID != crkID {
-			return nil, errors.ErrCRKInvalid
-		}
 	}
 
 	// Return mock reconstructed key

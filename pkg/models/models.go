@@ -14,20 +14,36 @@ type Organization struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// CRKStatus represents the status of a CRK.
+type CRKStatus string
+
+const (
+	CRKStatusActive   CRKStatus = "active"
+	CRKStatusRotating CRKStatus = "rotating"
+	CRKStatusRevoked  CRKStatus = "revoked"
+)
+
 // CRKShare represents a single share of a Customer Root Key using Shamir Secret Sharing.
 type CRKShare struct {
-	ShareNumber int    `json:"share_number"`
-	ShareData   []byte `json:"share_data"`
+	ID          string    `json:"id"`
+	CRKID       string    `json:"crk_id"`
+	Index       int       `json:"index"`
+	Data        []byte    `json:"data"`
+	CustodianID string    `json:"custodian_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // CRK represents a Customer Root Key - the cryptographic root of trust for an organization.
 type CRK struct {
-	OrgID       string     `json:"org_id"`
-	PublicKey   []byte     `json:"public_key"`
-	Shares      []CRKShare `json:"shares"`
-	Threshold   int        `json:"threshold"`
-	TotalShares int        `json:"total_shares"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID          string    `json:"id"`
+	OrgID       string    `json:"org_id"`
+	PublicKey   []byte    `json:"public_key"`
+	Version     int       `json:"version"`
+	Threshold   int       `json:"threshold"`
+	TotalShares int       `json:"total_shares"`
+	Status      CRKStatus `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	RotatedAt   time.Time `json:"rotated_at,omitempty"`
 }
 
 // Classification represents the security classification level.
@@ -46,18 +62,37 @@ const (
 	WorkspaceModeAirGap    WorkspaceMode = "airgap"
 )
 
+// WorkspaceStatus represents the status of a workspace.
+type WorkspaceStatus string
+
+const (
+	WorkspaceStatusActive   WorkspaceStatus = "active"
+	WorkspaceStatusArchived WorkspaceStatus = "archived"
+)
+
+// WorkspaceParticipant represents an organization's membership in a workspace.
+type WorkspaceParticipant struct {
+	OrgID    string    `json:"org_id"`
+	Role     string    `json:"role"`
+	JoinedAt time.Time `json:"joined_at"`
+}
+
 // Workspace represents a shared cryptographic domain for multi-organization data sharing.
 type Workspace struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	Participants   []string       `json:"participants"`
-	Classification Classification `json:"classification"`
-	Mode           WorkspaceMode  `json:"mode"`
-	Purpose        string         `json:"purpose"`
-	DEKWrapped     map[string][]byte `json:"dek_wrapped"` // DEK wrapped for each participant
-	CreatedAt      time.Time      `json:"created_at"`
-	ExpiresAt      *time.Time     `json:"expires_at,omitempty"`
-	Archived       bool           `json:"archived"`
+	ID                   string                 `json:"id"`
+	Name                 string                 `json:"name"`
+	OwnerOrgID           string                 `json:"owner_org_id"`
+	ParticipantOrgs      []string               `json:"participant_orgs,omitempty"`     // Simple list of org IDs
+	Participants         []WorkspaceParticipant `json:"participants,omitempty"`         // Detailed participants
+	Classification       Classification         `json:"classification"`
+	Mode                 WorkspaceMode          `json:"mode"`
+	Purpose              string                 `json:"purpose"`
+	DEKWrapped           map[string][]byte      `json:"dek_wrapped"`
+	Status               WorkspaceStatus        `json:"status"`
+	CreatedAt            time.Time              `json:"created_at"`
+	UpdatedAt            time.Time              `json:"updated_at"`
+	ExpiresAt            time.Time              `json:"expires_at,omitempty"`
+	Archived             bool                   `json:"archived"` // Deprecated: use Status
 }
 
 // FederationStatus represents the status of a federation link.
@@ -72,11 +107,12 @@ const (
 // Federation represents a bilateral trust relationship between two organizations.
 type Federation struct {
 	ID              string           `json:"id"`
-	LocalOrgID      string           `json:"local_org_id"`
+	OrgID           string           `json:"org_id"`
 	PartnerOrgID    string           `json:"partner_org_id"`
 	PartnerURL      string           `json:"partner_url"`
 	PartnerCert     []byte           `json:"partner_cert"`
 	Status          FederationStatus `json:"status"`
+	CreatedAt       time.Time        `json:"created_at"`
 	EstablishedAt   time.Time        `json:"established_at"`
 	LastHealthCheck time.Time        `json:"last_health_check"`
 }
@@ -85,6 +121,8 @@ type Federation struct {
 type EdgeNodeStatus string
 
 const (
+	EdgeNodeStatusHealthy      EdgeNodeStatus = "healthy"
+	EdgeNodeStatusUnhealthy    EdgeNodeStatus = "unhealthy"
 	EdgeNodeStatusConnected    EdgeNodeStatus = "connected"
 	EdgeNodeStatusDisconnected EdgeNodeStatus = "disconnected"
 	EdgeNodeStatusSealed       EdgeNodeStatus = "sealed"
@@ -92,12 +130,14 @@ const (
 
 // EdgeNode represents a Vault cluster where cryptographic operations occur.
 type EdgeNode struct {
-	ID            string         `json:"id"`
-	OrgID         string         `json:"org_id"`
-	VaultAddr     string         `json:"vault_addr"`
-	Status        EdgeNodeStatus `json:"status"`
-	LastHeartbeat time.Time      `json:"last_heartbeat"`
-	Certificate   []byte         `json:"certificate"`
+	ID             string         `json:"id"`
+	OrgID          string         `json:"org_id"`
+	Name           string         `json:"name"`
+	VaultAddress   string         `json:"vault_address"`
+	Status         EdgeNodeStatus `json:"status"`
+	Classification Classification `json:"classification"`
+	LastHeartbeat  time.Time      `json:"last_heartbeat"`
+	Certificate    []byte         `json:"certificate"`
 }
 
 // AuditEventType represents the type of audit event.
@@ -141,12 +181,14 @@ type AuditEvent struct {
 
 // Policy represents an OPA policy for access control.
 type Policy struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Workspace string    `json:"workspace,omitempty"`
-	Rego      string    `json:"rego"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	OrgID       string    `json:"org_id,omitempty"`
+	WorkspaceID string    `json:"workspace_id,omitempty"`
+	Rego        string    `json:"rego"`
+	Version     int       `json:"version"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // PolicyInput represents the input to policy evaluation.

@@ -230,7 +230,7 @@ func TestDEKManagement(t *testing.T) {
 	ctx := testutil.TestContext(t)
 
 	t.Run("Scenario: DEK is wrapped for each participant", func(t *testing.T) {
-		crypto := mocks.NewWorkspaceCryptoService()
+		_ = mocks.NewWorkspaceCryptoService() // For future use
 		vault := mocks.NewVaultClient()
 
 		var dek1, dek2 []byte

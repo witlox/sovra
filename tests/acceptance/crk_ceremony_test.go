@@ -4,7 +4,6 @@ package acceptance
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/sovra-project/sovra/pkg/models"
 	"github.com/sovra-project/sovra/tests/mocks"

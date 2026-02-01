@@ -4,10 +4,8 @@ package workspace
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/sovra-project/sovra/pkg/errors"
-	"github.com/sovra-project/sovra/pkg/models"
 	"github.com/sovra-project/sovra/tests/mocks"
 	"github.com/sovra-project/sovra/tests/testutil"
 	"github.com/stretchr/testify/assert"
@@ -29,10 +27,7 @@ func TestWorkspaceCreation(t *testing.T) {
 	})
 
 	t.Run("sets default classification to confidential", func(t *testing.T) {
-		ws := &models.Workspace{
-			Name:       "test-ws",
-			OwnerOrgID: "org-eth",
-		}
+		ws := testutil.TestWorkspace("test-ws", "org-eth")
 
 		err := repo.Create(ctx, ws)
 
@@ -45,9 +40,8 @@ func TestWorkspaceCreation(t *testing.T) {
 		err := repo.Create(ctx, ws)
 
 		require.NoError(t, err)
-		assert.Len(t, ws.Participants, 1)
-		assert.Equal(t, "org-eth", ws.Participants[0].OrgID)
-		assert.Equal(t, "owner", ws.Participants[0].Role)
+		assert.Len(t, ws.ParticipantOrgs, 1)
+		assert.Equal(t, "org-eth", ws.ParticipantOrgs[0])
 	})
 }
 
@@ -122,36 +116,28 @@ func TestWorkspaceParticipants(t *testing.T) {
 		ws := testutil.TestWorkspace("shared-ws", "org-eth")
 		_ = repo.Create(ctx, ws)
 
-		ws.Participants = append(ws.Participants, models.WorkspaceParticipant{
-			OrgID:    "org-uzh",
-			Role:     "participant",
-			JoinedAt: time.Now(),
-		})
+		ws.ParticipantOrgs = append(ws.ParticipantOrgs, "org-uzh")
 		err := repo.Update(ctx, ws)
 
 		require.NoError(t, err)
 
 		updated, _ := repo.Get(ctx, ws.ID)
-		assert.Len(t, updated.Participants, 2)
+		assert.Len(t, updated.ParticipantOrgs, 2)
 	})
 
 	t.Run("removes participant from workspace", func(t *testing.T) {
 		ws := testutil.TestWorkspace("shared-ws-2", "org-eth")
-		ws.Participants = append(ws.Participants, models.WorkspaceParticipant{
-			OrgID:    "org-uzh",
-			Role:     "participant",
-			JoinedAt: time.Now(),
-		})
+		ws.ParticipantOrgs = append(ws.ParticipantOrgs, "org-uzh")
 		_ = repo.Create(ctx, ws)
 
 		// Remove the participant
-		ws.Participants = ws.Participants[:1]
+		ws.ParticipantOrgs = ws.ParticipantOrgs[:1]
 		err := repo.Update(ctx, ws)
 
 		require.NoError(t, err)
 
 		updated, _ := repo.Get(ctx, ws.ID)
-		assert.Len(t, updated.Participants, 1)
+		assert.Len(t, updated.ParticipantOrgs, 1)
 	})
 }
 
@@ -198,13 +184,13 @@ func TestWorkspaceArchival(t *testing.T) {
 		ws := testutil.TestWorkspace("to-archive", "org-eth")
 		_ = repo.Create(ctx, ws)
 
-		ws.Status = models.WorkspaceStatusArchived
+		ws.Archived = true
 		err := repo.Update(ctx, ws)
 
 		require.NoError(t, err)
 
 		updated, _ := repo.Get(ctx, ws.ID)
-		assert.Equal(t, models.WorkspaceStatusArchived, updated.Status)
+		assert.True(t, updated.Archived)
 	})
 }
 

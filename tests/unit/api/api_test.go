@@ -43,6 +43,7 @@ func TestAuthentication(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrCertificateExpired)
+		auth.TokenExpired = false // reset
 	})
 
 	t.Run("rejects invalid token", func(t *testing.T) {
@@ -52,6 +53,7 @@ func TestAuthentication(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrCertificateInvalid)
+		auth.TokenInvalid = false // reset
 	})
 }
 

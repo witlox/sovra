@@ -2,7 +2,6 @@
 package integration
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 	"time"

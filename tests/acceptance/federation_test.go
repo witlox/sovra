@@ -174,11 +174,11 @@ func TestFederationHealthMonitoring(t *testing.T) {
 			}).
 			And("federation status should be updated", func() {
 				fed, _ := repo.Get(ctx, "org-eth", "org-unreliable")
-				fed.Status = models.FederationStatusDegraded
+				fed.Status = models.FederationStatusRevoked // Partner unavailable
 				repo.Update(ctx, fed)
 
 				updated, _ := repo.Get(ctx, "org-eth", "org-unreliable")
-				assert.Equal(t, models.FederationStatusDegraded, updated.Status)
+				assert.Equal(t, models.FederationStatusRevoked, updated.Status)
 			})
 	})
 }

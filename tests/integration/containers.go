@@ -59,8 +59,8 @@ func WithPostgres(t *testing.T, fn func(t *testing.T, pg *PostgresContainer)) {
 	t.Helper()
 	ctx := context.Background()
 
-	container, err := postgres.Run(ctx,
-		"postgres:16-alpine",
+	container, err := postgres.RunContainer(ctx,
+		testcontainers.WithImage("postgres:16-alpine"),
 		postgres.WithDatabase("sovra_test"),
 		postgres.WithUsername("sovra"),
 		postgres.WithPassword("sovra_test_password"),

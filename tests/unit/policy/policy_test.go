@@ -81,16 +81,10 @@ func TestPolicyEvaluation(t *testing.T) {
 		_ = engine.LoadPolicy(ctx, policy)
 
 		input := models.PolicyInput{
-			Action: "encrypt",
-			User: models.PolicyUser{
-				ID:    "user-123",
-				OrgID: "org-eth",
-				Role:  "researcher",
-			},
-			Resource: models.PolicyResource{
-				Type: "workspace",
-				ID:   "ws-123",
-			},
+			Actor:     "user-123",
+			Role:      "researcher",
+			Operation: "encrypt",
+			Workspace: "ws-123",
 		}
 
 		allowed, err := engine.Evaluate(ctx, input)
@@ -103,12 +97,9 @@ func TestPolicyEvaluation(t *testing.T) {
 		engine.DenyNext = true
 
 		input := models.PolicyInput{
-			Action: "delete",
-			User: models.PolicyUser{
-				ID:    "user-123",
-				OrgID: "org-eth",
-				Role:  "guest",
-			},
+			Actor:     "user-123",
+			Role:      "guest",
+			Operation: "delete",
 		}
 
 		allowed, err := engine.Evaluate(ctx, input)
@@ -119,7 +110,7 @@ func TestPolicyEvaluation(t *testing.T) {
 
 	t.Run("tracks evaluation count", func(t *testing.T) {
 		initialCount := engine.EvalCount
-		input := models.PolicyInput{Action: "test"}
+		input := models.PolicyInput{Operation: "test"}
 
 		_, _ = engine.Evaluate(ctx, input)
 		_, _ = engine.Evaluate(ctx, input)
@@ -225,8 +216,9 @@ func BenchmarkPolicyOperations(b *testing.B) {
 
 	b.Run("Evaluate", func(b *testing.B) {
 		input := models.PolicyInput{
-			Action: "encrypt",
-			User:   models.PolicyUser{ID: "user-123", Role: "researcher"},
+			Actor:     "user-123",
+			Role:      "researcher",
+			Operation: "encrypt",
 		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
