@@ -291,7 +291,7 @@ func (s *serviceImpl) Evaluate(ctx context.Context, input models.PolicyInput) (*
 	startTime := time.Now()
 
 	// Build decision path based on workspace
-	decisionPath := "sovra/default/allow"
+	decisionPath := "sovra/common/allow"
 	if input.Workspace != "" {
 		decisionPath = fmt.Sprintf("sovra/workspace/%s/allow", input.Workspace)
 	}

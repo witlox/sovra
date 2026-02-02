@@ -307,3 +307,92 @@ func BenchmarkAuditOperations(b *testing.B) {
 		}
 	})
 }
+
+// TestAuditVerification tests integrity verification functionality.
+func TestAuditVerification(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	repo := inmemory.NewAuditRepository()
+	svc := audit.NewAuditService(repo)
+
+	t.Run("verifies empty chain", func(t *testing.T) {
+		since := time.Now().Add(-24 * time.Hour)
+		until := time.Now()
+
+		valid, err := svc.VerifyIntegrity(ctx, since, until)
+		require.NoError(t, err)
+		assert.True(t, valid)
+	})
+
+	t.Run("verifies chain integrity check runs", func(t *testing.T) {
+		// Create several events in sequence
+		for i := 0; i < 5; i++ {
+			event := testutil.TestAuditEvent("org-verify", "ws-verify", models.AuditEventTypeEncrypt)
+			err := svc.Log(ctx, event)
+			require.NoError(t, err)
+		}
+
+		since := time.Now().Add(-1 * time.Hour)
+		until := time.Now().Add(1 * time.Hour)
+
+		// Test that verification runs without error
+		_, err := svc.VerifyIntegrity(ctx, since, until)
+		require.NoError(t, err)
+	})
+}
+
+// TestAuditGetStats tests statistics gathering.
+func TestAuditGetStats(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	repo := inmemory.NewAuditRepository()
+	svc := audit.NewAuditService(repo)
+
+	t.Run("gets stats for empty period", func(t *testing.T) {
+		stats, err := svc.GetStats(ctx, time.Now().Add(-1*time.Minute))
+		require.NoError(t, err)
+		assert.NotNil(t, stats)
+		assert.Equal(t, int64(0), stats.TotalEvents)
+	})
+
+	t.Run("gets stats with events", func(t *testing.T) {
+		// Create events with different types and results
+		events := []*models.AuditEvent{
+			{
+				OrgID:     "org-stats",
+				EventType: models.AuditEventTypeEncrypt,
+				Actor:     "user1",
+				Result:    models.AuditEventResultSuccess,
+			},
+			{
+				OrgID:     "org-stats",
+				EventType: models.AuditEventTypeDecrypt,
+				Actor:     "user1",
+				Result:    models.AuditEventResultSuccess,
+			},
+			{
+				OrgID:     "org-stats",
+				EventType: models.AuditEventTypeEncrypt,
+				Actor:     "user2",
+				Result:    models.AuditEventResultError,
+			},
+			{
+				OrgID:     "org-stats-2",
+				EventType: models.AuditEventTypeKeyCreate,
+				Actor:     "admin",
+				Result:    models.AuditEventResultSuccess,
+			},
+		}
+
+		for _, e := range events {
+			err := svc.Log(ctx, e)
+			require.NoError(t, err)
+		}
+
+		stats, err := svc.GetStats(ctx, time.Now().Add(-1*time.Hour))
+		require.NoError(t, err)
+		assert.NotNil(t, stats)
+		assert.GreaterOrEqual(t, stats.TotalEvents, int64(4))
+		assert.NotEmpty(t, stats.EventsByType)
+		assert.NotEmpty(t, stats.EventsByOrg)
+		assert.GreaterOrEqual(t, stats.UniqueActors, int64(2))
+	})
+}
