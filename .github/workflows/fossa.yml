@@ -1,0 +1,48 @@
+name: FOSSA
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # Run full CI pipeline first
+  build:
+    uses: ./.github/workflows/build.yml
+
+  validate:
+    needs: build
+    uses: ./.github/workflows/validate.yml
+
+  test:
+    needs: validate
+    uses: ./.github/workflows/test.yml
+
+  # FOSSA scan only after all checks pass
+  fossa-scan:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run FOSSA Scan
+        uses: fossas/fossa-action@main
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}
+
+      - name: Run FOSSA Test
+        uses: fossas/fossa-action@main
+        continue-on-error: true
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}
+          run-tests: true

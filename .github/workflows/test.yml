@@ -1,0 +1,85 @@
+name: Test
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.22"]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sovra
+          POSTGRES_PASSWORD: sovra
+          POSTGRES_DB: sovra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ matrix.go-version }}-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run unit tests with coverage
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./tests/unit/...
+        env:
+          DATABASE_URL: postgres://sovra:sovra@localhost:5432/sovra_test?sslmode=disable
+
+      - name: Run integration tests
+        run: |
+          go test -v -race -coverprofile=coverage-int.out -covermode=atomic ./tests/integration/...
+        env:
+          DATABASE_URL: postgres://sovra:sovra@localhost:5432/sovra_test?sslmode=disable
+
+      - name: Merge coverage reports
+        run: |
+          go install github.com/wadey/gocovmerge@latest
+          gocovmerge coverage.out coverage-int.out > coverage-merged.out
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.go-version }}
+          path: coverage-merged.out
+          retention-days: 7
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage-merged.out
+          flags: unittests
+          name: codecov-${{ matrix.go-version }}
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Check coverage threshold
+        run: |
+          go tool cover -func=coverage-merged.out | grep total | awk '{print $3}' | sed 's/%//' | \
+          awk '{if ($1 < 50) {print "Coverage is below 50%: " $1 "%"; exit 1} else {print "Coverage: " $1 "%"}}'
