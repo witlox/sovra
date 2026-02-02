@@ -5,8 +5,6 @@ server: https://app.fossa.com
 project:
   id: github.com/witlox/sovra
   name: sovra
-  team: witlox
-  policy: default
 
 analyze:
   modules:
