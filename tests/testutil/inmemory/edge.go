@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sovra-project/sovra/internal/edge"
 	"github.com/sovra-project/sovra/pkg/errors"
 	"github.com/sovra-project/sovra/pkg/models"
@@ -354,6 +355,92 @@ func (m *SyncManager) GetSyncStatus(ctx context.Context, nodeID string) (*edge.S
 	return &edge.SyncStatus{
 		LastSyncedAt:   time.Now(),
 		SyncInProgress: false,
+		PoliciesSynced: 10,
+		KeysSynced:     5,
+	}, nil
+}
+
+// EdgeService implements edge.Service for testing.
+type EdgeService struct {
+	repo *EdgeRepository
+}
+
+// NewEdgeService creates a new in-memory edge service.
+func NewEdgeService() *EdgeService {
+	return &EdgeService{
+		repo: NewEdgeRepository(),
+	}
+}
+
+func (s *EdgeService) Register(ctx context.Context, orgID string, config *edge.NodeConfig) (*models.EdgeNode, error) {
+	node := &models.EdgeNode{
+		ID:             uuid.New().String(),
+		OrgID:          orgID,
+		Name:           config.Name,
+		VaultAddress:   config.VaultAddress,
+		Classification: config.Classification,
+		Status:         models.EdgeNodeStatusHealthy,
+	}
+	if err := s.repo.Create(ctx, node); err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
+func (s *EdgeService) Get(ctx context.Context, id string) (*models.EdgeNode, error) {
+	return s.repo.Get(ctx, id)
+}
+
+func (s *EdgeService) List(ctx context.Context, orgID string) ([]*models.EdgeNode, error) {
+	return s.repo.GetByOrgID(ctx, orgID)
+}
+
+func (s *EdgeService) Unregister(ctx context.Context, id string) error {
+	return s.repo.Delete(ctx, id)
+}
+
+func (s *EdgeService) HealthCheck(ctx context.Context, id string) (*edge.HealthStatus, error) {
+	return &edge.HealthStatus{
+		Healthy:     true,
+		LastChecked: time.Now(),
+	}, nil
+}
+
+func (s *EdgeService) UpdateHealthStatus(ctx context.Context, orgID string) error {
+	return nil
+}
+
+func (s *EdgeService) Encrypt(ctx context.Context, nodeID, keyName string, plaintext []byte) ([]byte, error) {
+	return []byte("encrypted:" + string(plaintext)), nil
+}
+
+func (s *EdgeService) Decrypt(ctx context.Context, nodeID, keyName string, ciphertext []byte) ([]byte, error) {
+	return []byte("decrypted"), nil
+}
+
+func (s *EdgeService) Sign(ctx context.Context, nodeID, keyName string, data []byte) ([]byte, error) {
+	return []byte("signature"), nil
+}
+
+func (s *EdgeService) Verify(ctx context.Context, nodeID, keyName string, data, signature []byte) (bool, error) {
+	return true, nil
+}
+
+func (s *EdgeService) RotateKey(ctx context.Context, nodeID, keyName string) error {
+	return nil
+}
+
+func (s *EdgeService) SyncPolicies(ctx context.Context, id string, policies []*models.Policy) error {
+	return nil
+}
+
+func (s *EdgeService) SyncWorkspaceKeys(ctx context.Context, nodeID, workspaceID string, wrappedDEK []byte) error {
+	return nil
+}
+
+func (s *EdgeService) GetSyncStatus(ctx context.Context, id string) (*edge.SyncStatus, error) {
+	return &edge.SyncStatus{
+		LastSyncedAt:   time.Now(),
 		PoliciesSynced: 10,
 		KeysSynced:     5,
 	}, nil

@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/sovra-project/sovra/internal/federation"
 	"github.com/sovra-project/sovra/pkg/errors"
 	"github.com/sovra-project/sovra/pkg/models"
 )
@@ -155,3 +157,96 @@ func (c *FederationMTLSClient) IsConnected(partnerID string) bool {
 	defer c.mu.Unlock()
 	return c.connected[partnerID]
 }
+
+// FederationService implements federation.Service for testing.
+type FederationService struct {
+	repo *FederationRepository
+}
+
+// NewFederationService creates a new in-memory federation service.
+func NewFederationService() *FederationService {
+	return &FederationService{
+		repo: NewFederationRepository(),
+	}
+}
+
+func (s *FederationService) Init(ctx context.Context, req federation.InitRequest) (*federation.InitResponse, error) {
+	return &federation.InitResponse{
+		OrgID:       req.OrgID,
+		CSR:         []byte("csr-data"),
+		Certificate: []byte("cert-data"),
+		PublicKey:   []byte("pubkey-data"),
+	}, nil
+}
+
+func (s *FederationService) Establish(ctx context.Context, req federation.EstablishRequest) (*models.Federation, error) {
+	fed := &models.Federation{
+		ID:            uuid.New().String(),
+		OrgID:         "local-org",
+		PartnerOrgID:  req.PartnerOrgID,
+		PartnerURL:    req.PartnerURL,
+		PartnerCert:   req.PartnerCert,
+		Status:        models.FederationStatusActive,
+		CreatedAt:     time.Now(),
+		EstablishedAt: time.Now(),
+	}
+	if err := s.repo.Create(ctx, fed); err != nil {
+		return nil, err
+	}
+	return fed, nil
+}
+
+func (s *FederationService) List(ctx context.Context) ([]*models.Federation, error) {
+	return s.repo.List(ctx, "")
+}
+
+func (s *FederationService) Status(ctx context.Context, partnerOrgID string) (*models.Federation, error) {
+	feds, err := s.repo.List(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, fed := range feds {
+		if fed.PartnerOrgID == partnerOrgID {
+			return fed, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (s *FederationService) Revoke(ctx context.Context, req federation.RevocationRequest) error {
+	fed, err := s.Status(ctx, req.PartnerOrgID)
+	if err != nil {
+		return err
+	}
+	fed.Status = models.FederationStatusRevoked
+	return s.repo.Update(ctx, fed)
+}
+
+func (s *FederationService) HealthCheck(ctx context.Context) ([]federation.HealthCheckResult, error) {
+	return []federation.HealthCheckResult{
+		{
+			PartnerOrgID: "partner-org",
+			Healthy:      true,
+			LastCheck:    time.Now(),
+		},
+	}, nil
+}
+
+func (s *FederationService) ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, signature []byte) error {
+	fed, err := s.Status(ctx, partnerOrgID)
+	if err != nil {
+		return err
+	}
+	fed.PartnerCert = cert
+	return s.repo.Update(ctx, fed)
+}
+
+func (s *FederationService) RequestPublicKey(ctx context.Context, partnerOrgID string) ([]byte, error) {
+	return []byte("partner-public-key"), nil
+}
+
+func (s *FederationService) StartHealthMonitor(ctx context.Context, interval time.Duration) error {
+	return nil
+}
+
+func (s *FederationService) StopHealthMonitor() {}

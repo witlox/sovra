@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/sovra-project/sovra/internal/workspace"
 	"github.com/sovra-project/sovra/pkg/errors"
 	"github.com/sovra-project/sovra/pkg/models"
 )
@@ -222,4 +223,70 @@ func (s *WorkspaceCryptoService) Decrypt(ctx context.Context, workspaceID string
 
 	nonce, ciphertextData := data[:nonceSize], data[nonceSize:]
 	return gcm.Open(nil, nonce, ciphertextData, nil)
+}
+
+// WorkspaceService implements workspace.Service for testing.
+type WorkspaceService struct {
+	repo   *WorkspaceRepository
+	crypto *WorkspaceCryptoService
+}
+
+// NewWorkspaceService creates a new in-memory workspace service.
+func NewWorkspaceService() *WorkspaceService {
+	return &WorkspaceService{
+		repo:   NewWorkspaceRepository(),
+		crypto: NewWorkspaceCryptoService(),
+	}
+}
+
+func (s *WorkspaceService) Create(ctx context.Context, req workspace.CreateRequest) (*models.Workspace, error) {
+	ws := &models.Workspace{
+		ID:             uuid.New().String(),
+		Name:           req.Name,
+		Classification: req.Classification,
+		Mode:           req.Mode,
+		Purpose:        req.Purpose,
+		Status:         models.WorkspaceStatusActive,
+	}
+	if err := s.repo.Create(ctx, ws); err != nil {
+		return nil, err
+	}
+	return ws, nil
+}
+
+func (s *WorkspaceService) Get(ctx context.Context, id string) (*models.Workspace, error) {
+	return s.repo.Get(ctx, id)
+}
+
+func (s *WorkspaceService) List(ctx context.Context, orgID string, limit, offset int) ([]*models.Workspace, error) {
+	return s.repo.List(ctx, orgID, limit, offset)
+}
+
+func (s *WorkspaceService) AddParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error {
+	return nil
+}
+
+func (s *WorkspaceService) RemoveParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error {
+	return nil
+}
+
+func (s *WorkspaceService) Archive(ctx context.Context, workspaceID string, signature []byte) error {
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	ws.Status = models.WorkspaceStatusArchived
+	return s.repo.Update(ctx, ws)
+}
+
+func (s *WorkspaceService) Delete(ctx context.Context, workspaceID string, signatures map[string][]byte) error {
+	return s.repo.Delete(ctx, workspaceID)
+}
+
+func (s *WorkspaceService) Encrypt(ctx context.Context, workspaceID string, plaintext []byte) ([]byte, error) {
+	return s.crypto.Encrypt(ctx, workspaceID, plaintext)
+}
+
+func (s *WorkspaceService) Decrypt(ctx context.Context, workspaceID string, ciphertext []byte) ([]byte, error) {
+	return s.crypto.Decrypt(ctx, workspaceID, ciphertext)
 }

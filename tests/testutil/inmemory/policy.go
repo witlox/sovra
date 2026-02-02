@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sovra-project/sovra/internal/policy"
 	"github.com/sovra-project/sovra/pkg/errors"
 	"github.com/sovra-project/sovra/pkg/models"
 )
@@ -186,4 +187,65 @@ func (e *PolicyEngine) EvalCount() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.evalCount
+}
+
+// PolicyService implements policy.Service for testing.
+type PolicyService struct {
+	repo   *PolicyRepository
+	engine *PolicyEngine
+}
+
+// NewPolicyService creates a new in-memory policy service.
+func NewPolicyService() *PolicyService {
+	return &PolicyService{
+		repo:   NewPolicyRepository(),
+		engine: NewPolicyEngine(),
+	}
+}
+
+func (s *PolicyService) Create(ctx context.Context, req policy.CreateRequest) (*models.Policy, error) {
+	p := &models.Policy{
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		WorkspaceID: req.Workspace,
+		Rego:        req.Rego,
+		Version:     1,
+	}
+	if err := s.repo.Create(ctx, p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (s *PolicyService) Get(ctx context.Context, id string) (*models.Policy, error) {
+	return s.repo.Get(ctx, id)
+}
+
+func (s *PolicyService) Update(ctx context.Context, id string, rego string, signature []byte) (*models.Policy, error) {
+	p, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	p.Rego = rego
+	p.Version++
+	return p, s.repo.Update(ctx, p)
+}
+
+func (s *PolicyService) Delete(ctx context.Context, id string, signature []byte) error {
+	return s.repo.Delete(ctx, id)
+}
+
+func (s *PolicyService) GetForWorkspace(ctx context.Context, workspaceID string) ([]*models.Policy, error) {
+	return s.repo.GetByWorkspace(ctx, workspaceID)
+}
+
+func (s *PolicyService) Evaluate(ctx context.Context, input models.PolicyInput) (*policy.EvaluationResult, error) {
+	return &policy.EvaluationResult{
+		Allowed:    true,
+		DenyReason: "",
+	}, nil
+}
+
+func (s *PolicyService) Validate(ctx context.Context, rego string) error {
+	return nil
 }

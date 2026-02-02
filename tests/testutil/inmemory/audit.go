@@ -169,3 +169,50 @@ func (m *AuditVerifier) SetTampered(tampered bool) {
 	defer m.mu.Unlock()
 	m.tampered = tampered
 }
+
+// AuditService implements audit.Service for testing.
+type AuditService struct {
+	repo *AuditRepository
+}
+
+// NewAuditService creates a new in-memory audit service.
+func NewAuditService() *AuditService {
+	return &AuditService{
+		repo: NewAuditRepository(),
+	}
+}
+
+func (s *AuditService) Log(ctx context.Context, event *models.AuditEvent) error {
+	return s.repo.Create(ctx, event)
+}
+
+func (s *AuditService) Query(ctx context.Context, params audit.QueryParams) ([]*models.AuditEvent, error) {
+	return s.repo.Query(ctx, params)
+}
+
+func (s *AuditService) Get(ctx context.Context, id string) (*models.AuditEvent, error) {
+	return s.repo.Get(ctx, id)
+}
+
+func (s *AuditService) Export(ctx context.Context, req audit.ExportRequest) ([]byte, error) {
+	events, err := s.repo.Query(ctx, req.Query)
+	if err != nil {
+		return nil, err
+	}
+	_ = events // Use events in production
+	return []byte("exported data"), nil
+}
+
+func (s *AuditService) GetStats(ctx context.Context, since time.Time) (*audit.AuditStats, error) {
+	return &audit.AuditStats{
+		TotalEvents:  100,
+		SuccessCount: 80,
+		ErrorCount:   10,
+		DeniedCount:  10,
+		EventsByType: map[models.AuditEventType]int64{models.AuditEventTypeEncrypt: 50, models.AuditEventTypeDecrypt: 50},
+	}, nil
+}
+
+func (s *AuditService) VerifyIntegrity(ctx context.Context, since, until time.Time) (bool, error) {
+	return true, nil
+}

@@ -266,6 +266,78 @@ func TestGatewayHealth(t *testing.T) {
 	})
 }
 
+func TestAPIEndpointRouting(t *testing.T) {
+	router := createTestRouter()
+
+	t.Run("unknown endpoints get auth error before 404", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/unknown/path", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		// Auth middleware runs first, returns 401 for unknown unauthenticated requests
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("returns 405 for wrong method on health", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/health", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+}
+
+func TestProtectedEndpoints(t *testing.T) {
+	router := createTestRouter()
+
+	t.Run("workspaces endpoint requires auth", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/workspaces", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("policies endpoint requires auth", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/policies", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("federation endpoint requires auth", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/federation", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("edges endpoint requires auth", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/edges", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("crk endpoint requires auth", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/crk", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
 func BenchmarkAPIOperations(b *testing.B) {
 	ctx := context.Background()
 

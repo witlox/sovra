@@ -158,6 +158,39 @@ func TestPolicyEvaluation(t *testing.T) {
 		assert.False(t, result.Allowed)
 		assert.NotEmpty(t, result.DenyReason)
 	})
+
+	t.Run("evaluates with all input fields", func(t *testing.T) {
+		input := models.PolicyInput{
+			Actor:     "admin-user",
+			Role:      "admin",
+			Operation: "manage",
+			Workspace: "ws-critical",
+			Purpose:   "administrative task",
+		}
+
+		result, err := svc.Evaluate(ctx, input)
+
+		require.NoError(t, err)
+		assert.True(t, result.Allowed)
+	})
+
+	t.Run("evaluates different operations", func(t *testing.T) {
+		operations := []string{"create", "read", "update", "delete", "encrypt", "decrypt"}
+
+		for _, op := range operations {
+			input := models.PolicyInput{
+				Actor:     "user-123",
+				Role:      "researcher",
+				Operation: op,
+				Workspace: "ws-ops-test",
+			}
+
+			result, err := svc.Evaluate(ctx, input)
+
+			require.NoError(t, err, "operation %s should evaluate", op)
+			assert.True(t, result.Allowed, "operation %s should be allowed", op)
+		}
+	})
 }
 
 func TestPolicyValidation(t *testing.T) {
