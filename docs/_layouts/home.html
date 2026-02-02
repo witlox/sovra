@@ -19,14 +19,9 @@
             --accent-hover: #818cf8;
             --accent-glow: rgba(99, 102, 241, 0.3);
             --success: #22c55e;
-            --warning: #f59e0b;
         }
         
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -43,10 +38,7 @@
             text-align: center;
         }
         
-        .hero-content {
-            max-width: 800px;
-            margin: 0 auto;
-        }
+        .hero-content { max-width: 800px; margin: 0 auto; }
         
         .logo {
             width: 120px;
@@ -79,9 +71,7 @@
             margin-bottom: 2rem;
         }
         
-        .badges img {
-            height: 20px;
-        }
+        .badges img { height: 20px; }
         
         .cta-buttons {
             display: flex;
@@ -119,7 +109,6 @@
         
         .btn-secondary:hover {
             border-color: var(--accent);
-            background: var(--bg-secondary);
         }
         
         nav {
@@ -129,7 +118,6 @@
             position: sticky;
             top: 0;
             z-index: 100;
-            backdrop-filter: blur(10px);
         }
         
         nav ul {
@@ -148,9 +136,7 @@
             transition: color 0.2s ease;
         }
         
-        nav a:hover {
-            color: var(--accent);
-        }
+        nav a:hover { color: var(--accent); }
         
         main {
             max-width: 1200px;
@@ -162,7 +148,6 @@
             font-size: 1.75rem;
             font-weight: 600;
             margin-bottom: 1.5rem;
-            color: var(--text-primary);
         }
         
         .cards {
@@ -188,21 +173,9 @@
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
         }
         
-        .card-icon {
-            font-size: 2rem;
-            margin-bottom: 1rem;
-        }
-        
-        .card h3 {
-            font-size: 1.125rem;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-        }
-        
-        .card p {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-        }
+        .card-icon { font-size: 2rem; margin-bottom: 1rem; }
+        .card h3 { font-size: 1.125rem; font-weight: 600; margin-bottom: 0.5rem; }
+        .card p { color: var(--text-secondary); font-size: 0.9rem; }
         
         .features {
             display: grid;
@@ -220,14 +193,8 @@
             border-radius: 8px;
         }
         
-        .feature-icon {
-            color: var(--success);
-            font-size: 1.25rem;
-        }
-        
-        .feature-text {
-            font-size: 0.9rem;
-        }
+        .feature-icon { color: var(--success); font-size: 1.25rem; }
+        .feature-text { font-size: 0.9rem; }
         
         .code-block {
             background: var(--bg-secondary);
@@ -244,9 +211,7 @@
             color: var(--text-secondary);
         }
         
-        .code-block code {
-            color: var(--accent);
-        }
+        .code-block code { color: var(--accent); }
         
         footer {
             border-top: 1px solid var(--border);
@@ -256,27 +221,13 @@
             font-size: 0.875rem;
         }
         
-        footer a {
-            color: var(--accent);
-            text-decoration: none;
-        }
-        
-        footer a:hover {
-            text-decoration: underline;
-        }
+        footer a { color: var(--accent); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
         
         @media (max-width: 768px) {
-            h1 {
-                font-size: 2rem;
-            }
-            .tagline {
-                font-size: 1rem;
-            }
-            nav ul {
-                gap: 1rem;
-                flex-wrap: wrap;
-                justify-content: center;
-            }
+            h1 { font-size: 2rem; }
+            .tagline { font-size: 1rem; }
+            nav ul { gap: 1rem; flex-wrap: wrap; }
         }
     </style>
 </head>
@@ -293,125 +244,84 @@
                 <a href="https://github.com/witlox/sovra/blob/main/LICENSE"><img src="https://img.shields.io/github/license/witlox/sovra" alt="License"></a>
             </div>
             <div class="cta-buttons">
-                <a href="quickstart.md" class="btn btn-primary">
-                    <span>🚀</span> Quick Start
-                </a>
-                <a href="https://github.com/witlox/sovra" class="btn btn-secondary">
-                    <span>⭐</span> GitHub
-                </a>
+                <a href="{{ '/quickstart' | relative_url }}" class="btn btn-primary">🚀 Quick Start</a>
+                <a href="https://github.com/witlox/sovra" class="btn btn-secondary">⭐ GitHub</a>
             </div>
         </div>
     </div>
     
     <nav>
         <ul>
-            <li><a href="./">Home</a></li>
-            <li><a href="quickstart.md">Quick Start</a></li>
-            <li><a href="installation.md">Installation</a></li>
-            <li><a href="concepts.md">Concepts</a></li>
-            <li><a href="api/">API Reference</a></li>
+            <li><a href="{{ '/' | relative_url }}">Home</a></li>
+            <li><a href="{{ '/quickstart' | relative_url }}">Quick Start</a></li>
+            <li><a href="{{ '/installation' | relative_url }}">Installation</a></li>
+            <li><a href="{{ '/concepts' | relative_url }}">Concepts</a></li>
+            <li><a href="{{ '/control-plane' | relative_url }}">Control Plane</a></li>
         </ul>
     </nav>
     
     <main>
         <h2 class="section-title">📚 Documentation</h2>
         <div class="cards">
-            <a href="quickstart.md" class="card">
+            <a href="{{ '/quickstart' | relative_url }}" class="card">
                 <div class="card-icon">🚀</div>
                 <h3>Quick Start</h3>
-                <p>Get up and running with Sovra in minutes. Deploy your first control plane.</p>
+                <p>Get up and running with Sovra in minutes.</p>
             </a>
-            <a href="installation.md" class="card">
+            <a href="{{ '/installation' | relative_url }}" class="card">
                 <div class="card-icon">📦</div>
                 <h3>Installation</h3>
-                <p>Docker, binaries, or build from source. Choose your deployment method.</p>
+                <p>Docker, binaries, or build from source.</p>
             </a>
-            <a href="concepts.md" class="card">
+            <a href="{{ '/concepts' | relative_url }}" class="card">
                 <div class="card-icon">💡</div>
                 <h3>Core Concepts</h3>
-                <p>Understand workspaces, CRKs, federation, and the Sovra architecture.</p>
+                <p>Workspaces, CRKs, federation, and architecture.</p>
             </a>
-            <a href="control-plane.md" class="card">
+            <a href="{{ '/control-plane' | relative_url }}" class="card">
                 <div class="card-icon">🎛️</div>
                 <h3>Control Plane</h3>
-                <p>Configure and manage your Sovra control plane deployment.</p>
+                <p>Configure and manage your deployment.</p>
             </a>
-            <a href="crk-management.md" class="card">
+            <a href="{{ '/crk-management' | relative_url }}" class="card">
                 <div class="card-icon">🔐</div>
                 <h3>CRK Management</h3>
-                <p>Customer Root Key lifecycle, rotation, and security policies.</p>
+                <p>Key lifecycle, rotation, and policies.</p>
             </a>
-            <a href="federation/" class="card">
+            <a href="{{ '/federation/' | relative_url }}" class="card">
                 <div class="card-icon">🌐</div>
                 <h3>Federation</h3>
-                <p>Connect multiple Sovra instances for cross-organization collaboration.</p>
+                <p>Cross-organization collaboration.</p>
             </a>
         </div>
         
         <h2 class="section-title">✨ Key Features</h2>
         <div class="features">
-            <div class="feature">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text"><strong>Federated Architecture</strong> — Peer-to-peer control planes</span>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text"><strong>Cryptographic Sovereignty</strong> — Customer-controlled root keys</span>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text"><strong>Cross-Domain Sharing</strong> — Multi-organization collaboration</span>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text"><strong>Cloud-Agnostic</strong> — Deploy anywhere</span>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text"><strong>Air-Gap Capable</strong> — SECRET classification support</span>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text"><strong>Policy-Driven</strong> — OPA-based access control</span>
-            </div>
+            <div class="feature"><span class="feature-icon">✓</span><span class="feature-text"><strong>Federated Architecture</strong> — Peer-to-peer control planes</span></div>
+            <div class="feature"><span class="feature-icon">✓</span><span class="feature-text"><strong>Cryptographic Sovereignty</strong> — Customer-controlled root keys</span></div>
+            <div class="feature"><span class="feature-icon">✓</span><span class="feature-text"><strong>Cross-Domain Sharing</strong> — Multi-organization collaboration</span></div>
+            <div class="feature"><span class="feature-icon">✓</span><span class="feature-text"><strong>Cloud-Agnostic</strong> — Deploy anywhere</span></div>
+            <div class="feature"><span class="feature-icon">✓</span><span class="feature-text"><strong>Air-Gap Capable</strong> — SECRET classification support</span></div>
+            <div class="feature"><span class="feature-icon">✓</span><span class="feature-text"><strong>Policy-Driven</strong> — OPA-based access control</span></div>
         </div>
         
         <h2 class="section-title">⚡ Quick Install</h2>
         <div class="code-block">
-            <pre><span style="color: #6b7280"># Docker</span>
+<pre><span style="color:#6b7280"># Docker</span>
 <code>docker pull ghcr.io/witlox/sovra:latest</code>
 
-<span style="color: #6b7280"># Binary (Linux/macOS)</span>
+<span style="color:#6b7280"># Binary</span>
 <code>curl -LO https://github.com/witlox/sovra/releases/latest/download/sovra_linux_amd64.tar.gz
-tar xzf sovra_linux_amd64.tar.gz
-sudo mv sovra /usr/local/bin/</code>
+tar xzf sovra_linux_amd64.tar.gz && sudo mv sovra /usr/local/bin/</code>
 
-<span style="color: #6b7280"># From source</span>
+<span style="color:#6b7280"># From source</span>
 <code>go install github.com/witlox/sovra/cmd/...@latest</code></pre>
-        </div>
-        
-        <h2 class="section-title">📖 API Reference</h2>
-        <div class="cards">
-            <a href="api/pkg.md" class="card">
-                <div class="card-icon">📦</div>
-                <h3>Package Reference</h3>
-                <p>Public API documentation for pkg/ packages.</p>
-            </a>
-            <a href="api/internal.md" class="card">
-                <div class="card-icon">🔧</div>
-                <h3>Internal Reference</h3>
-                <p>Internal implementation documentation.</p>
-            </a>
         </div>
     </main>
     
     <footer>
-        <p>
-            <strong>Sovra</strong> — Built for Research Institutions, Government, and Military<br>
-            <a href="https://github.com/witlox/sovra">GitHub</a> · 
-            <a href="https://github.com/witlox/sovra/blob/main/LICENSE">Apache 2.0 License</a> · 
-            <a href="https://github.com/witlox/sovra/issues">Report Issues</a>
-        </p>
+        <p><strong>Sovra</strong> — Built for Research, Government, and Military<br>
+        <a href="https://github.com/witlox/sovra">GitHub</a> · <a href="https://github.com/witlox/sovra/blob/main/LICENSE">Apache 2.0</a></p>
     </footer>
 </body>
 </html>

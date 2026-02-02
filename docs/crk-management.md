@@ -1,3 +1,8 @@
+---
+layout: default
+title: CRK Management
+---
+
 # Customer Root Key (CRK) Management
 
 ## Overview

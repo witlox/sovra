@@ -1,3 +1,7 @@
+---
+layout: default
+title: Control Plane
+---
 # Control Plane Deployment
 
 ## Overview

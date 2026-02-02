@@ -1,3 +1,8 @@
+---
+layout: default
+title: Core Concepts
+---
+
 # Core Concepts
 
 ## Overview

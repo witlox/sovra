@@ -1,3 +1,8 @@
+---
+layout: default
+title: Quick Start
+---
+
 # Quick Start Guide
 
 **Time:** 15 minutes  
