@@ -1,0 +1,18 @@
+title: Sovra Documentation
+description: Federated Sovereign Key Management for Critical Infrastructure
+url: https://witlox.github.io/sovra
+baseurl: /sovra
+
+theme: jekyll-theme-minimal
+
+markdown: kramdown
+highlighter: rouge
+
+include:
+  - "*.md"
+  - "*.html"
+
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
