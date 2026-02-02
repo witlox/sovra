@@ -54,15 +54,15 @@ func TestCRKShares(crkID string, count int) []*models.CRKShare {
 // TestWorkspace creates a test workspace.
 func TestWorkspace(name, ownerOrgID string) *models.Workspace {
 	return &models.Workspace{
-		ID:             "ws-" + name,
-		Name:           name,
-		OwnerOrgID:     ownerOrgID,
-		Classification: models.ClassificationConfidential,
+		ID:              "ws-" + name,
+		Name:            name,
+		OwnerOrgID:      ownerOrgID,
+		Classification:  models.ClassificationConfidential,
 		ParticipantOrgs: []string{ownerOrgID},
-		DEKWrapped:     make(map[string][]byte),
-		Status:         models.WorkspaceStatusActive,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		DEKWrapped:      make(map[string][]byte),
+		Status:          models.WorkspaceStatusActive,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 }
 

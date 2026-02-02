@@ -570,9 +570,9 @@ func (m *AuditRepository) Count(ctx context.Context, query audit.QueryParams) (i
 
 // AuditForwarder mock for external forwarding.
 type AuditForwarder struct {
-	mu       sync.Mutex
-	Count    int
-	Failing  bool
+	mu      sync.Mutex
+	Count   int
+	Failing bool
 }
 
 func NewAuditForwarder() *AuditForwarder {

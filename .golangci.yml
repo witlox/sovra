@@ -49,6 +49,34 @@ linters:
     
     # Type safety
     - exhaustive      # Enum switch exhaustiveness
+  
+  exclusions:
+    # Exclude test files from strict linters
+    rules:
+      - path: "(.+)_test\\.go"
+        linters:
+          - gosec
+          - errcheck
+          - wrapcheck
+          - contextcheck
+          - noctx
+          - gocritic
+          - prealloc
+      - path: "tests/"
+        linters:
+          - gosec
+          - errcheck
+          - wrapcheck
+          - contextcheck
+          - noctx
+          - gocritic
+          - prealloc
+          - unused
+          - testifylint
+      - path: "internal/edge/edge.go"
+        text: "error is not nil"
+        linters:
+          - nilerr
 
   settings:
     errcheck:
@@ -88,38 +116,7 @@ linters:
         - "-SA1019"  # Disable deprecated warnings (OPA v0->v1)
     exhaustive:
       default-signifies-exhaustive: true
-    wrapcheck:
-      ignore-interfaces:
-        - net.Error
-      ignore-sigs:
-        - .Errorf(
-        - errors.New(
-        - errors.Unwrap(
-        - errors.Join(
-        - .Wrap(
-        - .Wrapf(
-        - .WithMessage(
-        - .WithStack(
     sloglint:
       kv-only: false
       attr-only: false
       context: all
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
-        - wrapcheck
-        - contextcheck
-    - path: tests/
-      linters:
-        - gosec
-        - errcheck
-        - wrapcheck
-        - contextcheck
-    - path: internal/edge/edge.go
-      text: "error is not nil"
-      linters:
-        - nilerr

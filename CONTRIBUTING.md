@@ -177,39 +177,44 @@ cd sovra
 git remote add upstream https://github.com/sovra-project/sovra.git
 
 # 3. Install dependencies
-make install
+go mod download
 
-# 4. Set up pre-commit hooks
-make setup-hooks
+# 4. Install development tools
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+go install github.com/evilmartians/lefthook@latest
 
-# 5. Start local development environment
-make dev-up
+# 5. Set up git hooks (runs linting on commit, tests on push)
+lefthook install
 
 # 6. Verify setup
-make verify
+go build ./...
+go test -short ./tests/...
 ```
 
 ### Running Tests
 
 ```bash
-# Run all tests
-make test
+# Run all tests (short mode - skips integration tests requiring Docker)
+go test -short ./tests/...
 
-# Run specific test suites
-make test-unit                # Unit tests only
-make test-integration         # Integration tests
-make test-e2e                # End-to-end tests
+# Run unit tests only
+go test -short ./tests/unit/...
 
-# Run tests for specific component
-cd services/api-gateway
-go test ./...
+# Run acceptance tests
+go test -short ./tests/acceptance/...
+
+# Run integration tests (requires Docker)
+go test ./tests/integration/...
 
 # Run with coverage
-make coverage
-open coverage.html
+go test -short -coverprofile=coverage.out ./tests/...
+go tool cover -html=coverage.out
 
 # Run with race detector
-go test -race ./...
+go test -race -short ./tests/...
+
+# Run linter
+golangci-lint run ./...
 ```
 
 ### Building

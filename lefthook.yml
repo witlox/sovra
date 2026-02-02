@@ -1,0 +1,34 @@
+# Lefthook configuration for Sovra
+# https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      glob: "*.go"
+      run: golangci-lint run --new-from-rev=HEAD~ {staged_files}
+      stage_fixed: true
+    
+    fmt:
+      glob: "*.go"
+      run: gofmt -l -w {staged_files}
+      stage_fixed: true
+    
+    imports:
+      glob: "*.go"
+      run: goimports -l -w {staged_files}
+      stage_fixed: true
+
+pre-push:
+  parallel: true
+  commands:
+    test:
+      run: go test -short ./tests/...
+    
+    build:
+      run: go build ./...
+
+# Skip hooks in CI environments
+skip_output:
+  - meta
+  - summary

@@ -216,9 +216,9 @@ func TestPolicyViolationAuditing(t *testing.T) {
 					Actor:     "guest-user@eth.ch",
 					Result:    models.AuditEventResultDenied,
 					Metadata: map[string]any{
-						"operation":  "delete",
-						"policy_id":  "policy-123",
-						"reason":     "role not authorized",
+						"operation": "delete",
+						"policy_id": "policy-123",
+						"reason":    "role not authorized",
 					},
 				})
 			}).

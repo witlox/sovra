@@ -102,8 +102,8 @@ func TestComprehensiveAuditLogging(t *testing.T) {
 					Actor:     "ceremony-manager@eth.ch",
 					Result:    models.AuditEventResultSuccess,
 					Metadata: map[string]any{
-						"operation":   "workspace.create",
-						"custodians":  3,
+						"operation":  "workspace.create",
+						"custodians": 3,
 					},
 				})
 			}).
@@ -326,7 +326,7 @@ func TestRealTimeAuditForwarding(t *testing.T) {
 					Actor:     "user@eth.ch",
 					Result:    models.AuditEventResultSuccess,
 				}
-				
+
 				// Logging should succeed even if forwarding fails
 				err := repo.Create(ctx, event)
 				require.NoError(t, err)

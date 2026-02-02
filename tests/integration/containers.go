@@ -140,7 +140,7 @@ func WithVault(t *testing.T, fn func(t *testing.T, vault *VaultContainer)) {
 		Image:        "hashicorp/vault:1.15",
 		ExposedPorts: []string{"8200/tcp"},
 		Env: map[string]string{
-			"VAULT_DEV_ROOT_TOKEN_ID": "root-token",
+			"VAULT_DEV_ROOT_TOKEN_ID":  "root-token",
 			"VAULT_DEV_LISTEN_ADDRESS": "0.0.0.0:8200",
 		},
 		Cmd: []string{"server", "-dev"},
@@ -273,7 +273,7 @@ type TestEnvironment struct {
 // WithFullEnvironment runs a test with all containers.
 func WithFullEnvironment(t *testing.T, fn func(t *testing.T, env *TestEnvironment)) {
 	t.Helper()
-	
+
 	// Start containers in parallel
 	env := &TestEnvironment{}
 	done := make(chan error, 3)

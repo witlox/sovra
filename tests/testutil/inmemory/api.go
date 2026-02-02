@@ -26,10 +26,14 @@ func NewMTLSVerifier() *MTLSVerifier {
 	return &MTLSVerifier{valid: true}
 }
 
-func (m *MTLSVerifier) SetValid(valid bool)         { m.mu.Lock(); m.valid = valid; m.mu.Unlock() }
-func (m *MTLSVerifier) SetExpired(expired bool)     { m.mu.Lock(); m.expired = expired; m.mu.Unlock() }
-func (m *MTLSVerifier) SetInvalid(invalid bool)     { m.mu.Lock(); m.invalid = invalid; m.mu.Unlock() }
-func (m *MTLSVerifier) SetUntrusted(untrusted bool) { m.mu.Lock(); m.untrusted = untrusted; m.mu.Unlock() }
+func (m *MTLSVerifier) SetValid(valid bool)     { m.mu.Lock(); m.valid = valid; m.mu.Unlock() }
+func (m *MTLSVerifier) SetExpired(expired bool) { m.mu.Lock(); m.expired = expired; m.mu.Unlock() }
+func (m *MTLSVerifier) SetInvalid(invalid bool) { m.mu.Lock(); m.invalid = invalid; m.mu.Unlock() }
+func (m *MTLSVerifier) SetUntrusted(untrusted bool) {
+	m.mu.Lock()
+	m.untrusted = untrusted
+	m.mu.Unlock()
+}
 
 func (m *MTLSVerifier) VerifyCertificate(ctx context.Context, cert []byte) (*api.CertificateInfo, error) {
 	m.mu.Lock()
@@ -76,9 +80,21 @@ func NewAuthenticator() *Authenticator {
 	return &Authenticator{}
 }
 
-func (m *Authenticator) SetTokenExpired(expired bool) { m.mu.Lock(); m.tokenExpired = expired; m.mu.Unlock() }
-func (m *Authenticator) SetTokenInvalid(invalid bool) { m.mu.Lock(); m.tokenInvalid = invalid; m.mu.Unlock() }
-func (m *Authenticator) SetRequireAuth(require bool)  { m.mu.Lock(); m.requireAuth = require; m.mu.Unlock() }
+func (m *Authenticator) SetTokenExpired(expired bool) {
+	m.mu.Lock()
+	m.tokenExpired = expired
+	m.mu.Unlock()
+}
+func (m *Authenticator) SetTokenInvalid(invalid bool) {
+	m.mu.Lock()
+	m.tokenInvalid = invalid
+	m.mu.Unlock()
+}
+func (m *Authenticator) SetRequireAuth(require bool) {
+	m.mu.Lock()
+	m.requireAuth = require
+	m.mu.Unlock()
+}
 
 func (m *Authenticator) AuthenticateRequest(ctx context.Context, r *http.Request) (*api.AuthResult, error) {
 	m.mu.Lock()
