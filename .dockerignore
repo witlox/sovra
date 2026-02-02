@@ -1,0 +1,49 @@
+# Test files
+tests/
+*_test.go
+**/*_test.go
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Infrastructure and deployment
+infrastructure/
+
+# Coverage reports
+*.out
+coverage.out
+*_coverage.out
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# CI/CD
+.github/
+lefthook.yml
+.fossa.yml
+
+# Build artifacts (we rebuild in container)
+dist/
+bin/
+
+# Vendor (use go mod download instead)
+vendor/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+*.tmp
+*.log

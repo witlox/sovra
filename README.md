@@ -51,13 +51,48 @@ Sovra is an open source federated control plane for managing cryptographic keys 
 
 ---
 
+## Installation
+
+### Using Docker (Recommended)
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/witlox/sovra:latest
+
+# Run a specific service
+docker run -d --name sovra-api ghcr.io/witlox/sovra:latest /app/api-gateway
+```
+
+### Download Pre-built Binaries
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/witlox/sovra/releases).
+
+```bash
+# Linux (amd64)
+curl -LO https://github.com/witlox/sovra/releases/latest/download/sovra_linux_amd64.tar.gz
+tar xzf sovra_linux_amd64.tar.gz
+
+# macOS (arm64)
+curl -LO https://github.com/witlox/sovra/releases/latest/download/sovra_darwin_arm64.tar.gz
+tar xzf sovra_darwin_arm64.tar.gz
+
+# Add to PATH
+sudo mv sovra /usr/local/bin/
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/witlox/sovra.git
+cd sovra
+go build -o bin/ ./cmd/...
+```
+
+---
+
 ## Quick Start
 
 ```bash
-# Clone
-git clone https://github.com/sovra-project/sovra.git
-cd sovra
-
 # Deploy control plane
 kubectl apply -k infrastructure/kubernetes/base
 
@@ -65,10 +100,10 @@ kubectl apply -k infrastructure/kubernetes/base
 ./scripts/init-control-plane.sh
 
 # Connect edge node
-sovra-cli edge-node register --control-plane https://sovra.example.org
+sovra edge-node register --control-plane https://sovra.example.org
 
 # Federate with partner
-sovra-cli federation establish --partner https://partner.example.org
+sovra federation establish --partner https://partner.example.org
 ```
 
 See [Quick Start Guide](docs/quickstart.md)
