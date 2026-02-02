@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	_ "github.com/lib/pq" // postgres driver
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,16 +37,18 @@ func TestPostgresConnection(t *testing.T) {
 			err := RunMigrations(db)
 			require.NoError(t, err)
 
+			orgID := uuid.New()
+
 			// Insert
 			_, err = db.Exec(`
 				INSERT INTO organizations (id, name, domain, created_at)
 				VALUES ($1, $2, $3, $4)
-			`, "org-test-123", "Test Org", "test.example.com", time.Now())
+			`, orgID, "Test Org", "test.example.com", time.Now())
 			require.NoError(t, err)
 
 			// Retrieve
 			var name string
-			err = db.QueryRow(`SELECT name FROM organizations WHERE id = $1`, "org-test-123").Scan(&name)
+			err = db.QueryRow(`SELECT name FROM organizations WHERE id = $1`, orgID).Scan(&name)
 			require.NoError(t, err)
 			assert.Equal(t, "Test Org", name)
 		})
@@ -53,23 +57,26 @@ func TestPostgresConnection(t *testing.T) {
 			err := RunMigrations(db)
 			require.NoError(t, err)
 
+			orgID := uuid.New()
+			wsID := uuid.New()
+
 			// Ensure org exists
 			_, _ = db.Exec(`
 				INSERT INTO organizations (id, name, domain, created_at)
 				VALUES ($1, $2, $3, $4)
 				ON CONFLICT (id) DO NOTHING
-			`, "org-ws-test", "Workspace Test Org", "ws-test.example.com", time.Now())
+			`, orgID, "Workspace Test Org", "ws-test.example.com", time.Now())
 
 			// Insert workspace
 			_, err = db.Exec(`
 				INSERT INTO workspaces (id, name, owner_org_id, classification, status, created_at, updated_at)
 				VALUES ($1, $2, $3, $4, $5, $6, $7)
-			`, "ws-test-123", "Test Workspace", "org-ws-test", "CONFIDENTIAL", "active", time.Now(), time.Now())
+			`, wsID, "Test Workspace", orgID, "CONFIDENTIAL", "active", time.Now(), time.Now())
 			require.NoError(t, err)
 
 			// Retrieve
 			var wsName string
-			err = db.QueryRow(`SELECT name FROM workspaces WHERE id = $1`, "ws-test-123").Scan(&wsName)
+			err = db.QueryRow(`SELECT name FROM workspaces WHERE id = $1`, wsID).Scan(&wsName)
 			require.NoError(t, err)
 			assert.Equal(t, "Test Workspace", wsName)
 		})
@@ -78,12 +85,15 @@ func TestPostgresConnection(t *testing.T) {
 			err := RunMigrations(db)
 			require.NoError(t, err)
 
+			orgID := uuid.New()
+
 			// Insert audit events
 			for i := 0; i < 10; i++ {
+				auditID := uuid.New()
 				_, err = db.Exec(`
 					INSERT INTO audit_events (id, timestamp, org_id, workspace, event_type, actor, result)
 					VALUES ($1, $2, $3, $4, $5, $6, $7)
-				`, "audit-"+string(rune('a'+i)), time.Now(), "org-audit-test",
+				`, auditID, time.Now(), orgID,
 					"ws-audit", "encrypt", "user@test.com", "success")
 				require.NoError(t, err)
 			}
@@ -91,7 +101,7 @@ func TestPostgresConnection(t *testing.T) {
 			// Query
 			rows, err := db.Query(`
 				SELECT id FROM audit_events WHERE org_id = $1
-			`, "org-audit-test")
+			`, orgID)
 			require.NoError(t, err)
 			defer rows.Close()
 
@@ -122,10 +132,12 @@ func TestPostgresTransactions(t *testing.T) {
 			tx, err := db.Begin()
 			require.NoError(t, err)
 
+			orgID := uuid.New()
+
 			_, err = tx.Exec(`
 				INSERT INTO organizations (id, name, domain, created_at)
 				VALUES ($1, $2, $3, $4)
-			`, "org-tx-commit", "TX Commit Org", "tx-commit.example.com", time.Now())
+			`, orgID, "TX Commit Org", "tx-commit.example.com", time.Now())
 			require.NoError(t, err)
 
 			err = tx.Commit()
@@ -133,7 +145,7 @@ func TestPostgresTransactions(t *testing.T) {
 
 			// Verify committed
 			var name string
-			err = db.QueryRow(`SELECT name FROM organizations WHERE id = $1`, "org-tx-commit").Scan(&name)
+			err = db.QueryRow(`SELECT name FROM organizations WHERE id = $1`, orgID).Scan(&name)
 			require.NoError(t, err)
 			assert.Equal(t, "TX Commit Org", name)
 		})
@@ -142,10 +154,12 @@ func TestPostgresTransactions(t *testing.T) {
 			tx, err := db.Begin()
 			require.NoError(t, err)
 
+			rollbackOrgID := uuid.New()
+
 			_, err = tx.Exec(`
 				INSERT INTO organizations (id, name, domain, created_at)
 				VALUES ($1, $2, $3, $4)
-			`, "org-tx-rollback", "TX Rollback Org", "tx-rollback.example.com", time.Now())
+			`, rollbackOrgID, "TX Rollback Org", "tx-rollback.example.com", time.Now())
 			require.NoError(t, err)
 
 			err = tx.Rollback()
@@ -153,7 +167,7 @@ func TestPostgresTransactions(t *testing.T) {
 
 			// Verify rolled back
 			var name string
-			err = db.QueryRow(`SELECT name FROM organizations WHERE id = $1`, "org-tx-rollback").Scan(&name)
+			err = db.QueryRow(`SELECT name FROM organizations WHERE id = $1`, rollbackOrgID).Scan(&name)
 			assert.Error(t, err) // Should not exist
 		})
 	})

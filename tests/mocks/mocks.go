@@ -9,10 +9,12 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sovra-project/sovra/internal/audit"
 	"github.com/sovra-project/sovra/pkg/errors"
 	"github.com/sovra-project/sovra/pkg/models"
 )
@@ -515,6 +517,16 @@ func (m *AuditRepository) Get(ctx context.Context, id string) (*models.AuditEven
 func (m *AuditRepository) Query(ctx context.Context, orgID, workspace string, eventType models.AuditEventType, since, until time.Time, limit, offset int) ([]*models.AuditEvent, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.queryInternal(orgID, workspace, eventType, since, until, limit, offset), nil
+}
+
+func (m *AuditRepository) QueryParams(ctx context.Context, query audit.QueryParams) ([]*models.AuditEvent, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.queryInternal(query.OrgID, query.Workspace, query.EventType, query.Since, query.Until, query.Limit, query.Offset), nil
+}
+
+func (m *AuditRepository) queryInternal(orgID, workspace string, eventType models.AuditEventType, since, until time.Time, limit, offset int) []*models.AuditEvent {
 	var result []*models.AuditEvent
 	for _, e := range m.events {
 		if orgID != "" && e.OrgID != orgID {
@@ -534,13 +546,26 @@ func (m *AuditRepository) Query(ctx context.Context, orgID, workspace string, ev
 		}
 		result = append(result, e)
 	}
+	// Sort by timestamp descending (newest first) to match real repository behavior
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Timestamp.After(result[j].Timestamp)
+	})
 	if offset < len(result) {
 		result = result[offset:]
+	} else {
+		result = nil
 	}
 	if limit > 0 && len(result) > limit {
 		result = result[:limit]
 	}
-	return result, nil
+	return result
+}
+
+func (m *AuditRepository) Count(ctx context.Context, query audit.QueryParams) (int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	events := m.queryInternal(query.OrgID, query.Workspace, query.EventType, query.Since, query.Until, 0, 0)
+	return int64(len(events)), nil
 }
 
 // AuditForwarder mock for external forwarding.

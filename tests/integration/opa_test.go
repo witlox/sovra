@@ -227,18 +227,19 @@ func TestOPAConnection(t *testing.T) {
 
 		t.Run("deletes policy", func(t *testing.T) {
 			// First upload
-			policy := `package sovra.delete; default allow = true`
+			policy := `package sovra.delete
+default allow = true`
 			client := &http.Client{}
 			uploadReq, _ := http.NewRequest("PUT", opa.Address+"/v1/policies/delete-me", bytes.NewBufferString(policy))
 			uploadReq.Header.Set("Content-Type", "text/plain")
-			resp, _ := client.Do(uploadReq)
-			if resp != nil {
-				resp.Body.Close()
-			}
+			resp, err := client.Do(uploadReq)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, resp.StatusCode, "upload should succeed")
+			resp.Body.Close()
 
 			// Delete
 			deleteReq, _ := http.NewRequest("DELETE", opa.Address+"/v1/policies/delete-me", nil)
-			resp, err := client.Do(deleteReq)
+			resp, err = client.Do(deleteReq)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 

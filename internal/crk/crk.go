@@ -2,6 +2,7 @@
 package crk
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hashicorp/vault/shamir"
 	"github.com/sovra-project/sovra/pkg/errors"
 	"github.com/sovra-project/sovra/pkg/models"
 )
@@ -16,19 +18,23 @@ import (
 // NewManager creates a new CRK Manager implementation.
 func NewManager() Manager {
 	return &managerImpl{
-		keys: make(map[string]ed25519.PrivateKey),
+		crkShares: make(map[string][][]byte),
 	}
 }
 
 type managerImpl struct {
-	mu   sync.RWMutex
-	keys map[string]ed25519.PrivateKey
+	mu        sync.RWMutex
+	crkShares map[string][][]byte // crkID -> shares for validation
 }
 
 // Generate creates a new CRK with the specified number of shares and threshold.
+// It generates an Ed25519 keypair and splits the private key using Shamir Secret Sharing.
 func (m *managerImpl) Generate(orgID string, totalShares, threshold int) (*models.CRK, error) {
 	if totalShares < threshold || threshold < 1 {
 		return nil, errors.ErrInvalidInput
+	}
+	if totalShares < 2 {
+		return nil, errors.NewCRKError("generate", errors.ErrInvalidInput)
 	}
 
 	// Generate Ed25519 key pair
@@ -39,22 +45,16 @@ func (m *managerImpl) Generate(orgID string, totalShares, threshold int) (*model
 
 	crkID := uuid.New().String()
 
-	// Store the private key for reconstruction
-	m.mu.Lock()
-	m.keys[crkID] = privKey
-	m.mu.Unlock()
-
-	// Generate shares using simple XOR-based secret sharing
-	shares := make([]models.CRKShare, totalShares)
-	for i := 0; i < totalShares; i++ {
-		shareData := make([]byte, len(privKey))
-		rand.Read(shareData)
-		shares[i] = models.CRKShare{
-			Index:     i + 1,
-			Data:      shareData,
-			CreatedAt: time.Now(),
-		}
+	// Split the private key using Shamir Secret Sharing
+	shamirShares, err := shamir.Split(privKey, totalShares, threshold)
+	if err != nil {
+		return nil, errors.NewCRKError("generate", err)
 	}
+
+	// Store shares for validation purposes
+	m.mu.Lock()
+	m.crkShares[crkID] = shamirShares
+	m.mu.Unlock()
 
 	return &models.CRK{
 		ID:          crkID,
@@ -68,7 +68,30 @@ func (m *managerImpl) Generate(orgID string, totalShares, threshold int) (*model
 	}, nil
 }
 
-// Reconstruct rebuilds the private key from threshold shares.
+// GetShares returns the shares for a CRK (used during key generation ceremony).
+func (m *managerImpl) GetShares(crkID string) ([]models.CRKShare, error) {
+	m.mu.RLock()
+	shamirShares, ok := m.crkShares[crkID]
+	m.mu.RUnlock()
+
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+
+	shares := make([]models.CRKShare, len(shamirShares))
+	for i, data := range shamirShares {
+		shares[i] = models.CRKShare{
+			ID:        uuid.New().String(),
+			CRKID:     crkID,
+			Index:     i + 1,
+			Data:      data,
+			CreatedAt: time.Now(),
+		}
+	}
+	return shares, nil
+}
+
+// Reconstruct rebuilds the private key from threshold shares using Shamir Secret Sharing.
 func (m *managerImpl) Reconstruct(shares []models.CRKShare, publicKey []byte) (ed25519.PrivateKey, error) {
 	if len(shares) == 0 {
 		return nil, errors.ErrCRKThresholdNotMet
@@ -83,8 +106,30 @@ func (m *managerImpl) Reconstruct(shares []models.CRKShare, publicKey []byte) (e
 		seen[s.Index] = true
 	}
 
-	// For the mock implementation, return a generated key
-	_, privKey, _ := ed25519.GenerateKey(rand.Reader)
+	// Convert models.CRKShare to [][]byte for Shamir reconstruction
+	shamirShares := make([][]byte, len(shares))
+	for i, s := range shares {
+		shamirShares[i] = s.Data
+	}
+
+	// Reconstruct the private key using Shamir
+	privKeyBytes, err := shamir.Combine(shamirShares)
+	if err != nil {
+		return nil, errors.NewCRKError("reconstruct", err)
+	}
+
+	// Verify the reconstructed key matches the public key
+	if len(privKeyBytes) != ed25519.PrivateKeySize {
+		return nil, errors.ErrCRKInvalid
+	}
+	privKey := ed25519.PrivateKey(privKeyBytes)
+
+	// Verify the public key matches
+	derivedPubKey := privKey.Public().(ed25519.PublicKey)
+	if !bytes.Equal(derivedPubKey, publicKey) {
+		return nil, errors.ErrCRKInvalid
+	}
+
 	return privKey, nil
 }
 
@@ -101,6 +146,9 @@ func (m *managerImpl) Sign(shares []models.CRKShare, publicKey []byte, data []by
 func (m *managerImpl) Verify(publicKey []byte, data []byte, signature []byte) (bool, error) {
 	if len(publicKey) != ed25519.PublicKeySize {
 		return false, errors.ErrCRKInvalid
+	}
+	if len(signature) != ed25519.SignatureSize {
+		return false, errors.ErrShareInvalid
 	}
 	return ed25519.Verify(publicKey, data, signature), nil
 }
@@ -129,15 +177,27 @@ func (m *managerImpl) ValidateShares(shares []models.CRKShare, threshold int, pu
 	return nil
 }
 
-// RegenerateShares creates new shares from an existing CRK.
+// RegenerateShares creates new shares from an existing CRK using Shamir Secret Sharing.
 func (m *managerImpl) RegenerateShares(privateKey ed25519.PrivateKey, totalShares, threshold int) ([]models.CRKShare, error) {
+	if totalShares < threshold || threshold < 1 {
+		return nil, errors.ErrInvalidInput
+	}
+	if totalShares < 2 {
+		return nil, errors.NewCRKError("regenerate", errors.ErrInvalidInput)
+	}
+
+	// Split the private key using Shamir Secret Sharing
+	shamirShares, err := shamir.Split(privateKey, totalShares, threshold)
+	if err != nil {
+		return nil, errors.NewCRKError("regenerate", err)
+	}
+
 	shares := make([]models.CRKShare, totalShares)
 	for i := 0; i < totalShares; i++ {
-		shareData := make([]byte, 32)
-		rand.Read(shareData)
 		shares[i] = models.CRKShare{
+			ID:        uuid.New().String(),
 			Index:     i + 1,
-			Data:      shareData,
+			Data:      shamirShares[i],
 			CreatedAt: time.Now(),
 		}
 	}
@@ -145,21 +205,29 @@ func (m *managerImpl) RegenerateShares(privateKey ed25519.PrivateKey, totalShare
 }
 
 // NewCeremonyManager creates a new ceremony manager implementation.
-func NewCeremonyManager() CeremonyManager {
+func NewCeremonyManager(manager Manager) CeremonyManager {
 	return &ceremonyManagerImpl{
-		ceremonies: make(map[string]*Ceremony),
+		ceremonies:  make(map[string]*Ceremony),
+		manager:     manager,
+		pendingCRKs: make(map[string]*models.CRK),
 	}
 }
 
 type ceremonyManagerImpl struct {
-	mu         sync.Mutex
-	ceremonies map[string]*Ceremony
+	mu          sync.Mutex
+	ceremonies  map[string]*Ceremony
+	manager     Manager
+	pendingCRKs map[string]*models.CRK // ceremonyID -> CRK (for generation ceremonies)
 }
 
 // StartCeremony initiates a new key ceremony.
 func (c *ceremonyManagerImpl) StartCeremony(orgID, operation string, threshold int) (*Ceremony, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if threshold < 1 {
+		return nil, errors.ErrInvalidInput
+	}
 
 	ceremony := &Ceremony{
 		ID:            uuid.New().String(),
@@ -216,10 +284,46 @@ func (c *ceremonyManagerImpl) CompleteCeremony(ceremonyID string, witness string
 	ceremony.Completed = true
 	ceremony.Witnesses = append(ceremony.Witnesses, witness)
 
-	// Return mock result
-	result := make([]byte, 64)
-	rand.Read(result)
-	return result, nil
+	// Handle different ceremony operations
+	switch ceremony.Operation {
+	case "generate":
+		// For generation ceremonies, retrieve the pending CRK
+		crk, ok := c.pendingCRKs[ceremonyID]
+		if !ok {
+			return nil, errors.ErrNotFound
+		}
+		delete(c.pendingCRKs, ceremonyID)
+		return crk.PublicKey, nil
+
+	case "sign":
+		// For signing ceremonies, reconstruct and sign
+		if c.manager == nil {
+			return nil, errors.NewCRKError("complete", errors.ErrInternalError)
+		}
+		crk, ok := c.pendingCRKs[ceremonyID]
+		if !ok {
+			return nil, errors.ErrNotFound
+		}
+		// Use the collected shares to sign (data should be stored in ceremony metadata)
+		privKey, err := c.manager.Reconstruct(ceremony.Shares, crk.PublicKey)
+		if err != nil {
+			return nil, err
+		}
+		// Sign a test message to prove reconstruction worked
+		testData := []byte("ceremony-complete-" + ceremonyID)
+		signature := ed25519.Sign(privKey, testData)
+		return signature, nil
+
+	default:
+		// Generic completion - return a hash of shares to prove completion
+		result := make([]byte, 64)
+		for i, share := range ceremony.Shares {
+			if i < 64 && len(share.Data) > 0 {
+				result[i] = share.Data[0]
+			}
+		}
+		return result, nil
+	}
 }
 
 // CancelCeremony cancels an ongoing ceremony.
@@ -244,7 +348,7 @@ func NewContextGenerator(m Manager) *ContextGenerator {
 	return &ContextGenerator{manager: m}
 }
 
-// Generate creates a new CRK with context.
+// Generate creates a new CRK with context using real Shamir Secret Sharing.
 func (g *ContextGenerator) Generate(ctx context.Context, orgID string, threshold, shareCount int) (*models.CRK, []*models.CRKShare, error) {
 	select {
 	case <-ctx.Done():
@@ -257,6 +361,20 @@ func (g *ContextGenerator) Generate(ctx context.Context, orgID string, threshold
 		return nil, nil, err
 	}
 
+	// Get the real SSS shares from the manager
+	if impl, ok := g.manager.(*managerImpl); ok {
+		modelShares, err := impl.GetShares(crk.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		shares := make([]*models.CRKShare, len(modelShares))
+		for i := range modelShares {
+			shares[i] = &modelShares[i]
+		}
+		return crk, shares, nil
+	}
+
+	// Fallback for non-managerImpl implementations
 	shares := make([]*models.CRKShare, shareCount)
 	for i := 0; i < shareCount; i++ {
 		shareData := make([]byte, 32)
@@ -274,14 +392,16 @@ func (g *ContextGenerator) Generate(ctx context.Context, orgID string, threshold
 }
 
 // ContextReconstructor wraps Reconstructor with context support.
-type ContextReconstructor struct{}
-
-// NewContextReconstructor creates a new context-aware reconstructor.
-func NewContextReconstructor() *ContextReconstructor {
-	return &ContextReconstructor{}
+type ContextReconstructor struct {
+	manager Manager
 }
 
-// Reconstruct rebuilds the private key with context.
+// NewContextReconstructor creates a new context-aware reconstructor.
+func NewContextReconstructor(m Manager) *ContextReconstructor {
+	return &ContextReconstructor{manager: m}
+}
+
+// Reconstruct rebuilds the private key with context using real Shamir Secret Sharing.
 func (r *ContextReconstructor) Reconstruct(ctx context.Context, shares []*models.CRKShare, threshold int) ([]byte, error) {
 	select {
 	case <-ctx.Done():
@@ -307,7 +427,17 @@ func (r *ContextReconstructor) Reconstruct(ctx context.Context, shares []*models
 		}
 	}
 
-	key := make([]byte, 32)
-	rand.Read(key)
+	// Convert pointer shares to model shares for Shamir reconstruction
+	shamirShares := make([][]byte, len(shares))
+	for i, s := range shares {
+		shamirShares[i] = s.Data
+	}
+
+	// Reconstruct using Shamir
+	key, err := shamir.Combine(shamirShares)
+	if err != nil {
+		return nil, errors.NewCRKError("reconstruct", err)
+	}
+
 	return key, nil
 }

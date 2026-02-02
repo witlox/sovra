@@ -45,6 +45,18 @@ type CryptoService interface {
 	Decrypt(ctx context.Context, workspaceID string, ciphertext []byte) ([]byte, error)
 }
 
+// AuditService handles audit event logging.
+type AuditService interface {
+	// Log creates an audit event.
+	Log(ctx context.Context, event *models.AuditEvent) error
+}
+
+// SignatureVerifier verifies CRK signatures.
+type SignatureVerifier interface {
+	// VerifyCRKSignature verifies a signature against the org's CRK.
+	VerifyCRKSignature(ctx context.Context, orgID string, data, signature []byte) (bool, error)
+}
+
 // CreateRequest represents a workspace creation request.
 type CreateRequest struct {
 	Name           string

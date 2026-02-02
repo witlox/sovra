@@ -47,6 +47,22 @@ type Engine interface {
 	ValidateRego(rego string) error
 }
 
+// OPAClient defines the interface for OPA operations.
+type OPAClient interface {
+	// UploadPolicy uploads or updates a policy with the given ID.
+	UploadPolicy(ctx context.Context, id string, policy string) error
+	// DeletePolicy deletes the policy with the given ID.
+	DeletePolicy(ctx context.Context, id string) error
+	// EvaluateDecision evaluates a policy and returns a structured decision result.
+	EvaluateDecision(ctx context.Context, path string, input models.PolicyInput) (*OPADecisionResult, error)
+}
+
+// OPADecisionResult represents the result of an OPA policy decision.
+type OPADecisionResult struct {
+	Allow  bool
+	Reason string
+}
+
 // CreateRequest represents a policy creation request.
 type CreateRequest struct {
 	Name         string
@@ -71,4 +87,25 @@ type Service interface {
 	Evaluate(ctx context.Context, input models.PolicyInput) (*EvaluationResult, error)
 	// Validate validates policy Rego syntax.
 	Validate(ctx context.Context, rego string) error
+}
+
+// AuditService defines audit logging operations.
+type AuditService interface {
+	// Log creates an audit event.
+	Log(ctx context.Context, event *models.AuditEvent) error
+}
+
+// NewPolicyService creates a new policy service with repository and OPA client.
+// The repo parameter should be a *postgres.PolicyRepository that implements Repository.
+// The opa parameter should be a *opa.Client that implements OPAClient.
+func NewPolicyService(
+	repo Repository,
+	opa OPAClient,
+	audit AuditService,
+) Service {
+	return &serviceImpl{
+		repo:  repo,
+		opa:   opa,
+		audit: audit,
+	}
 }

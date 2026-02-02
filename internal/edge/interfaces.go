@@ -3,9 +3,11 @@ package edge
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/sovra-project/sovra/pkg/vault"
 )
 
 // Repository handles edge node persistence.
@@ -83,6 +85,12 @@ type SyncStatus struct {
 	LastError       string
 }
 
+// AuditService provides audit logging for edge operations.
+type AuditService interface {
+	// Log creates an audit event.
+	Log(ctx context.Context, event *models.AuditEvent) error
+}
+
 // Service handles edge node operations.
 type Service interface {
 	// Register registers a new edge node.
@@ -93,6 +101,8 @@ type Service interface {
 	List(ctx context.Context, orgID string) ([]*models.EdgeNode, error)
 	// HealthCheck checks edge node health.
 	HealthCheck(ctx context.Context, nodeID string) (*HealthStatus, error)
+	// UpdateHealthStatus updates health status for all nodes in an organization.
+	UpdateHealthStatus(ctx context.Context, orgID string) error
 	// Unregister removes an edge node.
 	Unregister(ctx context.Context, nodeID string) error
 	// Encrypt encrypts data via edge node.
@@ -106,7 +116,11 @@ type Service interface {
 	// RotateKey rotates a key on edge node.
 	RotateKey(ctx context.Context, nodeID, keyName string) error
 	// SyncPolicies syncs policies to edge node.
-	SyncPolicies(ctx context.Context, nodeID string) error
+	SyncPolicies(ctx context.Context, nodeID string, policies []*models.Policy) error
+	// SyncWorkspaceKeys syncs workspace DEKs to edge node using transit rewrap.
+	SyncWorkspaceKeys(ctx context.Context, nodeID, workspaceID string, wrappedDEK []byte) error
+	// GetSyncStatus returns the sync status for an edge node.
+	GetSyncStatus(ctx context.Context, nodeID string) (*SyncStatus, error)
 }
 
 // NodeConfig contains edge node configuration.
@@ -118,4 +132,26 @@ type NodeConfig struct {
 	Classification  models.Classification
 	Region          string
 	Tags            map[string]string
+}
+
+// VaultFactory creates Vault clients for edge nodes.
+type VaultFactory func(address, token string) (*vault.Client, error)
+
+// NewEdgeService creates a new production-ready edge node service.
+// The repo parameter should be a *postgres.EdgeNodeRepository that implements Repository.
+// The vaultFactory creates vault.Client instances for each edge node.
+func NewEdgeService(
+	repo Repository,
+	vaultFactory VaultFactory,
+	audit AuditService,
+) Service {
+	return &edgeService{
+		repo:         repo,
+		vaultFactory: vaultFactory,
+		audit:        audit,
+		logger:       slog.Default(),
+		syncStatus:   make(map[string]*SyncStatus),
+		edgeClients:  make(map[string]*vault.Client),
+		edgeTokens:   make(map[string]string),
+	}
 }

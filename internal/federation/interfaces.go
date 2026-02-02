@@ -4,8 +4,10 @@ package federation
 import (
 	"context"
 	"crypto/x509"
+	"time"
 
 	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/sovra-project/sovra/pkg/vault"
 )
 
 // Repository defines federation persistence operations.
@@ -48,6 +50,26 @@ type MTLSClient interface {
 	Close(partnerID string) error
 }
 
+// AuditService handles audit logging for federation operations.
+type AuditService interface {
+	// Log creates an audit event.
+	Log(ctx context.Context, event *models.AuditEvent) error
+}
+
+// NewFederationService creates a new production-ready federation service.
+func NewFederationService(
+	repo Repository,
+	vaultClient *vault.Client,
+	audit AuditService,
+) Service {
+	return &productionServiceImpl{
+		repo:        repo,
+		vaultClient: vaultClient,
+		audit:       audit,
+		mtlsManager: newMTLSManager(vaultClient),
+	}
+}
+
 // InitRequest represents a federation initialization request.
 type InitRequest struct {
 	OrgID        string
@@ -57,6 +79,7 @@ type InitRequest struct {
 // InitResponse represents a federation initialization response.
 type InitResponse struct {
 	OrgID       string
+	CSR         []byte
 	Certificate []byte
 	PublicKey   []byte
 }
@@ -66,25 +89,52 @@ type EstablishRequest struct {
 	PartnerOrgID  string
 	PartnerURL    string
 	PartnerCert   []byte
+	PartnerCSR    []byte
 	CRKSignature  []byte
+}
+
+// EstablishResponse represents a federation establishment response.
+type EstablishResponse struct {
+	Federation        *models.Federation
+	SignedPartnerCert []byte
+}
+
+// HealthCheckResult represents the result of a health check for a partner.
+type HealthCheckResult struct {
+	PartnerOrgID string
+	Healthy      bool
+	LastCheck    time.Time
+	Error        string
+}
+
+// RevocationRequest represents a federation revocation request.
+type RevocationRequest struct {
+	PartnerOrgID    string
+	Signature       []byte
+	NotifyPartner   bool
+	RevokeCerts     bool
 }
 
 // Service handles federation business logic.
 type Service interface {
-	// Init generates a federation certificate request.
+	// Init initializes federation capability for an organization by generating CSR.
 	Init(ctx context.Context, req InitRequest) (*InitResponse, error)
-	// ImportCertificate imports a partner's federation certificate.
+	// ImportCertificate imports and validates a partner's federation certificate.
 	ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, signature []byte) error
-	// Establish establishes a federation with a partner.
+	// Establish establishes a bilateral federation with a partner organization.
 	Establish(ctx context.Context, req EstablishRequest) (*models.Federation, error)
-	// Status returns the status of a federation.
+	// Status returns the current status of a federation with a partner.
 	Status(ctx context.Context, partnerOrgID string) (*models.Federation, error)
-	// List returns all federations.
+	// List returns all federations for the current organization.
 	List(ctx context.Context) ([]*models.Federation, error)
-	// Revoke revokes a federation.
-	Revoke(ctx context.Context, partnerOrgID string, signature []byte) error
-	// HealthCheck checks all federation connections.
-	HealthCheck(ctx context.Context) (map[string]bool, error)
+	// Revoke revokes a federation and optionally notifies the partner.
+	Revoke(ctx context.Context, req RevocationRequest) error
+	// HealthCheck performs health checks on all federated partners.
+	HealthCheck(ctx context.Context) ([]HealthCheckResult, error)
 	// RequestPublicKey requests a participant's public key for workspace key wrapping.
 	RequestPublicKey(ctx context.Context, partnerOrgID string) ([]byte, error)
+	// StartHealthMonitor starts background health monitoring of federated partners.
+	StartHealthMonitor(ctx context.Context, interval time.Duration) error
+	// StopHealthMonitor stops the background health monitor.
+	StopHealthMonitor()
 }

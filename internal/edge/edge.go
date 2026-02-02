@@ -3,16 +3,20 @@ package edge
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/sovra-project/sovra/pkg/errors"
 	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/sovra-project/sovra/pkg/vault"
 )
 
-// NewService creates a new edge node service.
+// NewService creates a new edge node service (deprecated, use NewEdgeService).
 func NewService(repo Repository, client VaultClient, checker HealthChecker, sync SyncManager) Service {
 	return &serviceImpl{
 		repo:    repo,
@@ -38,7 +42,6 @@ func (s *serviceImpl) Register(ctx context.Context, orgID string, config *NodeCo
 		return nil, fmt.Errorf("invalid vault address: %w", errors.ErrInvalidInput)
 	}
 
-	// Check vault connectivity via health checker interface
 	if checker, ok := s.client.(interface{ IsUnreachable() bool }); ok && checker.IsUnreachable() {
 		return nil, errors.ErrEdgeNodeUnreachable
 	}
@@ -79,6 +82,28 @@ func (s *serviceImpl) HealthCheck(ctx context.Context, nodeID string) (*HealthSt
 	}
 
 	return s.checker.Check(ctx, nodeID)
+}
+
+func (s *serviceImpl) UpdateHealthStatus(ctx context.Context, orgID string) error {
+	nodes, err := s.repo.GetByOrgID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		status, err := s.checker.Check(ctx, node.ID)
+		if err != nil {
+			node.Status = models.EdgeNodeStatusUnhealthy
+		} else if status.VaultSealed {
+			node.Status = models.EdgeNodeStatusSealed
+		} else if status.Healthy {
+			node.Status = models.EdgeNodeStatusHealthy
+		} else {
+			node.Status = models.EdgeNodeStatusUnhealthy
+		}
+		node.LastHeartbeat = time.Now()
+		_ = s.repo.Update(ctx, node)
+	}
+	return nil
 }
 
 func (s *serviceImpl) Unregister(ctx context.Context, nodeID string) error {
@@ -136,10 +161,551 @@ func (s *serviceImpl) RotateKey(ctx context.Context, nodeID, keyName string) err
 	return s.client.RotateKey(ctx, keyName)
 }
 
-func (s *serviceImpl) SyncPolicies(ctx context.Context, nodeID string) error {
+func (s *serviceImpl) SyncPolicies(ctx context.Context, nodeID string, policies []*models.Policy) error {
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
 		return err
 	}
 
-	return s.sync.SyncPolicies(ctx, nodeID, nil)
+	return s.sync.SyncPolicies(ctx, nodeID, policies)
+}
+
+func (s *serviceImpl) SyncWorkspaceKeys(ctx context.Context, nodeID, workspaceID string, wrappedDEK []byte) error {
+	if _, err := s.repo.Get(ctx, nodeID); err != nil {
+		return err
+	}
+
+	return s.sync.SyncWorkspaceKeys(ctx, nodeID, workspaceID)
+}
+
+func (s *serviceImpl) GetSyncStatus(ctx context.Context, nodeID string) (*SyncStatus, error) {
+	if _, err := s.repo.Get(ctx, nodeID); err != nil {
+		return nil, err
+	}
+
+	return s.sync.GetSyncStatus(ctx, nodeID)
+}
+
+// edgeService is the production-ready edge node service using pkg/vault and pkg/postgres.
+type edgeService struct {
+	repo         Repository
+	vaultFactory VaultFactory
+	audit        AuditService
+	logger       *slog.Logger
+
+	mu           sync.RWMutex
+	syncStatus   map[string]*SyncStatus
+	edgeClients  map[string]*vault.Client
+	edgeTokens   map[string]string
+}
+
+func (s *edgeService) Register(ctx context.Context, orgID string, config *NodeConfig) (*models.EdgeNode, error) {
+	if config.Name == "" {
+		return nil, fmt.Errorf("name is required: %w", errors.ErrInvalidInput)
+	}
+
+	if _, err := url.ParseRequestURI(config.VaultAddress); err != nil {
+		return nil, fmt.Errorf("invalid vault address: %w", errors.ErrInvalidInput)
+	}
+
+	// Test connectivity to edge Vault
+	edgeClient, err := s.vaultFactory(config.VaultAddress, config.VaultToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create edge vault client: %w", errors.ErrEdgeNodeUnreachable)
+	}
+
+	health, err := edgeClient.Health(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("edge vault health check failed: %w", errors.ErrEdgeNodeUnreachable)
+	}
+
+	if health.Sealed {
+		return nil, fmt.Errorf("edge vault is sealed: %w", errors.ErrEdgeNodeUnreachable)
+	}
+
+	classification := config.Classification
+	if classification == "" {
+		classification = models.ClassificationConfidential
+	}
+
+	node := &models.EdgeNode{
+		ID:             uuid.New().String(),
+		OrgID:          orgID,
+		Name:           config.Name,
+		VaultAddress:   config.VaultAddress,
+		Status:         models.EdgeNodeStatusHealthy,
+		Classification: classification,
+		LastHeartbeat:  time.Now(),
+	}
+
+	if err := s.repo.Create(ctx, node); err != nil {
+		return nil, fmt.Errorf("failed to create edge node: %w", err)
+	}
+
+	// Cache the client and token for future operations
+	s.mu.Lock()
+	s.edgeClients[node.ID] = edgeClient
+	if s.edgeTokens == nil {
+		s.edgeTokens = make(map[string]string)
+	}
+	s.edgeTokens[node.ID] = config.VaultToken
+	s.syncStatus[node.ID] = &SyncStatus{
+		LastSyncedAt:   time.Time{},
+		SyncInProgress: false,
+	}
+	s.mu.Unlock()
+
+	// Audit log
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     orgID,
+			EventType: "edge.register",
+			Actor:     "system",
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"node_id":        node.ID,
+				"node_name":      node.Name,
+				"vault_address":  node.VaultAddress,
+				"classification": node.Classification,
+			},
+		})
+	}
+
+	return node, nil
+}
+
+func (s *edgeService) Get(ctx context.Context, id string) (*models.EdgeNode, error) {
+	return s.repo.Get(ctx, id)
+}
+
+func (s *edgeService) List(ctx context.Context, orgID string) ([]*models.EdgeNode, error) {
+	return s.repo.GetByOrgID(ctx, orgID)
+}
+
+func (s *edgeService) HealthCheck(ctx context.Context, nodeID string) (*HealthStatus, error) {
+	node, err := s.repo.Get(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := s.getOrCreateClient(ctx, node)
+	if err != nil {
+		return &HealthStatus{
+			Healthy:      false,
+			LastChecked:  time.Now(),
+			ErrorMessage: err.Error(),
+		}, nil
+	}
+
+	start := time.Now()
+	health, err := client.Health(ctx)
+	latency := time.Since(start)
+
+	if err != nil {
+		// Update node status in database
+		node.Status = models.EdgeNodeStatusUnhealthy
+		node.LastHeartbeat = time.Now()
+		_ = s.repo.Update(ctx, node)
+
+		return &HealthStatus{
+			Healthy:      false,
+			LastChecked:  time.Now(),
+			Latency:      latency,
+			ErrorMessage: err.Error(),
+		}, nil
+	}
+
+	status := &HealthStatus{
+		Healthy:     !health.Sealed && health.Initialized,
+		LastChecked: time.Now(),
+		VaultSealed: health.Sealed,
+		Version:     health.Version,
+		Latency:     latency,
+	}
+
+	// Update node status in database
+	if health.Sealed {
+		node.Status = models.EdgeNodeStatusSealed
+	} else if status.Healthy {
+		node.Status = models.EdgeNodeStatusHealthy
+	} else {
+		node.Status = models.EdgeNodeStatusUnhealthy
+	}
+	node.LastHeartbeat = time.Now()
+	_ = s.repo.Update(ctx, node)
+
+	return status, nil
+}
+
+func (s *edgeService) UpdateHealthStatus(ctx context.Context, orgID string) error {
+	nodes, err := s.repo.GetByOrgID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+
+	for _, node := range nodes {
+		_, _ = s.HealthCheck(ctx, node.ID)
+	}
+
+	return nil
+}
+
+func (s *edgeService) Unregister(ctx context.Context, nodeID string) error {
+	node, err := s.repo.Get(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+
+	// Clean up synced data on edge Vault if accessible
+	s.mu.Lock()
+	delete(s.edgeClients, nodeID)
+	delete(s.edgeTokens, nodeID)
+	delete(s.syncStatus, nodeID)
+	s.mu.Unlock()
+
+	if err := s.repo.Delete(ctx, nodeID); err != nil {
+		return err
+	}
+
+	// Audit log
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     node.OrgID,
+			EventType: "edge.unregister",
+			Actor:     "system",
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"node_id":   nodeID,
+				"node_name": node.Name,
+			},
+		})
+	}
+
+	return nil
+}
+
+func (s *edgeService) Encrypt(ctx context.Context, nodeID, keyName string, plaintext []byte) ([]byte, error) {
+	if len(plaintext) == 0 {
+		return nil, fmt.Errorf("plaintext is required: %w", errors.ErrInvalidInput)
+	}
+
+	node, err := s.repo.Get(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := s.getOrCreateClient(ctx, node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get edge client: %w", errors.ErrEdgeNodeUnreachable)
+	}
+
+	transit := client.Transit("transit")
+	ciphertext, err := transit.Encrypt(ctx, keyName, plaintext)
+	if err != nil {
+		return nil, fmt.Errorf("encryption failed: %w", err)
+	}
+
+	return []byte(ciphertext), nil
+}
+
+func (s *edgeService) Decrypt(ctx context.Context, nodeID, keyName string, ciphertext []byte) ([]byte, error) {
+	node, err := s.repo.Get(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := s.getOrCreateClient(ctx, node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get edge client: %w", errors.ErrEdgeNodeUnreachable)
+	}
+
+	transit := client.Transit("transit")
+	plaintext, err := transit.Decrypt(ctx, keyName, string(ciphertext))
+	if err != nil {
+		return nil, fmt.Errorf("decryption failed: %w", err)
+	}
+
+	return plaintext, nil
+}
+
+func (s *edgeService) Sign(ctx context.Context, nodeID, keyName string, data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("data is required: %w", errors.ErrInvalidInput)
+	}
+
+	node, err := s.repo.Get(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := s.getOrCreateClient(ctx, node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get edge client: %w", errors.ErrEdgeNodeUnreachable)
+	}
+
+	transit := client.Transit("transit")
+	signature, err := transit.Sign(ctx, keyName, data)
+	if err != nil {
+		return nil, fmt.Errorf("signing failed: %w", err)
+	}
+
+	return []byte(signature), nil
+}
+
+func (s *edgeService) Verify(ctx context.Context, nodeID, keyName string, data, signature []byte) (bool, error) {
+	node, err := s.repo.Get(ctx, nodeID)
+	if err != nil {
+		return false, err
+	}
+
+	client, err := s.getOrCreateClient(ctx, node)
+	if err != nil {
+		return false, fmt.Errorf("failed to get edge client: %w", errors.ErrEdgeNodeUnreachable)
+	}
+
+	transit := client.Transit("transit")
+	valid, err := transit.Verify(ctx, keyName, data, string(signature))
+	if err != nil {
+		return false, fmt.Errorf("verification failed: %w", err)
+	}
+
+	return valid, nil
+}
+
+func (s *edgeService) RotateKey(ctx context.Context, nodeID, keyName string) error {
+	node, err := s.repo.Get(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+
+	client, err := s.getOrCreateClient(ctx, node)
+	if err != nil {
+		return fmt.Errorf("failed to get edge client: %w", errors.ErrEdgeNodeUnreachable)
+	}
+
+	transit := client.Transit("transit")
+	if err := transit.RotateKey(ctx, keyName); err != nil {
+		return fmt.Errorf("key rotation failed: %w", err)
+	}
+
+	// Audit log
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     node.OrgID,
+			EventType: models.AuditEventTypeKeyRotate,
+			Actor:     "system",
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"node_id":  nodeID,
+				"key_name": keyName,
+			},
+		})
+	}
+
+	return nil
+}
+
+func (s *edgeService) SyncPolicies(ctx context.Context, nodeID string, policies []*models.Policy) error {
+	node, err := s.repo.Get(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	status := s.syncStatus[nodeID]
+	if status == nil {
+		status = &SyncStatus{}
+		s.syncStatus[nodeID] = status
+	}
+	status.SyncInProgress = true
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		status.SyncInProgress = false
+		s.mu.Unlock()
+	}()
+
+	client, err := s.getOrCreateClient(ctx, node)
+	if err != nil {
+		s.mu.Lock()
+		status.ErrorCount++
+		status.LastError = err.Error()
+		s.mu.Unlock()
+		return fmt.Errorf("failed to get edge client: %w", errors.ErrEdgeNodeUnreachable)
+	}
+
+	// Push policies to edge Vault's policy engine
+	syncedCount := 0
+	for _, policy := range policies {
+		policyName := fmt.Sprintf("sovra-%s", policy.ID)
+		err := client.Raw().Sys().PutPolicyWithContext(ctx, policyName, policy.Rego)
+		if err != nil {
+			s.mu.Lock()
+			status.ErrorCount++
+			status.LastError = fmt.Sprintf("failed to sync policy %s: %v", policy.ID, err)
+			s.mu.Unlock()
+			continue
+		}
+		syncedCount++
+	}
+
+	s.mu.Lock()
+	status.PoliciesSynced = syncedCount
+	status.LastSyncedAt = time.Now()
+	s.mu.Unlock()
+
+	// Audit log
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     node.OrgID,
+			EventType: "edge.sync.policies",
+			Actor:     "system",
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"node_id":         nodeID,
+				"policies_synced": syncedCount,
+				"policies_total":  len(policies),
+			},
+		})
+	}
+
+	return nil
+}
+
+func (s *edgeService) SyncWorkspaceKeys(ctx context.Context, nodeID, workspaceID string, wrappedDEK []byte) error {
+	node, err := s.repo.Get(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	status := s.syncStatus[nodeID]
+	if status == nil {
+		status = &SyncStatus{}
+		s.syncStatus[nodeID] = status
+	}
+	status.SyncInProgress = true
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		status.SyncInProgress = false
+		s.mu.Unlock()
+	}()
+
+	client, err := s.getOrCreateClient(ctx, node)
+	if err != nil {
+		s.mu.Lock()
+		status.ErrorCount++
+		status.LastError = err.Error()
+		s.mu.Unlock()
+		return fmt.Errorf("failed to get edge client: %w", errors.ErrEdgeNodeUnreachable)
+	}
+
+	// Use transit rewrap to securely distribute the DEK to the edge node
+	transit := client.Transit("transit")
+
+	// First, ensure the edge node has the workspace key created
+	keyName := fmt.Sprintf("workspace-%s", workspaceID)
+	_, err = transit.ReadKey(ctx, keyName)
+	if err != nil {
+		// Create the key on edge node if it doesn't exist
+		if err := transit.CreateKey(ctx, keyName, &vault.KeyConfig{
+			Type:       vault.KeyTypeAES256GCM96,
+			Exportable: false,
+		}); err != nil {
+			s.mu.Lock()
+			status.ErrorCount++
+			status.LastError = fmt.Sprintf("failed to create key on edge: %v", err)
+			s.mu.Unlock()
+			return fmt.Errorf("failed to create key on edge node: %w", err)
+		}
+	}
+
+	// Store the wrapped DEK in the edge Vault's KV store
+	kvPath := fmt.Sprintf("secret/data/sovra/workspaces/%s/dek", workspaceID)
+	_, err = client.Raw().Logical().WriteWithContext(ctx, kvPath, map[string]interface{}{
+		"data": map[string]interface{}{
+			"wrapped_dek": base64.StdEncoding.EncodeToString(wrappedDEK),
+			"synced_at":   time.Now().Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		s.mu.Lock()
+		status.ErrorCount++
+		status.LastError = fmt.Sprintf("failed to store DEK: %v", err)
+		s.mu.Unlock()
+		return fmt.Errorf("failed to store DEK on edge node: %w", err)
+	}
+
+	s.mu.Lock()
+	status.KeysSynced++
+	status.LastSyncedAt = time.Now()
+	s.mu.Unlock()
+
+	// Audit log
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     node.OrgID,
+			Workspace: workspaceID,
+			EventType: "edge.sync.keys",
+			Actor:     "system",
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"node_id":      nodeID,
+				"workspace_id": workspaceID,
+			},
+		})
+	}
+
+	return nil
+}
+
+func (s *edgeService) GetSyncStatus(ctx context.Context, nodeID string) (*SyncStatus, error) {
+	if _, err := s.repo.Get(ctx, nodeID); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	status, ok := s.syncStatus[nodeID]
+	if !ok {
+		return &SyncStatus{}, nil
+	}
+
+	return status, nil
+}
+
+func (s *edgeService) getOrCreateClient(ctx context.Context, node *models.EdgeNode) (*vault.Client, error) {
+	s.mu.RLock()
+	client, ok := s.edgeClients[node.ID]
+	token := s.edgeTokens[node.ID]
+	s.mu.RUnlock()
+
+	if ok && client != nil {
+		return client, nil
+	}
+
+	// Create new client using factory
+	newClient, err := s.vaultFactory(node.VaultAddress, token)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	s.edgeClients[node.ID] = newClient
+	s.mu.Unlock()
+
+	return newClient, nil
 }

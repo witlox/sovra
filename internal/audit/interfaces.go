@@ -65,6 +65,16 @@ type ExportRequest struct {
 	Format ExportFormat
 }
 
+// SIEMConfig holds configuration for SIEM forwarding.
+type SIEMConfig struct {
+	Endpoint    string
+	APIKey      string
+	Timeout     time.Duration
+	RetryCount  int
+	BatchSize   int
+	Enabled     bool
+}
+
 // Service handles audit business logic.
 type Service interface {
 	// Log creates a new audit event.
@@ -91,4 +101,19 @@ type AuditStats struct {
 	EventsByOrg     map[string]int64
 	UniqueActors    int64
 	TimeRange       time.Duration
+}
+
+// NewAuditService creates a new audit service using a repository that implements the Repository interface.
+// Pass a *postgres.AuditRepository from pkg/postgres to use the PostgreSQL implementation.
+func NewAuditService(repo Repository) Service {
+	return NewService(repo, &noopForwarder{}, &chainVerifier{repo: repo})
+}
+
+// NewAuditServiceWithSIEM creates a new audit service with SIEM forwarding.
+func NewAuditServiceWithSIEM(repo Repository, siemConfig *SIEMConfig) Service {
+	var forwarder Forwarder = &noopForwarder{}
+	if siemConfig != nil && siemConfig.Enabled {
+		forwarder = newHTTPForwarder(siemConfig)
+	}
+	return NewService(repo, forwarder, &chainVerifier{repo: repo})
 }
