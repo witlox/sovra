@@ -5,7 +5,7 @@ import (
 	"crypto/ed25519"
 	"time"
 
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // Generator handles CRK generation with Shamir Secret Sharing.

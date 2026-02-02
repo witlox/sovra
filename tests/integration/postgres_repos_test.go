@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq" // PostgreSQL driver
-	"github.com/sovra-project/sovra/internal/audit"
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/pkg/postgres"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/postgres"
 )
 
 // TestPostgresRepositoriesIntegration tests all postgres repositories.

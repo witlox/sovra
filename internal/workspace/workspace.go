@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/sovra-project/sovra/pkg/errors"
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/pkg/vault"
+	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/vault"
 )
 
 const (

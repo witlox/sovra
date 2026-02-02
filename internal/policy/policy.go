@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-policy-agent/opa/ast"
-	"github.com/sovra-project/sovra/pkg/errors"
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // NewService creates a new policy service (deprecated, use NewPolicyService instead).

@@ -4,7 +4,7 @@ package workspace
 import (
 	"context"
 
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // Repository defines workspace persistence operations.

@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/sovra-project/sovra/internal/federation"
-	"github.com/sovra-project/sovra/pkg/errors"
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/internal/federation"
+	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // FederationRepository is an in-memory federation repository.

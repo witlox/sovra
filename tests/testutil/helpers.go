@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/sovra-project/sovra/pkg/models"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // =============================================================================

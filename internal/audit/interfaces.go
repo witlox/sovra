@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // Repository defines audit log persistence operations.

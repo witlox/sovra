@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/sovra-project/sovra/internal/edge"
-	"github.com/sovra-project/sovra/pkg/errors"
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/internal/edge"
+	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // EdgeRepository is an in-memory edge node repository.

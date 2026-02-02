@@ -30,7 +30,7 @@ jobs:
         id: version
         run: |
           YEAR=$(date +%Y)
-          MAJOR=1
+          MAJOR=2
           COMMIT_COUNT=$(git rev-list --count HEAD)
           VERSION="${YEAR}.${MAJOR}.${COMMIT_COUNT}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT

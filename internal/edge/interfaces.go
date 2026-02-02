@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/pkg/vault"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/vault"
 )
 
 // Repository handles edge node persistence.

@@ -12,14 +12,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/sovra-project/sovra/internal/audit"
-	"github.com/sovra-project/sovra/internal/crk"
-	"github.com/sovra-project/sovra/internal/edge"
-	"github.com/sovra-project/sovra/internal/federation"
-	"github.com/sovra-project/sovra/internal/policy"
-	"github.com/sovra-project/sovra/internal/workspace"
-	apierrors "github.com/sovra-project/sovra/pkg/errors"
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/crk"
+	"github.com/witlox/sovra/internal/edge"
+	"github.com/witlox/sovra/internal/federation"
+	"github.com/witlox/sovra/internal/policy"
+	"github.com/witlox/sovra/internal/workspace"
+	apierrors "github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // =============================================================================

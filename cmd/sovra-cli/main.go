@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sovra-project/sovra/internal/crk"
-	"github.com/sovra-project/sovra/pkg/models"
 	"github.com/spf13/cobra"
+	"github.com/witlox/sovra/internal/crk"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 var version = "dev"

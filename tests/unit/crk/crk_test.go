@@ -5,11 +5,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sovra-project/sovra/internal/crk"
-	"github.com/sovra-project/sovra/pkg/errors"
-	"github.com/sovra-project/sovra/pkg/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/internal/crk"
+	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 func TestCRKGeneration(t *testing.T) {

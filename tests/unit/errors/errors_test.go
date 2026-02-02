@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	pkgErrors "github.com/sovra-project/sovra/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	pkgErrors "github.com/witlox/sovra/pkg/errors"
 )
 
 func TestValidationError(t *testing.T) {

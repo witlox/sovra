@@ -5,8 +5,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/sovra-project/sovra/internal/policy"
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/internal/policy"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // OPAClient is an in-memory OPA client for testing.

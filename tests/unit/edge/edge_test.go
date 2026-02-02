@@ -5,13 +5,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sovra-project/sovra/internal/edge"
-	"github.com/sovra-project/sovra/pkg/errors"
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/tests/testutil"
-	"github.com/sovra-project/sovra/tests/testutil/inmemory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/internal/edge"
+	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/tests/testutil"
+	"github.com/witlox/sovra/tests/testutil/inmemory"
 )
 
 // createTestService creates an edge service with inmemory dependencies.

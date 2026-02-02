@@ -11,12 +11,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sovra-project/sovra/internal/audit"
-	"github.com/sovra-project/sovra/internal/config"
-	"github.com/sovra-project/sovra/internal/policy"
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/pkg/opa"
-	"github.com/sovra-project/sovra/pkg/postgres"
+	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/config"
+	"github.com/witlox/sovra/internal/policy"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/opa"
+	"github.com/witlox/sovra/pkg/postgres"
 )
 
 var version = "dev"

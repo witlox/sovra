@@ -10,12 +10,12 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/sovra-project/sovra/internal/api"
-	"github.com/sovra-project/sovra/internal/workspace"
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/tests/testutil/inmemory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/internal/api"
+	"github.com/witlox/sovra/internal/workspace"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/tests/testutil/inmemory"
 )
 
 // TestWorkspaceHandlerCreate tests the workspace Create handler.

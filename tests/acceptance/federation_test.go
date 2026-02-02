@@ -5,11 +5,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/tests/mocks"
-	"github.com/sovra-project/sovra/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/tests/mocks"
+	"github.com/witlox/sovra/tests/testutil"
 )
 
 // TestFederationEstablishment tests federation as described in docs/concepts.md.

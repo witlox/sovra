@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/sovra-project/sovra/internal/crk"
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/internal/crk"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // CRKService implements crk.Manager and crk.CeremonyManager for testing.

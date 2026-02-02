@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sovra-project/sovra/internal/config"
-	"github.com/sovra-project/sovra/internal/crk"
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/pkg/vault"
+	"github.com/witlox/sovra/internal/config"
+	"github.com/witlox/sovra/internal/crk"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/vault"
 )
 
 var version = "dev"

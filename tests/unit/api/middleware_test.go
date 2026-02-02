@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/sovra-project/sovra/internal/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/internal/api"
 )
 
 // TestInMemoryRateLimiter tests the in-memory rate limiter.

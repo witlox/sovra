@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/tests/mocks"
-	"github.com/sovra-project/sovra/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/tests/mocks"
+	"github.com/witlox/sovra/tests/testutil"
 )
 
 // TestPolicyEnforcement tests policy enforcement as described in docs/concepts.md.

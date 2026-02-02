@@ -8,14 +8,14 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
-	"github.com/sovra-project/sovra/internal/federation"
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/pkg/postgres"
-	"github.com/sovra-project/sovra/pkg/vault"
-	"github.com/sovra-project/sovra/tests/integration"
-	"github.com/sovra-project/sovra/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/internal/federation"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/postgres"
+	"github.com/witlox/sovra/pkg/vault"
+	"github.com/witlox/sovra/tests/integration"
+	"github.com/witlox/sovra/tests/testutil"
 )
 
 // TestProductionFederationEstablishment tests federation establishment with production implementations.

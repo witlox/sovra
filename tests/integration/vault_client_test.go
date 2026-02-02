@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sovra-project/sovra/pkg/vault"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/pkg/vault"
 )
 
 // TestVaultClientIntegration tests the vault client with a real Vault instance.

@@ -8,15 +8,15 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
-	"github.com/sovra-project/sovra/internal/audit"
-	"github.com/sovra-project/sovra/internal/workspace"
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/pkg/postgres"
-	"github.com/sovra-project/sovra/pkg/vault"
-	"github.com/sovra-project/sovra/tests/integration"
-	"github.com/sovra-project/sovra/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/workspace"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/postgres"
+	"github.com/witlox/sovra/pkg/vault"
+	"github.com/witlox/sovra/tests/integration"
+	"github.com/witlox/sovra/tests/testutil"
 )
 
 // wsNoOpVerifier is a no-op implementation of audit.Verifier for workspace tests.

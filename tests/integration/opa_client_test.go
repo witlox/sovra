@@ -5,10 +5,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/pkg/opa"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/opa"
 )
 
 // TestOPAClientIntegration tests the OPA client with a real OPA instance.

@@ -7,11 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sovra-project/sovra/internal/api"
-	"github.com/sovra-project/sovra/tests/testutil"
-	"github.com/sovra-project/sovra/tests/testutil/inmemory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/witlox/sovra/internal/api"
+	"github.com/witlox/sovra/tests/testutil"
+	"github.com/witlox/sovra/tests/testutil/inmemory"
 )
 
 // createTestRouter creates a router with inmemory dependencies.

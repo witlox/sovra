@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sovra-project/sovra/internal/api"
-	"github.com/sovra-project/sovra/pkg/errors"
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/internal/api"
+	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // MTLSVerifier is an in-memory mTLS verifier.

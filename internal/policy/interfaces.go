@@ -4,7 +4,7 @@ package policy
 import (
 	"context"
 
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // Repository defines policy persistence operations.

@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/vault/shamir"
-	"github.com/sovra-project/sovra/pkg/errors"
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // NewManager creates a new CRK Manager implementation.

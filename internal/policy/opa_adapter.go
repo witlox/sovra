@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sovra-project/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // opaHTTPClient is a simple HTTP client for OPA operations.
