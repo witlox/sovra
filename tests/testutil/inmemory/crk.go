@@ -2,6 +2,7 @@
 package inmemory
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"sync"
 
@@ -43,7 +44,7 @@ func (s *CRKService) Generate(orgID string, totalShares, threshold int) (*models
 }
 
 // Reconstruct rebuilds the private key from shares.
-func (s *CRKService) Reconstruct(shares []models.CRKShare, publicKey []byte) (interface{}, error) {
+func (s *CRKService) Reconstruct(shares []models.CRKShare, publicKey []byte) (ed25519.PrivateKey, error) {
 	return s.manager.Reconstruct(shares, publicKey)
 }
 
@@ -68,7 +69,7 @@ func (s *CRKService) ValidateShares(shares []models.CRKShare, threshold int, pub
 }
 
 // RegenerateShares creates new shares from a private key.
-func (s *CRKService) RegenerateShares(privateKey interface{}, totalShares, threshold int) ([]models.CRKShare, error) {
+func (s *CRKService) RegenerateShares(privateKey ed25519.PrivateKey, totalShares, threshold int) ([]models.CRKShare, error) {
 	return nil, nil // Simplified for testing
 }
 
