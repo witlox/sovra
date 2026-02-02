@@ -109,3 +109,29 @@ func NewPolicyService(
 		audit: audit,
 	}
 }
+
+// OPAClientAdapter wraps the opa.Client to implement the OPAClient interface.
+type OPAClientAdapter struct {
+	address string
+}
+
+// NewOPAClientAdapter creates a new OPA client adapter.
+func NewOPAClientAdapter(address string) OPAClient {
+	return &OPAClientAdapter{address: address}
+}
+
+func (a *OPAClientAdapter) UploadPolicy(ctx context.Context, id string, policy string) error {
+	// Lazy import to avoid circular dependencies
+	client := newOPAHTTPClient(a.address)
+	return client.uploadPolicy(ctx, id, policy)
+}
+
+func (a *OPAClientAdapter) DeletePolicy(ctx context.Context, id string) error {
+	client := newOPAHTTPClient(a.address)
+	return client.deletePolicy(ctx, id)
+}
+
+func (a *OPAClientAdapter) EvaluateDecision(ctx context.Context, path string, input models.PolicyInput) (*OPADecisionResult, error) {
+	client := newOPAHTTPClient(a.address)
+	return client.evaluateDecision(ctx, path, input)
+}

@@ -62,6 +62,12 @@ linters:
           - noctx
           - gocritic
           - prealloc
+      - path: "cmd/"
+        linters:
+          - errcheck
+          - gocritic
+          - sloglint
+          - gosec
       - path: "tests/"
         linters:
           - gosec

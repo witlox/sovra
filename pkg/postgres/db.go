@@ -70,13 +70,13 @@ func New(cfg *Config) (*DB, error) {
 }
 
 // NewFromDSN creates a new database connection from a DSN string.
-func NewFromDSN(dsn string) (*DB, error) {
+func NewFromDSN(ctx context.Context, dsn string) (*DB, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	if err := db.PingContext(context.Background()); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -86,6 +86,18 @@ func NewFromDSN(dsn string) (*DB, error) {
 // RunMigrations runs all database migrations.
 func (d *DB) RunMigrations(ctx context.Context) error {
 	return RunMigrations(ctx, d.DB)
+}
+
+// Connect creates a new database connection from a DSN string.
+// This is a convenience function for service initialization.
+func Connect(ctx context.Context, dsn string) (*DB, error) {
+	return NewFromDSN(ctx, dsn)
+}
+
+// Migrate runs database migrations on the given database.
+// This is a convenience function for service initialization.
+func Migrate(ctx context.Context, db *DB) error {
+	return db.RunMigrations(ctx)
 }
 
 // Tx represents a database transaction.

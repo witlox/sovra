@@ -44,6 +44,8 @@ type Manager interface {
 	ShareValidator
 	// RegenerateShares creates new shares from an existing CRK.
 	RegenerateShares(privateKey ed25519.PrivateKey, totalShares, threshold int) ([]models.CRKShare, error)
+	// GetShares returns the shares for a CRK (used during key generation ceremony).
+	GetShares(crkID string) ([]models.CRKShare, error)
 }
 
 // Ceremony represents a key ceremony for CRK operations.

@@ -45,6 +45,12 @@ type HealthStatus struct {
 	ClusterID   string
 }
 
+// NewClient creates a new Vault client with minimal configuration.
+// This is a convenience function for service initialization.
+func NewClient(cfg Config) (*Client, error) {
+	return New(&cfg, nil)
+}
+
 // New creates a new Vault client with the given configuration.
 func New(cfg *Config, logger *slog.Logger) (*Client, error) {
 	if cfg == nil {
