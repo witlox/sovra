@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	// pq is the PostgreSQL driver for database/sql
 	_ "github.com/lib/pq"
 )
 
@@ -61,7 +62,7 @@ func New(cfg *Config) (*DB, error) {
 	db.SetMaxIdleConns(cfg.MaxIdleConns)
 	db.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -75,7 +76,7 @@ func NewFromDSN(dsn string) (*DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -112,7 +113,7 @@ func (d *DB) WithTx(ctx context.Context, fn func(*Tx) error) error {
 
 	if err := fn(tx); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("tx error: %w, rollback error: %v", err, rbErr)
+			return fmt.Errorf("tx error: %w, rollback error: %w", err, rbErr)
 		}
 		return err
 	}
@@ -126,10 +127,16 @@ func (d *DB) WithTx(ctx context.Context, fn func(*Tx) error) error {
 
 // HealthCheck checks database connectivity.
 func (d *DB) HealthCheck(ctx context.Context) error {
-	return d.PingContext(ctx)
+	if err := d.PingContext(ctx); err != nil {
+		return fmt.Errorf("database health check failed: %w", err)
+	}
+	return nil
 }
 
 // Close closes the database connection pool.
 func (d *DB) Close() error {
-	return d.DB.Close()
+	if err := d.DB.Close(); err != nil {
+		return fmt.Errorf("failed to close database: %w", err)
+	}
+	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"sync"
 	"time"
 
@@ -307,7 +308,7 @@ func (c *ceremonyManagerImpl) CompleteCeremony(ceremonyID string, witness string
 		// Use the collected shares to sign (data should be stored in ceremony metadata)
 		privKey, err := c.manager.Reconstruct(ceremony.Shares, crk.PublicKey)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("reconstruct private key: %w", err)
 		}
 		// Sign a test message to prove reconstruction worked
 		testData := []byte("ceremony-complete-" + ceremonyID)
@@ -352,13 +353,13 @@ func NewContextGenerator(m Manager) *ContextGenerator {
 func (g *ContextGenerator) Generate(ctx context.Context, orgID string, threshold, shareCount int) (*models.CRK, []*models.CRKShare, error) {
 	select {
 	case <-ctx.Done():
-		return nil, nil, ctx.Err()
+		return nil, nil, fmt.Errorf("context cancelled: %w", ctx.Err())
 	default:
 	}
 
 	crk, err := g.manager.Generate(orgID, shareCount, threshold)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("generate CRK: %w", err)
 	}
 
 	// Get the real SSS shares from the manager
@@ -405,7 +406,7 @@ func NewContextReconstructor(m Manager) *ContextReconstructor {
 func (r *ContextReconstructor) Reconstruct(ctx context.Context, shares []*models.CRKShare, threshold int) ([]byte, error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
 	default:
 	}
 

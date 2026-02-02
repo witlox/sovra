@@ -75,9 +75,10 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 			wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
+			//nolint:contextcheck // We're using r.Context() inside the defer
 			defer func() {
 				requestID, _ := r.Context().Value(ContextKeyRequestID).(string)
-				logger.Info("http request",
+				logger.InfoContext(r.Context(), "http request",
 					"method", r.Method,
 					"path", r.URL.Path,
 					"status", wrapped.statusCode,
@@ -243,10 +244,11 @@ func RecoveryMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			//nolint:contextcheck // We're using r.Context() inside the defer
 			defer func() {
 				if err := recover(); err != nil {
 					requestID, _ := r.Context().Value(ContextKeyRequestID).(string)
-					logger.Error("panic recovered",
+					logger.ErrorContext(r.Context(), "panic recovered",
 						"error", err,
 						"request_id", requestID,
 						"path", r.URL.Path,

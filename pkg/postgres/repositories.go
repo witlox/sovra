@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -62,7 +63,7 @@ func (r *OrganizationRepository) Get(ctx context.Context, id string) (*models.Or
 		`SELECT id, name, public_key, created_at, updated_at FROM organizations WHERE id = $1`,
 		uid,
 	).Scan(&org.ID, &org.Name, &org.PublicKey, &org.CreatedAt, &org.UpdatedAt)
-	if err == sql.ErrNoRows {
+	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
 	if err != nil {
@@ -129,7 +130,10 @@ func (r *OrganizationRepository) List(ctx context.Context, limit, offset int) ([
 		}
 		orgs = append(orgs, org)
 	}
-	return orgs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate organizations: %w", err)
+	}
+	return orgs, nil
 }
 
 // =============================================================================
@@ -226,7 +230,7 @@ func (r *WorkspaceRepository) Get(ctx context.Context, id string) (*models.Works
 		 FROM workspaces WHERE id = $1`,
 		uid,
 	).Scan(&ws.ID, &ws.Name, &ws.OwnerOrgID, &ws.Classification, &ws.Mode, &ws.Purpose, &ws.Status, &ws.Archived, &ws.CreatedAt, &ws.UpdatedAt, &expiresAt)
-	if err == sql.ErrNoRows {
+	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
 	if err != nil {
@@ -326,7 +330,10 @@ func (r *WorkspaceRepository) List(ctx context.Context, orgID string, limit, off
 		}
 		workspaces = append(workspaces, ws)
 	}
-	return workspaces, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate workspaces: %w", err)
+	}
+	return workspaces, nil
 }
 
 // Update updates an existing workspace.
@@ -436,7 +443,10 @@ func (r *WorkspaceRepository) ListByParticipant(ctx context.Context, orgID strin
 		}
 		workspaces = append(workspaces, ws)
 	}
-	return workspaces, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate workspaces by participant: %w", err)
+	}
+	return workspaces, nil
 }
 
 // =============================================================================
@@ -503,7 +513,7 @@ func (r *FederationRepository) Get(ctx context.Context, id string) (*models.Fede
 		 FROM federations WHERE id = $1`,
 		uid,
 	).Scan(&fed.ID, &fed.OrgID, &fed.PartnerOrgID, &fed.PartnerURL, &fed.PartnerCert, &fed.Status, &fed.CreatedAt, &establishedAt, &lastHealthCheck)
-	if err == sql.ErrNoRows {
+	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
 	if err != nil {
@@ -534,7 +544,7 @@ func (r *FederationRepository) GetByPartner(ctx context.Context, localOrgID, par
 		`SELECT id FROM federations WHERE org_id = $1 AND partner_org_id = $2`,
 		localUID, partnerUID,
 	).Scan(&id)
-	if err == sql.ErrNoRows {
+	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
 	if err != nil {
@@ -571,7 +581,10 @@ func (r *FederationRepository) List(ctx context.Context, orgID string) ([]*model
 		}
 		federations = append(federations, fed)
 	}
-	return federations, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate federations: %w", err)
+	}
+	return federations, nil
 }
 
 // Update updates an existing federation.
@@ -684,7 +697,7 @@ func (r *PolicyRepository) Get(ctx context.Context, id string) (*models.Policy, 
 		 FROM policies WHERE id = $1`,
 		uid,
 	).Scan(&pol.ID, &pol.Name, &orgID, &workspaceID, &pol.Rego, &pol.Version, &pol.CreatedAt, &pol.UpdatedAt)
-	if err == sql.ErrNoRows {
+	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
 	if err != nil {
@@ -727,7 +740,10 @@ func (r *PolicyRepository) GetByWorkspace(ctx context.Context, workspaceID strin
 		}
 		policies = append(policies, pol)
 	}
-	return policies, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate policies: %w", err)
+	}
+	return policies, nil
 }
 
 // GetOrganizationPolicies retrieves organization-wide policies.
@@ -758,7 +774,10 @@ func (r *PolicyRepository) GetOrganizationPolicies(ctx context.Context, orgID st
 		}
 		policies = append(policies, pol)
 	}
-	return policies, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate organization policies: %w", err)
+	}
+	return policies, nil
 }
 
 // Update updates an existing policy.
@@ -823,7 +842,10 @@ func (r *PolicyRepository) List(ctx context.Context, limit, offset int) ([]*mode
 		}
 		policies = append(policies, pol)
 	}
-	return policies, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate policies by workspace: %w", err)
+	}
+	return policies, nil
 }
 
 // =============================================================================
@@ -880,7 +902,7 @@ func (r *AuditRepository) Get(ctx context.Context, id string) (*models.AuditEven
 		 FROM audit_events WHERE id = $1`,
 		uid,
 	).Scan(&event.ID, &event.Timestamp, &event.OrgID, &workspace, &event.EventType, &event.Actor, &purpose, &event.Result, &dataHash, &metadata)
-	if err == sql.ErrNoRows {
+	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
 	if err != nil {
@@ -973,7 +995,10 @@ func (r *AuditRepository) Query(ctx context.Context, query audit.QueryParams) ([
 		}
 		events = append(events, event)
 	}
-	return events, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate audit events: %w", err)
+	}
+	return events, nil
 }
 
 // Count returns the count of events matching criteria.
@@ -1080,7 +1105,7 @@ func (r *CRKRepository) Get(ctx context.Context, id string) (*models.CRK, error)
 		 FROM crks WHERE id = $1`,
 		uid,
 	).Scan(&crk.ID, &crk.OrgID, &crk.PublicKey, &crk.Version, &crk.Threshold, &crk.TotalShares, &crk.Status, &crk.CreatedAt, &rotatedAt)
-	if err == sql.ErrNoRows {
+	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
 	if err != nil {
@@ -1104,7 +1129,7 @@ func (r *CRKRepository) GetByOrgID(ctx context.Context, orgID string) (*models.C
 		`SELECT id FROM crks WHERE org_id = $1 AND status = 'active' ORDER BY version DESC LIMIT 1`,
 		uid,
 	).Scan(&id)
-	if err == sql.ErrNoRows {
+	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
 	if err != nil {
@@ -1207,7 +1232,10 @@ func (r *CRKRepository) GetShares(ctx context.Context, crkID string) ([]models.C
 		}
 		shares = append(shares, share)
 	}
-	return shares, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate CRK shares: %w", err)
+	}
+	return shares, nil
 }
 
 // =============================================================================
@@ -1267,7 +1295,7 @@ func (r *EdgeNodeRepository) Get(ctx context.Context, id string) (*models.EdgeNo
 		 FROM edge_nodes WHERE id = $1`,
 		uid,
 	).Scan(&node.ID, &node.OrgID, &node.Name, &node.VaultAddress, &node.Status, &node.Classification, &lastHeartbeat, &node.Certificate)
-	if err == sql.ErrNoRows {
+	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
 	if err != nil {
@@ -1307,7 +1335,10 @@ func (r *EdgeNodeRepository) GetByOrgID(ctx context.Context, orgID string) ([]*m
 		}
 		nodes = append(nodes, node)
 	}
-	return nodes, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate edge nodes: %w", err)
+	}
+	return nodes, nil
 }
 
 // Update updates edge node status.

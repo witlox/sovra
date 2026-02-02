@@ -11,37 +11,99 @@ formatters:
 
 linters:
   enable:
-    - errcheck      # Check for unchecked errors
-    - govet         # Go vet checks
-    - ineffassign   # Detect ineffective assignments
-    - staticcheck   # Static analysis
-    - unused        # Detect unused code
-    - misspell      # Detect spelling errors
-    - gosec         # Security checks
-    - bodyclose     # Check HTTP response body is closed
-    - prealloc      # Suggest preallocations
-    - unconvert     # Remove unnecessary conversions
+    # Default/essential
+    - errcheck        # Check for unchecked errors
+    - govet           # Go vet checks
+    - ineffassign     # Detect ineffective assignments
+    - staticcheck     # Static analysis
+    - unused          # Detect unused code
+    
+    # Code quality
+    - gocritic        # Bugs, performance, style issues
+    - revive          # Modern golint replacement
+    - misspell        # Spelling errors
+    - unconvert       # Remove unnecessary conversions
+    - prealloc        # Suggest slice preallocations
+    
+    # Error handling
+    - errorlint       # Proper error wrapping (Go 1.13+)
+    - nilerr          # Nil error returns
+    - wrapcheck       # Wrap external errors
+    
+    # Security
+    - gosec           # Security checks
+    - bodyclose       # HTTP response body closing
+    
+    # Context handling
+    - noctx           # Missing context.Context usage
+    - contextcheck    # Context inheritance validation
+    
+    # Database
+    - sqlclosecheck   # SQL resource closing
+    
+    # Testing
+    - testifylint     # testify usage checks
+    
+    # Logging
+    - sloglint        # slog consistency
+    
+    # Type safety
+    - exhaustive      # Enum switch exhaustiveness
+
   settings:
     errcheck:
       check-type-assertions: false
       check-blank: false
-      exclude-functions:
-        - io.Close
-        - (*os.File).Close
-        - (io.Closer).Close
-        - (*database/sql.Rows).Close
     govet:
       disable:
         - fieldalignment  # Too noisy, minor optimization
     gosec:
       excludes:
-        - G104 # Audit errors not checked (too noisy for now)
-    misspell:
-      locale: US
+        - G104 # Unchecked errors (covered by errcheck)
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam       # Too strict for this codebase
+        - rangeValCopy    # Often intentional
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+          disabled: true  # Too noisy
+        - name: increment-decrement
+        - name: var-declaration
+        - name: package-comments
+          disabled: true  # Optional
+        - name: unreachable-code
     staticcheck:
       checks:
         - all
-        - "-SA1019" # Disable deprecated warnings (OPA v0->v1 migration)
+        - "-SA1019"  # Disable deprecated warnings (OPA v0->v1)
+    exhaustive:
+      default-signifies-exhaustive: true
+    wrapcheck:
+      ignore-interfaces:
+        - net.Error
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - errors.Join(
+        - .Wrap(
+        - .Wrapf(
+        - .WithMessage(
+        - .WithStack(
+    sloglint:
+      kv-only: false
+      attr-only: false
+      context: all
 
 issues:
   exclude-rules:
@@ -49,9 +111,15 @@ issues:
       linters:
         - gosec
         - errcheck
+        - wrapcheck
+        - contextcheck
     - path: tests/
       linters:
         - gosec
         - errcheck
+        - wrapcheck
+        - contextcheck
     - path: internal/edge/edge.go
       text: "error is not nil"
+      linters:
+        - nilerr

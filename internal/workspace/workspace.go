@@ -121,17 +121,25 @@ func (s *productionService) Create(ctx context.Context, req CreateRequest) (*mod
 }
 
 func (s *productionService) Get(ctx context.Context, id string) (*models.Workspace, error) {
-	return s.repo.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace: %w", err)
+	}
+	return ws, nil
 }
 
 func (s *productionService) List(ctx context.Context, orgID string, limit, offset int) ([]*models.Workspace, error) {
-	return s.repo.List(ctx, orgID, limit, offset)
+	workspaces, err := s.repo.List(ctx, orgID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workspaces: %w", err)
+	}
+	return workspaces, nil
 }
 
 func (s *productionService) AddParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
 	// Check if org is already a participant
@@ -174,7 +182,7 @@ func (s *productionService) AddParticipant(ctx context.Context, workspaceID, org
 	ws.UpdatedAt = time.Now()
 
 	if err := s.repo.Update(ctx, ws); err != nil {
-		return err
+		return fmt.Errorf("failed to update workspace: %w", err)
 	}
 
 	// Create audit event
@@ -200,7 +208,7 @@ func (s *productionService) AddParticipant(ctx context.Context, workspaceID, org
 func (s *productionService) RemoveParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
 	// Cannot remove the owner
@@ -238,7 +246,7 @@ func (s *productionService) RemoveParticipant(ctx context.Context, workspaceID, 
 	ws.UpdatedAt = time.Now()
 
 	if err := s.repo.Update(ctx, ws); err != nil {
-		return err
+		return fmt.Errorf("failed to update workspace: %w", err)
 	}
 
 	// Create audit event
@@ -264,7 +272,7 @@ func (s *productionService) RemoveParticipant(ctx context.Context, workspaceID, 
 func (s *productionService) Archive(ctx context.Context, workspaceID string, signature []byte) error {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
 	// Verify CRK signature if provided
@@ -282,13 +290,16 @@ func (s *productionService) Archive(ctx context.Context, workspaceID string, sig
 	ws.Status = models.WorkspaceStatusArchived
 	ws.UpdatedAt = time.Now()
 
-	return s.repo.Update(ctx, ws)
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return fmt.Errorf("failed to update workspace: %w", err)
+	}
+	return nil
 }
 
 func (s *productionService) Delete(ctx context.Context, workspaceID string, signatures map[string][]byte) error {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
 	// Verify signatures from all participants
@@ -308,13 +319,16 @@ func (s *productionService) Delete(ctx context.Context, workspaceID string, sign
 		}
 	}
 
-	return s.repo.Delete(ctx, workspaceID)
+	if err := s.repo.Delete(ctx, workspaceID); err != nil {
+		return fmt.Errorf("failed to delete workspace: %w", err)
+	}
+	return nil
 }
 
 func (s *productionService) Encrypt(ctx context.Context, workspaceID string, plaintext []byte) ([]byte, error) {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get workspace: %w", err)
 	}
 
 	if ws.Archived || ws.Status == models.WorkspaceStatusArchived {
@@ -371,7 +385,7 @@ func (s *productionService) Encrypt(ctx context.Context, workspaceID string, pla
 func (s *productionService) Decrypt(ctx context.Context, workspaceID string, ciphertext []byte) ([]byte, error) {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get workspace: %w", err)
 	}
 
 	// Get any participant's wrapped DEK to unwrap
@@ -438,7 +452,7 @@ func (s *productionService) wrapDEKForOrg(ctx context.Context, dek []byte, orgID
 	// Encrypt DEK with org's KEK via Vault transit
 	ciphertext, err := s.transit.Encrypt(ctx, keyName, dek)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to encrypt DEK: %w", err)
 	}
 
 	return []byte(ciphertext), nil
@@ -451,7 +465,7 @@ func (s *productionService) unwrapDEKForOrg(ctx context.Context, wrappedDEK []by
 	// Decrypt DEK with org's KEK via Vault transit
 	plaintext, err := s.transit.Decrypt(ctx, keyName, string(wrappedDEK))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to decrypt DEK: %w", err)
 	}
 
 	return plaintext, nil
@@ -460,24 +474,28 @@ func (s *productionService) unwrapDEKForOrg(ctx context.Context, wrappedDEK []by
 // verifyCRKSignature verifies a signature using the org's CRK key in Vault.
 func (s *productionService) verifyCRKSignature(ctx context.Context, orgID string, data, signature []byte) (bool, error) {
 	keyName := "crk-" + orgID
-	return s.transit.Verify(ctx, keyName, data, string(signature))
+	valid, err := s.transit.Verify(ctx, keyName, data, string(signature))
+	if err != nil {
+		return false, fmt.Errorf("failed to verify signature: %w", err)
+	}
+	return valid, nil
 }
 
 // encryptAESGCM encrypts plaintext using AES-256-GCM.
 func encryptAESGCM(key, plaintext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
 	}
 
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
 	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
@@ -488,12 +506,12 @@ func encryptAESGCM(key, plaintext []byte) ([]byte, error) {
 func decryptAESGCM(key, ciphertext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
 	}
 
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
 	}
 
 	nonceSize := gcm.NonceSize()
@@ -502,7 +520,11 @@ func decryptAESGCM(key, ciphertext []byte) ([]byte, error) {
 	}
 
 	nonce, ciphertextData := ciphertext[:nonceSize], ciphertext[nonceSize:]
-	return gcm.Open(nil, nonce, ciphertextData, nil)
+	plaintext, err := gcm.Open(nil, nonce, ciphertextData, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt: %w", err)
+	}
+	return plaintext, nil
 }
 
 // serviceImpl is the legacy implementation for testing with mocks.
@@ -529,36 +551,44 @@ func (s *serviceImpl) Create(ctx context.Context, req CreateRequest) (*models.Wo
 
 	dek, err := s.keyMgr.GenerateDEK(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to generate DEK: %w", err)
 	}
 
 	for _, p := range req.Participants {
 		wrapped, err := s.keyMgr.WrapDEK(ctx, dek, []byte(p))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to wrap DEK: %w", err)
 		}
 		ws.DEKWrapped[p] = wrapped
 	}
 
 	if err := s.repo.Create(ctx, ws); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create workspace: %w", err)
 	}
 
 	return ws, nil
 }
 
 func (s *serviceImpl) Get(ctx context.Context, id string) (*models.Workspace, error) {
-	return s.repo.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace: %w", err)
+	}
+	return ws, nil
 }
 
 func (s *serviceImpl) List(ctx context.Context, orgID string, limit, offset int) ([]*models.Workspace, error) {
-	return s.repo.List(ctx, orgID, limit, offset)
+	workspaces, err := s.repo.List(ctx, orgID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workspaces: %w", err)
+	}
+	return workspaces, nil
 }
 
 func (s *serviceImpl) AddParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
 	for _, p := range ws.ParticipantOrgs {
@@ -569,13 +599,16 @@ func (s *serviceImpl) AddParticipant(ctx context.Context, workspaceID, orgID str
 
 	ws.ParticipantOrgs = append(ws.ParticipantOrgs, orgID)
 	ws.UpdatedAt = time.Now()
-	return s.repo.Update(ctx, ws)
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return fmt.Errorf("failed to update workspace: %w", err)
+	}
+	return nil
 }
 
 func (s *serviceImpl) RemoveParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
 	newParticipants := make([]string, 0, len(ws.ParticipantOrgs)-1)
@@ -588,27 +621,44 @@ func (s *serviceImpl) RemoveParticipant(ctx context.Context, workspaceID, orgID 
 	ws.ParticipantOrgs = newParticipants
 	delete(ws.DEKWrapped, orgID)
 	ws.UpdatedAt = time.Now()
-	return s.repo.Update(ctx, ws)
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return fmt.Errorf("failed to update workspace: %w", err)
+	}
+	return nil
 }
 
 func (s *serviceImpl) Archive(ctx context.Context, workspaceID string, signature []byte) error {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 	ws.Archived = true
 	ws.UpdatedAt = time.Now()
-	return s.repo.Update(ctx, ws)
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return fmt.Errorf("failed to update workspace: %w", err)
+	}
+	return nil
 }
 
 func (s *serviceImpl) Delete(ctx context.Context, workspaceID string, signatures map[string][]byte) error {
-	return s.repo.Delete(ctx, workspaceID)
+	if err := s.repo.Delete(ctx, workspaceID); err != nil {
+		return fmt.Errorf("failed to delete workspace: %w", err)
+	}
+	return nil
 }
 
 func (s *serviceImpl) Encrypt(ctx context.Context, workspaceID string, plaintext []byte) ([]byte, error) {
-	return s.crypto.Encrypt(ctx, workspaceID, plaintext)
+	result, err := s.crypto.Encrypt(ctx, workspaceID, plaintext)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt: %w", err)
+	}
+	return result, nil
 }
 
 func (s *serviceImpl) Decrypt(ctx context.Context, workspaceID string, ciphertext []byte) ([]byte, error) {
-	return s.crypto.Decrypt(ctx, workspaceID, ciphertext)
+	result, err := s.crypto.Decrypt(ctx, workspaceID, ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt: %w", err)
+	}
+	return result, nil
 }

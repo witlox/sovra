@@ -4,6 +4,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -36,10 +37,13 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 func readJSON(r *http.Request, v any) error {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read request body: %w", err)
 	}
 	defer func() { _ = r.Body.Close() }()
-	return json.Unmarshal(body, v)
+	if err := json.Unmarshal(body, v); err != nil {
+		return fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+	return nil
 }
 
 // handleError writes appropriate error response based on error type.

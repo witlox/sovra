@@ -72,10 +72,11 @@ func (s *serviceImpl) Log(ctx context.Context, event *models.AuditEvent) error {
 	event.Metadata["prev_hash"] = prevHash
 
 	if err := s.repo.Create(ctx, event); err != nil {
-		return err
+		return fmt.Errorf("failed to create audit event: %w", err)
 	}
 
 	// Forward asynchronously - don't block on failure
+	//nolint:contextcheck // Goroutine uses context.Background() intentionally
 	go func() {
 		_ = s.forwarder.Forward(context.Background(), event)
 	}()
@@ -90,7 +91,7 @@ func (s *serviceImpl) getPreviousChainHash(ctx context.Context, orgID string) (s
 		Limit: 1,
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to query previous chain hash: %w", err)
 	}
 	if len(events) == 0 {
 		return "genesis", nil
@@ -130,17 +131,25 @@ func computeChainHash(currentHash, prevHash string) string {
 }
 
 func (s *serviceImpl) Query(ctx context.Context, query QueryParams) ([]*models.AuditEvent, error) {
-	return s.repo.Query(ctx, query)
+	events, err := s.repo.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query audit events: %w", err)
+	}
+	return events, nil
 }
 
 func (s *serviceImpl) Get(ctx context.Context, id string) (*models.AuditEvent, error) {
-	return s.repo.Get(ctx, id)
+	event, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get audit event: %w", err)
+	}
+	return event, nil
 }
 
 func (s *serviceImpl) Export(ctx context.Context, req ExportRequest) ([]byte, error) {
 	events, err := s.repo.Query(ctx, req.Query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query audit events for export: %w", err)
 	}
 
 	if len(events) == 0 {
@@ -152,7 +161,11 @@ func (s *serviceImpl) Export(ctx context.Context, req ExportRequest) ([]byte, er
 
 	switch req.Format {
 	case ExportFormatJSON:
-		return json.MarshalIndent(events, "", "  ")
+		data, err := json.MarshalIndent(events, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal audit events to JSON: %w", err)
+		}
+		return data, nil
 	case ExportFormatCSV:
 		return s.exportCSV(events)
 	default:
@@ -167,7 +180,7 @@ func (s *serviceImpl) exportCSV(events []*models.AuditEvent) ([]byte, error) {
 	// Write header
 	header := []string{"id", "timestamp", "org_id", "workspace", "event_type", "actor", "result", "purpose", "data_hash"}
 	if err := writer.Write(header); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
 	// Write rows
@@ -184,7 +197,7 @@ func (s *serviceImpl) exportCSV(events []*models.AuditEvent) ([]byte, error) {
 			e.DataHash,
 		}
 		if err := writer.Write(row); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to write CSV row: %w", err)
 		}
 	}
 
@@ -193,7 +206,11 @@ func (s *serviceImpl) exportCSV(events []*models.AuditEvent) ([]byte, error) {
 }
 
 func (s *serviceImpl) VerifyIntegrity(ctx context.Context, since, until time.Time) (bool, error) {
-	return s.verifier.VerifyChain(ctx, since, until)
+	valid, err := s.verifier.VerifyChain(ctx, since, until)
+	if err != nil {
+		return false, fmt.Errorf("failed to verify chain integrity: %w", err)
+	}
+	return valid, nil
 }
 
 func (s *serviceImpl) GetStats(ctx context.Context, since time.Time) (*AuditStats, error) {
@@ -204,7 +221,7 @@ func (s *serviceImpl) GetStats(ctx context.Context, since time.Time) (*AuditStat
 
 	events, err := s.repo.Query(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query audit events: %w", err)
 	}
 
 	stats := &AuditStats{
@@ -247,7 +264,7 @@ func (v *chainVerifier) VerifyChain(ctx context.Context, since, until time.Time)
 		Limit: 100000,
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("query audit events for chain verification: %w", err)
 	}
 
 	if len(events) == 0 {
@@ -303,7 +320,7 @@ func (v *chainVerifier) VerifyChain(ctx context.Context, since, until time.Time)
 func (v *chainVerifier) VerifyEvent(ctx context.Context, eventID string) (bool, error) {
 	event, err := v.repo.Get(ctx, eventID)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to get event for verification: %w", err)
 	}
 
 	// Verify event data hash

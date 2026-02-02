@@ -85,12 +85,12 @@ func (s *legacyServiceAdapter) Init(ctx context.Context, req InitRequest) (*Init
 	s.orgID = req.OrgID
 	csr, err := s.certMgr.GenerateCSR(req.OrgID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("generate CSR: %w", err)
 	}
 
 	cert, err := s.certMgr.SignCSR(csr, req.CRKSignature)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("sign CSR: %w", err)
 	}
 
 	return &InitResponse{
@@ -102,8 +102,10 @@ func (s *legacyServiceAdapter) Init(ctx context.Context, req InitRequest) (*Init
 }
 
 func (s *legacyServiceAdapter) ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, signature []byte) error {
-	_, err := s.certMgr.ValidateCertificate(cert)
-	return err
+	if _, err := s.certMgr.ValidateCertificate(cert); err != nil {
+		return fmt.Errorf("validate certificate: %w", err)
+	}
+	return nil
 }
 
 func (s *legacyServiceAdapter) Establish(ctx context.Context, req EstablishRequest) (*models.Federation, error) {
@@ -123,38 +125,49 @@ func (s *legacyServiceAdapter) Establish(ctx context.Context, req EstablishReque
 	}
 
 	if err := s.repo.Create(ctx, fed); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create federation: %w", err)
 	}
 
 	return fed, nil
 }
 
 func (s *legacyServiceAdapter) Status(ctx context.Context, partnerOrgID string) (*models.Federation, error) {
-	return s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
+	fed, err := s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
+	if err != nil {
+		return nil, fmt.Errorf("get federation status: %w", err)
+	}
+	return fed, nil
 }
 
 func (s *legacyServiceAdapter) List(ctx context.Context) ([]*models.Federation, error) {
-	return s.repo.List(ctx, s.orgID)
+	feds, err := s.repo.List(ctx, s.orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list federations: %w", err)
+	}
+	return feds, nil
 }
 
 func (s *legacyServiceAdapter) Revoke(ctx context.Context, req RevocationRequest) error {
 	fed, err := s.repo.GetByPartner(ctx, s.orgID, req.PartnerOrgID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get federation for revoke: %w", err)
 	}
 
 	fed.Status = models.FederationStatusRevoked
 	if err := s.repo.Update(ctx, fed); err != nil {
-		return err
+		return fmt.Errorf("update federation status: %w", err)
 	}
 
-	return s.client.Close(req.PartnerOrgID)
+	if err := s.client.Close(req.PartnerOrgID); err != nil {
+		return fmt.Errorf("close mTLS client: %w", err)
+	}
+	return nil
 }
 
 func (s *legacyServiceAdapter) HealthCheck(ctx context.Context) ([]HealthCheckResult, error) {
 	feds, err := s.repo.List(ctx, s.orgID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list federations for health check: %w", err)
 	}
 
 	results := make([]HealthCheckResult, 0, len(feds))
@@ -180,7 +193,7 @@ func (s *legacyServiceAdapter) HealthCheck(ctx context.Context) ([]HealthCheckRe
 func (s *legacyServiceAdapter) RequestPublicKey(ctx context.Context, partnerOrgID string) ([]byte, error) {
 	resp, err := s.client.Request(ctx, partnerOrgID, "GET", "/v1/public-key", nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("request public key: %w", err)
 	}
 	return resp, nil
 }
@@ -336,19 +349,27 @@ func (s *productionServiceImpl) Establish(ctx context.Context, req EstablishRequ
 
 // Status returns the current status of a federation with a partner.
 func (s *productionServiceImpl) Status(ctx context.Context, partnerOrgID string) (*models.Federation, error) {
-	return s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
+	fed, err := s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
+	if err != nil {
+		return nil, fmt.Errorf("get federation by partner: %w", err)
+	}
+	return fed, nil
 }
 
 // List returns all federations for the current organization.
 func (s *productionServiceImpl) List(ctx context.Context) ([]*models.Federation, error) {
-	return s.repo.List(ctx, s.orgID)
+	feds, err := s.repo.List(ctx, s.orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list federations: %w", err)
+	}
+	return feds, nil
 }
 
 // Revoke revokes a federation and optionally notifies the partner.
 func (s *productionServiceImpl) Revoke(ctx context.Context, req RevocationRequest) error {
 	fed, err := s.repo.GetByPartner(ctx, s.orgID, req.PartnerOrgID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get federation for revoke: %w", err)
 	}
 
 	if req.RevokeCerts {
@@ -360,12 +381,12 @@ func (s *productionServiceImpl) Revoke(ctx context.Context, req RevocationReques
 	}
 
 	if req.NotifyPartner {
-		_, _ = s.mtlsManager.request(ctx, req.PartnerOrgID, "POST", "/v1/federation/revoked", []byte(fmt.Sprintf(`{"org_id":"%s"}`, s.orgID)))
+		_, _ = s.mtlsManager.request(ctx, req.PartnerOrgID, "POST", "/v1/federation/revoked", []byte(fmt.Sprintf(`{"org_id":%q}`, s.orgID)))
 	}
 
 	fed.Status = models.FederationStatusRevoked
 	if err := s.repo.Update(ctx, fed); err != nil {
-		return err
+		return fmt.Errorf("update federation status: %w", err)
 	}
 
 	s.mtlsManager.close(req.PartnerOrgID)
@@ -395,7 +416,7 @@ func (s *productionServiceImpl) Revoke(ctx context.Context, req RevocationReques
 func (s *productionServiceImpl) HealthCheck(ctx context.Context) ([]HealthCheckResult, error) {
 	feds, err := s.repo.List(ctx, s.orgID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list federations for health check: %w", err)
 	}
 
 	results := make([]HealthCheckResult, 0, len(feds))
@@ -593,5 +614,9 @@ func parseCertificatePEM(certPEM []byte) (*x509.Certificate, error) {
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode PEM block")
 	}
-	return x509.ParseCertificate(block.Bytes)
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse certificate: %w", err)
+	}
+	return cert, nil
 }

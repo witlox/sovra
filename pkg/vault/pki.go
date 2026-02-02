@@ -126,7 +126,7 @@ func (p *PKIClient) GenerateRoot(ctx context.Context, commonName string, ttl tim
 
 	secret, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to generate root CA", "common_name", commonName, "error", err)
+		p.logger.ErrorContext(ctx, "failed to generate root CA", "common_name", commonName, "error", err)
 		return nil, fmt.Errorf("vault: failed to generate root CA: %w", err)
 	}
 
@@ -145,7 +145,7 @@ func (p *PKIClient) GenerateRoot(ctx context.Context, commonName string, ttl tim
 		cert.SerialNumber = v
 	}
 
-	p.logger.Info("root CA generated", "common_name", commonName, "path", p.mountPath)
+	p.logger.InfoContext(ctx, "root CA generated", "common_name", commonName, "path", p.mountPath)
 	return cert, nil
 }
 
@@ -166,7 +166,7 @@ func (p *PKIClient) GenerateIntermediate(ctx context.Context, commonName string,
 
 	secret, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to generate intermediate CSR", "common_name", commonName, "error", err)
+		p.logger.ErrorContext(ctx, "failed to generate intermediate CSR", "common_name", commonName, "error", err)
 		return nil, fmt.Errorf("vault: failed to generate intermediate CSR: %w", err)
 	}
 
@@ -179,7 +179,7 @@ func (p *PKIClient) GenerateIntermediate(ctx context.Context, commonName string,
 		resp.CSR = v
 	}
 
-	p.logger.Info("intermediate CSR generated", "common_name", commonName)
+	p.logger.InfoContext(ctx, "intermediate CSR generated", "common_name", commonName)
 	return resp, nil
 }
 
@@ -195,7 +195,7 @@ func (p *PKIClient) SignIntermediate(ctx context.Context, csr string, commonName
 
 	secret, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to sign intermediate", "common_name", commonName, "error", err)
+		p.logger.ErrorContext(ctx, "failed to sign intermediate", "common_name", commonName, "error", err)
 		return nil, fmt.Errorf("vault: failed to sign intermediate: %w", err)
 	}
 
@@ -221,7 +221,7 @@ func (p *PKIClient) SignIntermediate(ctx context.Context, csr string, commonName
 		}
 	}
 
-	p.logger.Info("intermediate signed", "common_name", commonName)
+	p.logger.InfoContext(ctx, "intermediate signed", "common_name", commonName)
 	return cert, nil
 }
 
@@ -235,11 +235,11 @@ func (p *PKIClient) SetSignedIntermediate(ctx context.Context, certificate strin
 
 	_, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to set signed intermediate", "error", err)
+		p.logger.ErrorContext(ctx, "failed to set signed intermediate", "error", err)
 		return fmt.Errorf("vault: failed to set signed intermediate: %w", err)
 	}
 
-	p.logger.Info("signed intermediate set", "path", p.mountPath)
+	p.logger.InfoContext(ctx, "signed intermediate set", "path", p.mountPath)
 	return nil
 }
 
@@ -285,7 +285,7 @@ func (p *PKIClient) GenerateCSR(ctx context.Context, req *CSRRequest) (*CSRRespo
 
 	secret, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to generate CSR", "common_name", req.CommonName, "error", err)
+		p.logger.ErrorContext(ctx, "failed to generate CSR", "common_name", req.CommonName, "error", err)
 		return nil, fmt.Errorf("vault: failed to generate CSR: %w", err)
 	}
 
@@ -301,7 +301,7 @@ func (p *PKIClient) GenerateCSR(ctx context.Context, req *CSRRequest) (*CSRRespo
 		resp.PrivateKey = v
 	}
 
-	p.logger.Info("CSR generated", "common_name", req.CommonName)
+	p.logger.InfoContext(ctx, "CSR generated", "common_name", req.CommonName)
 	return resp, nil
 }
 
@@ -358,11 +358,11 @@ func (p *PKIClient) CreateRole(ctx context.Context, name string, config *RoleCon
 
 	_, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to create PKI role", "name", name, "error", err)
+		p.logger.ErrorContext(ctx, "failed to create PKI role", "name", name, "error", err)
 		return fmt.Errorf("vault: failed to create PKI role %s: %w", name, err)
 	}
 
-	p.logger.Info("PKI role created", "name", name, "path", p.mountPath)
+	p.logger.InfoContext(ctx, "PKI role created", "name", name, "path", p.mountPath)
 	return nil
 }
 
@@ -372,7 +372,7 @@ func (p *PKIClient) ReadRole(ctx context.Context, name string) (map[string]inter
 
 	secret, err := p.client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
-		p.logger.Error("failed to read PKI role", "name", name, "error", err)
+		p.logger.ErrorContext(ctx, "failed to read PKI role", "name", name, "error", err)
 		return nil, fmt.Errorf("vault: failed to read PKI role %s: %w", name, err)
 	}
 
@@ -389,11 +389,11 @@ func (p *PKIClient) DeleteRole(ctx context.Context, name string) error {
 
 	_, err := p.client.Logical().DeleteWithContext(ctx, path)
 	if err != nil {
-		p.logger.Error("failed to delete PKI role", "name", name, "error", err)
+		p.logger.ErrorContext(ctx, "failed to delete PKI role", "name", name, "error", err)
 		return fmt.Errorf("vault: failed to delete PKI role %s: %w", name, err)
 	}
 
-	p.logger.Info("PKI role deleted", "name", name)
+	p.logger.InfoContext(ctx, "PKI role deleted", "name", name)
 	return nil
 }
 
@@ -403,7 +403,7 @@ func (p *PKIClient) ListRoles(ctx context.Context) ([]string, error) {
 
 	secret, err := p.client.Logical().ListWithContext(ctx, path)
 	if err != nil {
-		p.logger.Error("failed to list PKI roles", "error", err)
+		p.logger.ErrorContext(ctx, "failed to list PKI roles", "error", err)
 		return nil, fmt.Errorf("vault: failed to list PKI roles: %w", err)
 	}
 
@@ -456,7 +456,7 @@ func (p *PKIClient) IssueCertificate(ctx context.Context, role string, req *Cert
 
 	secret, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to issue certificate", "role", role, "common_name", req.CommonName, "error", err)
+		p.logger.ErrorContext(ctx, "failed to issue certificate", "role", role, "common_name", req.CommonName, "error", err)
 		return nil, fmt.Errorf("vault: failed to issue certificate: %w", err)
 	}
 
@@ -465,7 +465,7 @@ func (p *PKIClient) IssueCertificate(ctx context.Context, role string, req *Cert
 	}
 
 	cert := parseCertificateResponse(secret.Data)
-	p.logger.Info("certificate issued", "role", role, "common_name", req.CommonName, "serial", cert.SerialNumber)
+	p.logger.InfoContext(ctx, "certificate issued", "role", role, "common_name", req.CommonName, "serial", cert.SerialNumber)
 	return cert, nil
 }
 
@@ -484,7 +484,7 @@ func (p *PKIClient) SignCertificate(ctx context.Context, role string, csr string
 
 	secret, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to sign certificate", "role", role, "common_name", commonName, "error", err)
+		p.logger.ErrorContext(ctx, "failed to sign certificate", "role", role, "common_name", commonName, "error", err)
 		return nil, fmt.Errorf("vault: failed to sign certificate: %w", err)
 	}
 
@@ -493,7 +493,7 @@ func (p *PKIClient) SignCertificate(ctx context.Context, role string, csr string
 	}
 
 	cert := parseCertificateResponse(secret.Data)
-	p.logger.Info("certificate signed", "role", role, "common_name", commonName, "serial", cert.SerialNumber)
+	p.logger.InfoContext(ctx, "certificate signed", "role", role, "common_name", commonName, "serial", cert.SerialNumber)
 	return cert, nil
 }
 
@@ -511,7 +511,7 @@ func (p *PKIClient) SignVerbatim(ctx context.Context, csr string, ttl time.Durat
 
 	secret, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to sign certificate verbatim", "error", err)
+		p.logger.ErrorContext(ctx, "failed to sign certificate verbatim", "error", err)
 		return nil, fmt.Errorf("vault: failed to sign certificate verbatim: %w", err)
 	}
 
@@ -520,7 +520,7 @@ func (p *PKIClient) SignVerbatim(ctx context.Context, csr string, ttl time.Durat
 	}
 
 	cert := parseCertificateResponse(secret.Data)
-	p.logger.Info("certificate signed verbatim", "serial", cert.SerialNumber)
+	p.logger.InfoContext(ctx, "certificate signed verbatim", "serial", cert.SerialNumber)
 	return cert, nil
 }
 
@@ -534,11 +534,11 @@ func (p *PKIClient) RevokeCertificate(ctx context.Context, serialNumber string) 
 
 	_, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to revoke certificate", "serial", serialNumber, "error", err)
+		p.logger.ErrorContext(ctx, "failed to revoke certificate", "serial", serialNumber, "error", err)
 		return fmt.Errorf("vault: failed to revoke certificate %s: %w", serialNumber, err)
 	}
 
-	p.logger.Info("certificate revoked", "serial", serialNumber)
+	p.logger.InfoContext(ctx, "certificate revoked", "serial", serialNumber)
 	return nil
 }
 
@@ -548,7 +548,7 @@ func (p *PKIClient) ReadCertificate(ctx context.Context, serialNumber string) (*
 
 	secret, err := p.client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
-		p.logger.Error("failed to read certificate", "serial", serialNumber, "error", err)
+		p.logger.ErrorContext(ctx, "failed to read certificate", "serial", serialNumber, "error", err)
 		return nil, fmt.Errorf("vault: failed to read certificate %s: %w", serialNumber, err)
 	}
 
@@ -570,7 +570,7 @@ func (p *PKIClient) ListCertificates(ctx context.Context) ([]string, error) {
 
 	secret, err := p.client.Logical().ListWithContext(ctx, path)
 	if err != nil {
-		p.logger.Error("failed to list certificates", "error", err)
+		p.logger.ErrorContext(ctx, "failed to list certificates", "error", err)
 		return nil, fmt.Errorf("vault: failed to list certificates: %w", err)
 	}
 
@@ -599,7 +599,7 @@ func (p *PKIClient) GetCAChain(ctx context.Context) (string, error) {
 
 	secret, err := p.client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
-		p.logger.Error("failed to get CA chain", "error", err)
+		p.logger.ErrorContext(ctx, "failed to get CA chain", "error", err)
 		return "", fmt.Errorf("vault: failed to get CA chain: %w", err)
 	}
 
@@ -638,11 +638,11 @@ func (p *PKIClient) SetURLs(ctx context.Context, issuingCertificates, crlDistrib
 
 	_, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to set PKI URLs", "error", err)
+		p.logger.ErrorContext(ctx, "failed to set PKI URLs", "error", err)
 		return fmt.Errorf("vault: failed to set PKI URLs: %w", err)
 	}
 
-	p.logger.Info("PKI URLs configured", "path", p.mountPath)
+	p.logger.InfoContext(ctx, "PKI URLs configured", "path", p.mountPath)
 	return nil
 }
 
@@ -660,11 +660,11 @@ func (p *PKIClient) TidyCertificates(ctx context.Context, tidyCertStore, tidyRev
 
 	_, err := p.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		p.logger.Error("failed to tidy certificates", "error", err)
+		p.logger.ErrorContext(ctx, "failed to tidy certificates", "error", err)
 		return fmt.Errorf("vault: failed to tidy certificates: %w", err)
 	}
 
-	p.logger.Info("certificate tidy started", "path", p.mountPath)
+	p.logger.InfoContext(ctx, "certificate tidy started", "path", p.mountPath)
 	return nil
 }
 
@@ -675,7 +675,11 @@ func ParseCertificate(certPEM string) (*x509.Certificate, error) {
 		return nil, fmt.Errorf("failed to decode PEM block")
 	}
 
-	return x509.ParseCertificate(block.Bytes)
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse certificate: %w", err)
+	}
+	return cert, nil
 }
 
 // Helper functions

@@ -62,42 +62,55 @@ func (s *serviceImpl) Register(ctx context.Context, orgID string, config *NodeCo
 	}
 
 	if err := s.repo.Create(ctx, node); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create edge node: %w", err)
 	}
 
 	return node, nil
 }
 
 func (s *serviceImpl) Get(ctx context.Context, id string) (*models.EdgeNode, error) {
-	return s.repo.Get(ctx, id)
+	node, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get edge node: %w", err)
+	}
+	return node, nil
 }
 
 func (s *serviceImpl) List(ctx context.Context, orgID string) ([]*models.EdgeNode, error) {
-	return s.repo.GetByOrgID(ctx, orgID)
+	nodes, err := s.repo.GetByOrgID(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list edge nodes: %w", err)
+	}
+	return nodes, nil
 }
 
 func (s *serviceImpl) HealthCheck(ctx context.Context, nodeID string) (*HealthStatus, error) {
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get edge node: %w", err)
 	}
 
-	return s.checker.Check(ctx, nodeID)
+	status, err := s.checker.Check(ctx, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check edge node health: %w", err)
+	}
+	return status, nil
 }
 
 func (s *serviceImpl) UpdateHealthStatus(ctx context.Context, orgID string) error {
 	nodes, err := s.repo.GetByOrgID(ctx, orgID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get edge nodes: %w", err)
 	}
 	for _, node := range nodes {
 		status, err := s.checker.Check(ctx, node.ID)
-		if err != nil {
+		switch {
+		case err != nil:
 			node.Status = models.EdgeNodeStatusUnhealthy
-		} else if status.VaultSealed {
+		case status.VaultSealed:
 			node.Status = models.EdgeNodeStatusSealed
-		} else if status.Healthy {
+		case status.Healthy:
 			node.Status = models.EdgeNodeStatusHealthy
-		} else {
+		default:
 			node.Status = models.EdgeNodeStatusUnhealthy
 		}
 		node.LastHeartbeat = time.Now()
@@ -108,9 +121,12 @@ func (s *serviceImpl) UpdateHealthStatus(ctx context.Context, orgID string) erro
 
 func (s *serviceImpl) Unregister(ctx context.Context, nodeID string) error {
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return err
+		return fmt.Errorf("failed to get edge node: %w", err)
 	}
-	return s.repo.Delete(ctx, nodeID)
+	if err := s.repo.Delete(ctx, nodeID); err != nil {
+		return fmt.Errorf("failed to delete edge node: %w", err)
+	}
+	return nil
 }
 
 func (s *serviceImpl) Encrypt(ctx context.Context, nodeID, keyName string, plaintext []byte) ([]byte, error) {
@@ -119,18 +135,26 @@ func (s *serviceImpl) Encrypt(ctx context.Context, nodeID, keyName string, plain
 	}
 
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get edge node: %w", err)
 	}
 
-	return s.client.Encrypt(ctx, keyName, plaintext)
+	result, err := s.client.Encrypt(ctx, keyName, plaintext)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt: %w", err)
+	}
+	return result, nil
 }
 
 func (s *serviceImpl) Decrypt(ctx context.Context, nodeID, keyName string, ciphertext []byte) ([]byte, error) {
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get edge node: %w", err)
 	}
 
-	return s.client.Decrypt(ctx, keyName, ciphertext)
+	result, err := s.client.Decrypt(ctx, keyName, ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt: %w", err)
+	}
+	return result, nil
 }
 
 func (s *serviceImpl) Sign(ctx context.Context, nodeID, keyName string, data []byte) ([]byte, error) {
@@ -139,50 +163,71 @@ func (s *serviceImpl) Sign(ctx context.Context, nodeID, keyName string, data []b
 	}
 
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get edge node: %w", err)
 	}
 
-	return s.client.Sign(ctx, keyName, data)
+	result, err := s.client.Sign(ctx, keyName, data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign: %w", err)
+	}
+	return result, nil
 }
 
 func (s *serviceImpl) Verify(ctx context.Context, nodeID, keyName string, data, signature []byte) (bool, error) {
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to get edge node: %w", err)
 	}
 
-	return s.client.Verify(ctx, keyName, data, signature)
+	valid, err := s.client.Verify(ctx, keyName, data, signature)
+	if err != nil {
+		return false, fmt.Errorf("failed to verify: %w", err)
+	}
+	return valid, nil
 }
 
 func (s *serviceImpl) RotateKey(ctx context.Context, nodeID, keyName string) error {
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return err
+		return fmt.Errorf("failed to get edge node: %w", err)
 	}
 
-	return s.client.RotateKey(ctx, keyName)
+	if err := s.client.RotateKey(ctx, keyName); err != nil {
+		return fmt.Errorf("failed to rotate key: %w", err)
+	}
+	return nil
 }
 
 func (s *serviceImpl) SyncPolicies(ctx context.Context, nodeID string, policies []*models.Policy) error {
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return err
+		return fmt.Errorf("failed to get edge node: %w", err)
 	}
 
-	return s.sync.SyncPolicies(ctx, nodeID, policies)
+	if err := s.sync.SyncPolicies(ctx, nodeID, policies); err != nil {
+		return fmt.Errorf("failed to sync policies: %w", err)
+	}
+	return nil
 }
 
 func (s *serviceImpl) SyncWorkspaceKeys(ctx context.Context, nodeID, workspaceID string, wrappedDEK []byte) error {
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return err
+		return fmt.Errorf("failed to get edge node: %w", err)
 	}
 
-	return s.sync.SyncWorkspaceKeys(ctx, nodeID, workspaceID)
+	if err := s.sync.SyncWorkspaceKeys(ctx, nodeID, workspaceID); err != nil {
+		return fmt.Errorf("failed to sync workspace keys: %w", err)
+	}
+	return nil
 }
 
 func (s *serviceImpl) GetSyncStatus(ctx context.Context, nodeID string) (*SyncStatus, error) {
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get edge node: %w", err)
 	}
 
-	return s.sync.GetSyncStatus(ctx, nodeID)
+	status, err := s.sync.GetSyncStatus(ctx, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync status: %w", err)
+	}
+	return status, nil
 }
 
 // edgeService is the production-ready edge node service using pkg/vault and pkg/postgres.
@@ -276,21 +321,30 @@ func (s *edgeService) Register(ctx context.Context, orgID string, config *NodeCo
 }
 
 func (s *edgeService) Get(ctx context.Context, id string) (*models.EdgeNode, error) {
-	return s.repo.Get(ctx, id)
+	node, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get edge node: %w", err)
+	}
+	return node, nil
 }
 
 func (s *edgeService) List(ctx context.Context, orgID string) ([]*models.EdgeNode, error) {
-	return s.repo.GetByOrgID(ctx, orgID)
+	nodes, err := s.repo.GetByOrgID(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list edge nodes: %w", err)
+	}
+	return nodes, nil
 }
 
 func (s *edgeService) HealthCheck(ctx context.Context, nodeID string) (*HealthStatus, error) {
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get edge node for health check: %w", err)
 	}
 
 	client, err := s.getOrCreateClient(ctx, node)
 	if err != nil {
+		//nolint:nilerr // Intentionally return HealthStatus with error info, not an error
 		return &HealthStatus{
 			Healthy:      false,
 			LastChecked:  time.Now(),
@@ -308,6 +362,7 @@ func (s *edgeService) HealthCheck(ctx context.Context, nodeID string) (*HealthSt
 		node.LastHeartbeat = time.Now()
 		_ = s.repo.Update(ctx, node)
 
+		//nolint:nilerr // Intentionally return HealthStatus with error info, not an error
 		return &HealthStatus{
 			Healthy:      false,
 			LastChecked:  time.Now(),
@@ -325,11 +380,12 @@ func (s *edgeService) HealthCheck(ctx context.Context, nodeID string) (*HealthSt
 	}
 
 	// Update node status in database
-	if health.Sealed {
+	switch {
+	case health.Sealed:
 		node.Status = models.EdgeNodeStatusSealed
-	} else if status.Healthy {
+	case status.Healthy:
 		node.Status = models.EdgeNodeStatusHealthy
-	} else {
+	default:
 		node.Status = models.EdgeNodeStatusUnhealthy
 	}
 	node.LastHeartbeat = time.Now()
@@ -341,7 +397,7 @@ func (s *edgeService) HealthCheck(ctx context.Context, nodeID string) (*HealthSt
 func (s *edgeService) UpdateHealthStatus(ctx context.Context, orgID string) error {
 	nodes, err := s.repo.GetByOrgID(ctx, orgID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get edge nodes for health update: %w", err)
 	}
 
 	for _, node := range nodes {
@@ -354,7 +410,7 @@ func (s *edgeService) UpdateHealthStatus(ctx context.Context, orgID string) erro
 func (s *edgeService) Unregister(ctx context.Context, nodeID string) error {
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get edge node for unregister: %w", err)
 	}
 
 	// Clean up synced data on edge Vault if accessible
@@ -365,7 +421,7 @@ func (s *edgeService) Unregister(ctx context.Context, nodeID string) error {
 	s.mu.Unlock()
 
 	if err := s.repo.Delete(ctx, nodeID); err != nil {
-		return err
+		return fmt.Errorf("delete edge node: %w", err)
 	}
 
 	// Audit log
@@ -394,7 +450,7 @@ func (s *edgeService) Encrypt(ctx context.Context, nodeID, keyName string, plain
 
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get edge node for encrypt: %w", err)
 	}
 
 	client, err := s.getOrCreateClient(ctx, node)
@@ -414,7 +470,7 @@ func (s *edgeService) Encrypt(ctx context.Context, nodeID, keyName string, plain
 func (s *edgeService) Decrypt(ctx context.Context, nodeID, keyName string, ciphertext []byte) ([]byte, error) {
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get edge node for decrypt: %w", err)
 	}
 
 	client, err := s.getOrCreateClient(ctx, node)
@@ -438,7 +494,7 @@ func (s *edgeService) Sign(ctx context.Context, nodeID, keyName string, data []b
 
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get edge node for sign: %w", err)
 	}
 
 	client, err := s.getOrCreateClient(ctx, node)
@@ -458,7 +514,7 @@ func (s *edgeService) Sign(ctx context.Context, nodeID, keyName string, data []b
 func (s *edgeService) Verify(ctx context.Context, nodeID, keyName string, data, signature []byte) (bool, error) {
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("get edge node for verify: %w", err)
 	}
 
 	client, err := s.getOrCreateClient(ctx, node)
@@ -478,7 +534,7 @@ func (s *edgeService) Verify(ctx context.Context, nodeID, keyName string, data, 
 func (s *edgeService) RotateKey(ctx context.Context, nodeID, keyName string) error {
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get edge node for key rotation: %w", err)
 	}
 
 	client, err := s.getOrCreateClient(ctx, node)
@@ -513,7 +569,7 @@ func (s *edgeService) RotateKey(ctx context.Context, nodeID, keyName string) err
 func (s *edgeService) SyncPolicies(ctx context.Context, nodeID string, policies []*models.Policy) error {
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get edge node for sync policies: %w", err)
 	}
 
 	s.mu.Lock()
@@ -583,7 +639,7 @@ func (s *edgeService) SyncPolicies(ctx context.Context, nodeID string, policies 
 func (s *edgeService) SyncWorkspaceKeys(ctx context.Context, nodeID, workspaceID string, wrappedDEK []byte) error {
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get edge node for sync workspace keys: %w", err)
 	}
 
 	s.mu.Lock()
@@ -673,7 +729,7 @@ func (s *edgeService) SyncWorkspaceKeys(ctx context.Context, nodeID, workspaceID
 
 func (s *edgeService) GetSyncStatus(ctx context.Context, nodeID string) (*SyncStatus, error) {
 	if _, err := s.repo.Get(ctx, nodeID); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get edge node for sync status: %w", err)
 	}
 
 	s.mu.RLock()

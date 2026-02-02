@@ -87,11 +87,11 @@ func (t *TransitClient) CreateKey(ctx context.Context, name string, config *KeyC
 
 	_, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to create transit key", "name", name, "error", err)
+		t.logger.ErrorContext(ctx, "failed to create transit key", "name", name, "error", err)
 		return fmt.Errorf("vault: failed to create transit key %s: %w", name, err)
 	}
 
-	t.logger.Info("transit key created", "name", name, "path", t.mountPath)
+	t.logger.InfoContext(ctx, "transit key created", "name", name, "path", t.mountPath)
 	return nil
 }
 
@@ -101,7 +101,7 @@ func (t *TransitClient) ReadKey(ctx context.Context, name string) (*KeyInfo, err
 
 	secret, err := t.client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
-		t.logger.Error("failed to read transit key", "name", name, "error", err)
+		t.logger.ErrorContext(ctx, "failed to read transit key", "name", name, "error", err)
 		return nil, fmt.Errorf("vault: failed to read transit key %s: %w", name, err)
 	}
 
@@ -153,11 +153,11 @@ func (t *TransitClient) DeleteKey(ctx context.Context, name string) error {
 
 	_, err := t.client.Logical().DeleteWithContext(ctx, path)
 	if err != nil {
-		t.logger.Error("failed to delete transit key", "name", name, "error", err)
+		t.logger.ErrorContext(ctx, "failed to delete transit key", "name", name, "error", err)
 		return fmt.Errorf("vault: failed to delete transit key %s: %w", name, err)
 	}
 
-	t.logger.Info("transit key deleted", "name", name)
+	t.logger.InfoContext(ctx, "transit key deleted", "name", name)
 	return nil
 }
 
@@ -167,11 +167,11 @@ func (t *TransitClient) ConfigureKey(ctx context.Context, name string, config ma
 
 	_, err := t.client.Logical().WriteWithContext(ctx, path, config)
 	if err != nil {
-		t.logger.Error("failed to configure transit key", "name", name, "error", err)
+		t.logger.ErrorContext(ctx, "failed to configure transit key", "name", name, "error", err)
 		return fmt.Errorf("vault: failed to configure transit key %s: %w", name, err)
 	}
 
-	t.logger.Debug("transit key configured", "name", name)
+	t.logger.DebugContext(ctx, "transit key configured", "name", name)
 	return nil
 }
 
@@ -181,11 +181,11 @@ func (t *TransitClient) RotateKey(ctx context.Context, name string) error {
 
 	_, err := t.client.Logical().WriteWithContext(ctx, path, nil)
 	if err != nil {
-		t.logger.Error("failed to rotate transit key", "name", name, "error", err)
+		t.logger.ErrorContext(ctx, "failed to rotate transit key", "name", name, "error", err)
 		return fmt.Errorf("vault: failed to rotate transit key %s: %w", name, err)
 	}
 
-	t.logger.Info("transit key rotated", "name", name)
+	t.logger.InfoContext(ctx, "transit key rotated", "name", name)
 	return nil
 }
 
@@ -195,7 +195,7 @@ func (t *TransitClient) ListKeys(ctx context.Context) ([]string, error) {
 
 	secret, err := t.client.Logical().ListWithContext(ctx, path)
 	if err != nil {
-		t.logger.Error("failed to list transit keys", "error", err)
+		t.logger.ErrorContext(ctx, "failed to list transit keys", "error", err)
 		return nil, fmt.Errorf("vault: failed to list transit keys: %w", err)
 	}
 
@@ -228,7 +228,7 @@ func (t *TransitClient) Encrypt(ctx context.Context, keyName string, plaintext [
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to encrypt data", "key", keyName, "error", err)
+		t.logger.ErrorContext(ctx, "failed to encrypt data", "key", keyName, "error", err)
 		return "", fmt.Errorf("vault: failed to encrypt with key %s: %w", keyName, err)
 	}
 
@@ -241,7 +241,7 @@ func (t *TransitClient) Encrypt(ctx context.Context, keyName string, plaintext [
 		return "", fmt.Errorf("vault: invalid ciphertext in response")
 	}
 
-	t.logger.Debug("data encrypted", "key", keyName)
+	t.logger.DebugContext(ctx, "data encrypted", "key", keyName)
 	return ciphertext, nil
 }
 
@@ -256,7 +256,7 @@ func (t *TransitClient) EncryptWithContext(ctx context.Context, keyName string, 
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to encrypt data with context", "key", keyName, "error", err)
+		t.logger.ErrorContext(ctx, "failed to encrypt data with context", "key", keyName, "error", err)
 		return "", fmt.Errorf("vault: failed to encrypt with key %s: %w", keyName, err)
 	}
 
@@ -282,7 +282,7 @@ func (t *TransitClient) Decrypt(ctx context.Context, keyName, ciphertext string)
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to decrypt data", "key", keyName, "error", err)
+		t.logger.ErrorContext(ctx, "failed to decrypt data", "key", keyName, "error", err)
 		return nil, fmt.Errorf("vault: failed to decrypt with key %s: %w", keyName, err)
 	}
 
@@ -300,7 +300,7 @@ func (t *TransitClient) Decrypt(ctx context.Context, keyName, ciphertext string)
 		return nil, fmt.Errorf("vault: failed to decode plaintext: %w", err)
 	}
 
-	t.logger.Debug("data decrypted", "key", keyName)
+	t.logger.DebugContext(ctx, "data decrypted", "key", keyName)
 	return plaintext, nil
 }
 
@@ -315,7 +315,7 @@ func (t *TransitClient) DecryptWithContext(ctx context.Context, keyName, ciphert
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to decrypt data with context", "key", keyName, "error", err)
+		t.logger.ErrorContext(ctx, "failed to decrypt data with context", "key", keyName, "error", err)
 		return nil, fmt.Errorf("vault: failed to decrypt with key %s: %w", keyName, err)
 	}
 
@@ -346,7 +346,7 @@ func (t *TransitClient) Sign(ctx context.Context, keyName string, input []byte) 
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to sign data", "key", keyName, "error", err)
+		t.logger.ErrorContext(ctx, "failed to sign data", "key", keyName, "error", err)
 		return "", fmt.Errorf("vault: failed to sign with key %s: %w", keyName, err)
 	}
 
@@ -359,7 +359,7 @@ func (t *TransitClient) Sign(ctx context.Context, keyName string, input []byte) 
 		return "", fmt.Errorf("vault: invalid signature in response")
 	}
 
-	t.logger.Debug("data signed", "key", keyName)
+	t.logger.DebugContext(ctx, "data signed", "key", keyName)
 	return signature, nil
 }
 
@@ -375,7 +375,7 @@ func (t *TransitClient) SignWithHashAlgorithm(ctx context.Context, keyName strin
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to sign data", "key", keyName, "hash", hashAlgorithm, "error", err)
+		t.logger.ErrorContext(ctx, "failed to sign data", "key", keyName, "hash", hashAlgorithm, "error", err)
 		return "", fmt.Errorf("vault: failed to sign with key %s: %w", keyName, err)
 	}
 
@@ -402,7 +402,7 @@ func (t *TransitClient) Verify(ctx context.Context, keyName string, input []byte
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to verify signature", "key", keyName, "error", err)
+		t.logger.ErrorContext(ctx, "failed to verify signature", "key", keyName, "error", err)
 		return false, fmt.Errorf("vault: failed to verify with key %s: %w", keyName, err)
 	}
 
@@ -415,7 +415,7 @@ func (t *TransitClient) Verify(ctx context.Context, keyName string, input []byte
 		return false, fmt.Errorf("vault: invalid response from verify operation")
 	}
 
-	t.logger.Debug("signature verified", "key", keyName, "valid", valid)
+	t.logger.DebugContext(ctx, "signature verified", "key", keyName, "valid", valid)
 	return valid, nil
 }
 
@@ -432,7 +432,7 @@ func (t *TransitClient) VerifyWithHashAlgorithm(ctx context.Context, keyName str
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to verify signature", "key", keyName, "hash", hashAlgorithm, "error", err)
+		t.logger.ErrorContext(ctx, "failed to verify signature", "key", keyName, "hash", hashAlgorithm, "error", err)
 		return false, fmt.Errorf("vault: failed to verify with key %s: %w", keyName, err)
 	}
 
@@ -458,7 +458,7 @@ func (t *TransitClient) Rewrap(ctx context.Context, keyName, ciphertext string) 
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to rewrap ciphertext", "key", keyName, "error", err)
+		t.logger.ErrorContext(ctx, "failed to rewrap ciphertext", "key", keyName, "error", err)
 		return "", fmt.Errorf("vault: failed to rewrap with key %s: %w", keyName, err)
 	}
 
@@ -471,7 +471,7 @@ func (t *TransitClient) Rewrap(ctx context.Context, keyName, ciphertext string) 
 		return "", fmt.Errorf("vault: invalid ciphertext in rewrap response")
 	}
 
-	t.logger.Debug("ciphertext rewrapped", "key", keyName)
+	t.logger.DebugContext(ctx, "ciphertext rewrapped", "key", keyName)
 	return newCiphertext, nil
 }
 
@@ -485,7 +485,7 @@ func (t *TransitClient) GenerateDataKey(ctx context.Context, keyName string, bit
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to generate data key", "key", keyName, "error", err)
+		t.logger.ErrorContext(ctx, "failed to generate data key", "key", keyName, "error", err)
 		return "", "", fmt.Errorf("vault: failed to generate data key with %s: %w", keyName, err)
 	}
 
@@ -496,7 +496,7 @@ func (t *TransitClient) GenerateDataKey(ctx context.Context, keyName string, bit
 	plaintext, _ = secret.Data["plaintext"].(string)
 	ciphertext, _ = secret.Data["ciphertext"].(string)
 
-	t.logger.Debug("data key generated", "key", keyName, "bits", bits)
+	t.logger.DebugContext(ctx, "data key generated", "key", keyName, "bits", bits)
 	return plaintext, ciphertext, nil
 }
 
@@ -510,7 +510,7 @@ func (t *TransitClient) GenerateWrappedDataKey(ctx context.Context, keyName stri
 
 	secret, err := t.client.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
-		t.logger.Error("failed to generate wrapped data key", "key", keyName, "error", err)
+		t.logger.ErrorContext(ctx, "failed to generate wrapped data key", "key", keyName, "error", err)
 		return "", fmt.Errorf("vault: failed to generate wrapped data key with %s: %w", keyName, err)
 	}
 
@@ -523,6 +523,6 @@ func (t *TransitClient) GenerateWrappedDataKey(ctx context.Context, keyName stri
 		return "", fmt.Errorf("vault: invalid ciphertext in datakey response")
 	}
 
-	t.logger.Debug("wrapped data key generated", "key", keyName, "bits", bits)
+	t.logger.DebugContext(ctx, "wrapped data key generated", "key", keyName, "bits", bits)
 	return ciphertext, nil
 }

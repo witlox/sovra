@@ -91,7 +91,7 @@ func New(cfg *Config, logger *slog.Logger) (*Client, error) {
 		client.SetNamespace(cfg.Namespace)
 	}
 
-	logger.Info("vault client created", "address", cfg.Address)
+	logger.InfoContext(context.Background(), "vault client created", "address", cfg.Address)
 
 	return &Client{
 		client: client,
@@ -113,7 +113,7 @@ func (c *Client) SetNamespace(namespace string) {
 func (c *Client) Health(ctx context.Context) (*HealthStatus, error) {
 	health, err := c.client.Sys().HealthWithContext(ctx)
 	if err != nil {
-		c.logger.Error("failed to get vault health", "error", err)
+		c.logger.ErrorContext(ctx, "failed to get vault health", "error", err)
 		return nil, fmt.Errorf("vault: health check failed: %w", err)
 	}
 
@@ -126,7 +126,7 @@ func (c *Client) Health(ctx context.Context) (*HealthStatus, error) {
 		ClusterID:   health.ClusterID,
 	}
 
-	c.logger.Debug("vault health check",
+	c.logger.DebugContext(ctx, "vault health check",
 		"initialized", status.Initialized,
 		"sealed", status.Sealed,
 		"version", status.Version,
@@ -177,7 +177,7 @@ func (c *Client) EnableSecretsEngine(ctx context.Context, path, engineType strin
 	}
 
 	if err := c.client.Sys().MountWithContext(ctx, path, input); err != nil {
-		c.logger.Error("failed to enable secrets engine",
+		c.logger.ErrorContext(ctx, "failed to enable secrets engine",
 			"path", path,
 			"type", engineType,
 			"error", err,
@@ -185,18 +185,18 @@ func (c *Client) EnableSecretsEngine(ctx context.Context, path, engineType strin
 		return fmt.Errorf("vault: failed to enable secrets engine at %s: %w", path, err)
 	}
 
-	c.logger.Info("secrets engine enabled", "path", path, "type", engineType)
+	c.logger.InfoContext(ctx, "secrets engine enabled", "path", path, "type", engineType)
 	return nil
 }
 
 // DisableSecretsEngine disables a secrets engine at the given path.
 func (c *Client) DisableSecretsEngine(ctx context.Context, path string) error {
 	if err := c.client.Sys().UnmountWithContext(ctx, path); err != nil {
-		c.logger.Error("failed to disable secrets engine", "path", path, "error", err)
+		c.logger.ErrorContext(ctx, "failed to disable secrets engine", "path", path, "error", err)
 		return fmt.Errorf("vault: failed to disable secrets engine at %s: %w", path, err)
 	}
 
-	c.logger.Info("secrets engine disabled", "path", path)
+	c.logger.InfoContext(ctx, "secrets engine disabled", "path", path)
 	return nil
 }
 
@@ -204,7 +204,7 @@ func (c *Client) DisableSecretsEngine(ctx context.Context, path string) error {
 func (c *Client) ListSecretsEngines(ctx context.Context) (map[string]*api.MountOutput, error) {
 	mounts, err := c.client.Sys().ListMountsWithContext(ctx)
 	if err != nil {
-		c.logger.Error("failed to list secrets engines", "error", err)
+		c.logger.ErrorContext(ctx, "failed to list secrets engines", "error", err)
 		return nil, fmt.Errorf("vault: failed to list secrets engines: %w", err)
 	}
 	return mounts, nil

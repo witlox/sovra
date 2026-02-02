@@ -159,7 +159,7 @@ func (s *Server) buildTLSConfig() (*tls.Config, error) {
 }
 
 // Start starts the HTTP server.
-func (s *Server) Start() error {
+func (s *Server) Start(ctx context.Context) error {
 	if s.started.Load() {
 		return fmt.Errorf("server already started")
 	}
@@ -167,28 +167,33 @@ func (s *Server) Start() error {
 	s.started.Store(true)
 	s.ready.Store(true)
 
-	s.logger.Info("starting HTTP server",
+	s.logger.InfoContext(ctx, "starting HTTP server",
 		"addr", s.config.Addr,
 		"tls", s.config.TLSEnabled,
 		"mtls", s.config.MTLSEnabled,
 	)
 
 	var err error
-	if s.config.TLSEnabled && s.config.TLSCertFile != "" {
+	switch {
+	case s.config.TLSEnabled && s.config.TLSCertFile != "":
 		err = s.server.ListenAndServeTLS(s.config.TLSCertFile, s.config.TLSKeyFile)
-	} else if s.config.TLSEnabled && s.server.TLSConfig != nil && len(s.server.TLSConfig.Certificates) > 0 {
-		listener, listenErr := net.Listen("tcp", s.config.Addr)
+	case s.config.TLSEnabled && s.server.TLSConfig != nil && len(s.server.TLSConfig.Certificates) > 0:
+		lc := net.ListenConfig{}
+		listener, listenErr := lc.Listen(ctx, "tcp", s.config.Addr)
 		if listenErr != nil {
-			return listenErr
+			return fmt.Errorf("failed to listen: %w", listenErr)
 		}
-		return s.server.ServeTLS(listener, "", "")
-	} else {
+		if serveErr := s.server.ServeTLS(listener, "", ""); serveErr != nil && serveErr != http.ErrServerClosed {
+			return fmt.Errorf("failed to serve TLS: %w", serveErr)
+		}
+		return nil
+	default:
 		err = s.server.ListenAndServe()
 	}
 
 	if err != nil && err != http.ErrServerClosed {
 		s.healthy.Store(false)
-		return err
+		return fmt.Errorf("server error: %w", err)
 	}
 
 	return nil
@@ -201,8 +206,8 @@ func (s *Server) StartAsync() error {
 	}
 
 	go func() {
-		if err := s.Start(); err != nil {
-			s.logger.Error("server error", "error", err)
+		if err := s.Start(context.Background()); err != nil {
+			s.logger.ErrorContext(context.Background(), "server error", "error", err)
 		}
 	}()
 
@@ -221,7 +226,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return nil // Already shutting down
 	}
 
-	s.logger.Info("shutting down HTTP server")
+	s.logger.InfoContext(ctx, "shutting down HTTP server")
 
 	// Mark as not ready first
 	s.ready.Store(false)
@@ -235,13 +240,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	// Gracefully shutdown
 	if err := s.server.Shutdown(ctx); err != nil {
-		s.logger.Error("server shutdown error", "error", err)
+		s.logger.ErrorContext(ctx, "server shutdown error", "error", err)
 		s.healthy.Store(false)
-		return err
+		return fmt.Errorf("server shutdown error: %w", err)
 	}
 
 	s.healthy.Store(false)
-	s.logger.Info("HTTP server stopped")
+	s.logger.InfoContext(ctx, "HTTP server stopped")
 	return nil
 }
 
@@ -313,7 +318,7 @@ func (h *HealthChecker) Check(ctx context.Context) *HealthCheckResult {
 			componentResult.Status = "unhealthy"
 			componentResult.Error = err.Error()
 			result.Status = "unhealthy"
-			h.logger.Warn("health check failed", "component", name, "error", err)
+			h.logger.WarnContext(ctx, "health check failed", "component", name, "error", err)
 		}
 		result.Components[name] = componentResult
 	}

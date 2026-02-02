@@ -26,7 +26,7 @@ type legacyServiceImpl struct {
 
 func (s *legacyServiceImpl) Create(ctx context.Context, req CreateRequest) (*models.Policy, error) {
 	if err := s.engine.ValidateRego(req.Rego); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate rego: %w", err)
 	}
 
 	policy := &models.Policy{
@@ -40,32 +40,40 @@ func (s *legacyServiceImpl) Create(ctx context.Context, req CreateRequest) (*mod
 	}
 
 	if err := s.repo.Create(ctx, policy); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create policy: %w", err)
 	}
 
 	if err := s.engine.LoadPolicy(ctx, policy); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load policy: %w", err)
 	}
 
 	return policy, nil
 }
 
 func (s *legacyServiceImpl) Get(ctx context.Context, id string) (*models.Policy, error) {
-	return s.repo.Get(ctx, id)
+	policy, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get policy: %w", err)
+	}
+	return policy, nil
 }
 
 func (s *legacyServiceImpl) GetForWorkspace(ctx context.Context, workspaceID string) ([]*models.Policy, error) {
-	return s.repo.GetByWorkspace(ctx, workspaceID)
+	policies, err := s.repo.GetByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("get policies for workspace: %w", err)
+	}
+	return policies, nil
 }
 
 func (s *legacyServiceImpl) Update(ctx context.Context, id string, rego string, signature []byte) (*models.Policy, error) {
 	if err := s.engine.ValidateRego(rego); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate rego: %w", err)
 	}
 
 	policy, err := s.repo.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get policy: %w", err)
 	}
 
 	policy.Rego = rego
@@ -73,11 +81,11 @@ func (s *legacyServiceImpl) Update(ctx context.Context, id string, rego string, 
 	policy.UpdatedAt = time.Now()
 
 	if err := s.repo.Update(ctx, policy); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("update policy: %w", err)
 	}
 
 	if err := s.engine.LoadPolicy(ctx, policy); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load policy: %w", err)
 	}
 
 	return policy, nil
@@ -85,17 +93,27 @@ func (s *legacyServiceImpl) Update(ctx context.Context, id string, rego string, 
 
 func (s *legacyServiceImpl) Delete(ctx context.Context, id string, signature []byte) error {
 	if err := s.engine.UnloadPolicy(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("unload policy: %w", err)
 	}
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete policy: %w", err)
+	}
+	return nil
 }
 
 func (s *legacyServiceImpl) Evaluate(ctx context.Context, input models.PolicyInput) (*EvaluationResult, error) {
-	return s.engine.Evaluate(ctx, input)
+	result, err := s.engine.Evaluate(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("evaluate policy: %w", err)
+	}
+	return result, nil
 }
 
 func (s *legacyServiceImpl) Validate(ctx context.Context, rego string) error {
-	return s.engine.ValidateRego(rego)
+	if err := s.engine.ValidateRego(rego); err != nil {
+		return fmt.Errorf("validate rego: %w", err)
+	}
+	return nil
 }
 
 // serviceImpl is the production service implementation using repository and OPA interfaces.
@@ -113,7 +131,7 @@ func (s *serviceImpl) validateRego(rego string) error {
 
 	_, err := ast.ParseModule("policy.rego", rego)
 	if err != nil {
-		return fmt.Errorf("%w: %v", errors.ErrPolicyInvalid, err)
+		return fmt.Errorf("%w: %w", errors.ErrPolicyInvalid, err)
 	}
 
 	return nil
@@ -175,7 +193,7 @@ func (s *serviceImpl) Create(ctx context.Context, req CreateRequest) (*models.Po
 func (s *serviceImpl) Get(ctx context.Context, id string) (*models.Policy, error) {
 	policy, err := s.repo.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get policy: %w", err)
 	}
 	return policy, nil
 }
@@ -197,7 +215,7 @@ func (s *serviceImpl) Update(ctx context.Context, id string, rego string, signat
 	// Get existing policy
 	policy, err := s.repo.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get policy: %w", err)
 	}
 
 	// Increment version and update timestamps
@@ -238,7 +256,7 @@ func (s *serviceImpl) Delete(ctx context.Context, id string, signature []byte) e
 	// Get policy first for audit logging
 	policy, err := s.repo.Get(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get policy: %w", err)
 	}
 
 	// Delete from OPA first
