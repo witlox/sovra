@@ -63,13 +63,13 @@ type Authorizer interface {
 
 // AuthzRequest contains authorization request.
 type AuthzRequest struct {
-	UserID      string
-	OrgID       string
-	Roles       []string
-	Action      string
-	Resource    string
-	ResourceID  string
-	Context     map[string]any
+	UserID     string
+	OrgID      string
+	Roles      []string
+	Action     string
+	Resource   string
+	ResourceID string
+	Context    map[string]any
 }
 
 // AuthzResult contains authorization result.
@@ -107,22 +107,22 @@ type Handler interface {
 
 // Request represents an API request.
 type Request struct {
-	Method      string
-	Path        string
-	Headers     map[string]string
-	Body        []byte
-	Auth        *AuthResult
-	ClientCert  *CertificateInfo
-	RemoteAddr  string
-	RequestID   string
+	Method     string
+	Path       string
+	Headers    map[string]string
+	Body       []byte
+	Auth       *AuthResult
+	ClientCert *CertificateInfo
+	RemoteAddr string
+	RequestID  string
 }
 
 // Response represents an API response.
 type Response struct {
-	StatusCode  int
-	Headers     map[string]string
-	Body        []byte
-	Error       *APIError
+	StatusCode int
+	Headers    map[string]string
+	Body       []byte
+	Error      *APIError
 }
 
 // APIError represents an API error.
@@ -167,14 +167,14 @@ type MetricsCollector interface {
 
 // GatewayMetrics contains gateway metrics.
 type GatewayMetrics struct {
-	TotalRequests   int64
-	TotalErrors     int64
-	AvgLatency      time.Duration
-	P99Latency      time.Duration
-	AuthSuccess     int64
-	AuthFailure     int64
-	RateLimited     int64
-	ActiveRequests  int64
+	TotalRequests  int64
+	TotalErrors    int64
+	AvgLatency     time.Duration
+	P99Latency     time.Duration
+	AuthSuccess    int64
+	AuthFailure    int64
+	RateLimited    int64
+	ActiveRequests int64
 }
 
 // AuditLogger logs API actions for audit.

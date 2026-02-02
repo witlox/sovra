@@ -16,20 +16,20 @@ type PKIClient struct {
 
 // CSRRequest holds parameters for generating a CSR.
 type CSRRequest struct {
-	CommonName         string
-	AltNames           []string
-	IPSANs             []string
-	URISANs            []string
-	OtherSANs          []string
-	Organization       []string
-	OrganizationalUnit []string
-	Country            []string
-	Locality           []string
-	Province           []string
-	StreetAddress      []string
-	PostalCode         []string
-	KeyType            string
-	KeyBits            int
+	CommonName          string
+	AltNames            []string
+	IPSANs              []string
+	URISANs             []string
+	OtherSANs           []string
+	Organization        []string
+	OrganizationalUnit  []string
+	Country             []string
+	Locality            []string
+	Province            []string
+	StreetAddress       []string
+	PostalCode          []string
+	KeyType             string
+	KeyBits             int
 	AddBasicConstraints bool
 }
 
@@ -41,14 +41,14 @@ type CSRResponse struct {
 
 // CertificateRequest holds parameters for issuing or signing a certificate.
 type CertificateRequest struct {
-	CommonName         string
-	AltNames           []string
-	IPSANs             []string
-	URISANs            []string
-	TTL                time.Duration
-	Format             string
-	PrivateKeyFormat   string
-	ExcludeCNFromSANs  bool
+	CommonName        string
+	AltNames          []string
+	IPSANs            []string
+	URISANs           []string
+	TTL               time.Duration
+	Format            string
+	PrivateKeyFormat  string
+	ExcludeCNFromSANs bool
 }
 
 // Certificate holds a certificate response from Vault.
@@ -64,32 +64,32 @@ type Certificate struct {
 
 // RoleConfig holds configuration for a PKI role.
 type RoleConfig struct {
-	TTL                  time.Duration
-	MaxTTL               time.Duration
-	AllowLocalhost       bool
-	AllowedDomains       []string
+	TTL                    time.Duration
+	MaxTTL                 time.Duration
+	AllowLocalhost         bool
+	AllowedDomains         []string
 	AllowedDomainsTemplate bool
-	AllowBareDomains     bool
-	AllowSubdomains      bool
-	AllowGlobDomains     bool
-	AllowAnyName         bool
-	AllowIPSANs          bool
-	AllowedURISANs       []string
-	AllowedOtherSANs     []string
-	ServerFlag           bool
-	ClientFlag           bool
-	CodeSigningFlag      bool
-	EmailProtectionFlag  bool
-	KeyType              string
-	KeyBits              int
-	KeyUsage             []string
-	ExtKeyUsage          []string
-	ExtKeyUsageOIDs      []string
-	UseCSRCommonName     bool
-	UseCSRSANs           bool
-	RequireCN            bool
-	BasicConstraintsValid bool
-	NotBeforeDuration    time.Duration
+	AllowBareDomains       bool
+	AllowSubdomains        bool
+	AllowGlobDomains       bool
+	AllowAnyName           bool
+	AllowIPSANs            bool
+	AllowedURISANs         []string
+	AllowedOtherSANs       []string
+	ServerFlag             bool
+	ClientFlag             bool
+	CodeSigningFlag        bool
+	EmailProtectionFlag    bool
+	KeyType                string
+	KeyBits                int
+	KeyUsage               []string
+	ExtKeyUsage            []string
+	ExtKeyUsageOIDs        []string
+	UseCSRCommonName       bool
+	UseCSRSANs             bool
+	RequireCN              bool
+	BasicConstraintsValid  bool
+	NotBeforeDuration      time.Duration
 }
 
 // PKI returns a PKIClient for the given mount path.
@@ -604,16 +604,14 @@ func (p *PKIClient) GetCAChain(ctx context.Context) (string, error) {
 	}
 
 	if secret == nil || secret.Data == nil {
-		// Try the non-JSON endpoint
-		resp, err := p.client.RawRequestWithContext(ctx, p.client.NewRequest("GET", fmt.Sprintf("/v1/%s/ca_chain", p.mountPath)))
+		// Try the non-JSON endpoint using Logical API
+		secret, err = p.client.Logical().ReadWithContext(ctx, fmt.Sprintf("%s/ca_chain", p.mountPath))
 		if err != nil {
 			return "", fmt.Errorf("vault: failed to get CA chain: %w", err)
 		}
-		defer resp.Body.Close()
-
-		buf := make([]byte, 32*1024)
-		n, _ := resp.Body.Read(buf)
-		return string(buf[:n]), nil
+		if secret == nil || secret.Data == nil {
+			return "", nil
+		}
 	}
 
 	if chain, ok := secret.Data["ca_chain"].(string); ok {

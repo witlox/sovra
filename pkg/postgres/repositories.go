@@ -119,7 +119,7 @@ func (r *OrganizationRepository) List(ctx context.Context, limit, offset int) ([
 	if err != nil {
 		return nil, fmt.Errorf("failed to list organizations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var orgs []*models.Organization
 	for rows.Next() {
@@ -244,7 +244,7 @@ func (r *WorkspaceRepository) Get(ctx context.Context, id string) (*models.Works
 	if err != nil {
 		return nil, fmt.Errorf("failed to get participants: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var orgID string
 		if err := rows.Scan(&orgID); err != nil {
@@ -262,7 +262,7 @@ func (r *WorkspaceRepository) Get(ctx context.Context, id string) (*models.Works
 	if err != nil {
 		return nil, fmt.Errorf("failed to get wrapped DEKs: %w", err)
 	}
-	defer dekRows.Close()
+	defer func() { _ = dekRows.Close() }()
 	for dekRows.Next() {
 		var orgID string
 		var wrappedDEK []byte
@@ -312,7 +312,7 @@ func (r *WorkspaceRepository) List(ctx context.Context, orgID string, limit, off
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workspaces: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var workspaces []*models.Workspace
 	for rows.Next() {
@@ -422,7 +422,7 @@ func (r *WorkspaceRepository) ListByParticipant(ctx context.Context, orgID strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workspaces by participant: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var workspaces []*models.Workspace
 	for rows.Next() {
@@ -557,7 +557,7 @@ func (r *FederationRepository) List(ctx context.Context, orgID string) ([]*model
 	if err != nil {
 		return nil, fmt.Errorf("failed to list federations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var federations []*models.Federation
 	for rows.Next() {
@@ -713,7 +713,7 @@ func (r *PolicyRepository) GetByWorkspace(ctx context.Context, workspaceID strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to get policies by workspace: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var policies []*models.Policy
 	for rows.Next() {
@@ -744,7 +744,7 @@ func (r *PolicyRepository) GetOrganizationPolicies(ctx context.Context, orgID st
 	if err != nil {
 		return nil, fmt.Errorf("failed to get organization policies: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var policies []*models.Policy
 	for rows.Next() {
@@ -809,7 +809,7 @@ func (r *PolicyRepository) List(ctx context.Context, limit, offset int) ([]*mode
 	if err != nil {
 		return nil, fmt.Errorf("failed to list policies: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var policies []*models.Policy
 	for rows.Next() {
@@ -959,7 +959,7 @@ func (r *AuditRepository) Query(ctx context.Context, query audit.QueryParams) ([
 	if err != nil {
 		return nil, fmt.Errorf("failed to query audit events: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var events []*models.AuditEvent
 	for rows.Next() {
@@ -1193,7 +1193,7 @@ func (r *CRKRepository) GetShares(ctx context.Context, crkID string) ([]models.C
 	if err != nil {
 		return nil, fmt.Errorf("failed to get CRK shares: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var shares []models.CRKShare
 	for rows.Next() {
@@ -1293,7 +1293,7 @@ func (r *EdgeNodeRepository) GetByOrgID(ctx context.Context, orgID string) ([]*m
 	if err != nil {
 		return nil, fmt.Errorf("failed to get edge nodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var nodes []*models.EdgeNode
 	for rows.Next() {

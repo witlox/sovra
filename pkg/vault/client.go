@@ -37,12 +37,12 @@ type TLSConfig struct {
 
 // HealthStatus represents the health status of Vault.
 type HealthStatus struct {
-	Initialized   bool
-	Sealed        bool
-	Standby       bool
-	Version       string
-	ClusterName   string
-	ClusterID     string
+	Initialized bool
+	Sealed      bool
+	Standby     bool
+	Version     string
+	ClusterName string
+	ClusterID   string
 }
 
 // New creates a new Vault client with the given configuration.

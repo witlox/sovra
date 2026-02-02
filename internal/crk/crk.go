@@ -378,7 +378,7 @@ func (g *ContextGenerator) Generate(ctx context.Context, orgID string, threshold
 	shares := make([]*models.CRKShare, shareCount)
 	for i := 0; i < shareCount; i++ {
 		shareData := make([]byte, 32)
-		rand.Read(shareData)
+		_, _ = rand.Read(shareData)
 		shares[i] = &models.CRKShare{
 			ID:        uuid.New().String(),
 			CRKID:     crk.ID,

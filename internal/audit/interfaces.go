@@ -22,15 +22,15 @@ type Repository interface {
 
 // QueryParams defines audit log query parameters.
 type QueryParams struct {
-	OrgID       string
-	Workspace   string
-	EventType   models.AuditEventType
-	Actor       string
-	Result      models.AuditEventResult
-	Since       time.Time
-	Until       time.Time
-	Limit       int
-	Offset      int
+	OrgID     string
+	Workspace string
+	EventType models.AuditEventType
+	Actor     string
+	Result    models.AuditEventResult
+	Since     time.Time
+	Until     time.Time
+	Limit     int
+	Offset    int
 }
 
 // Forwarder forwards audit events to external systems.
@@ -67,12 +67,12 @@ type ExportRequest struct {
 
 // SIEMConfig holds configuration for SIEM forwarding.
 type SIEMConfig struct {
-	Endpoint    string
-	APIKey      string
-	Timeout     time.Duration
-	RetryCount  int
-	BatchSize   int
-	Enabled     bool
+	Endpoint   string
+	APIKey     string
+	Timeout    time.Duration
+	RetryCount int
+	BatchSize  int
+	Enabled    bool
 }
 
 // Service handles audit business logic.
@@ -93,14 +93,14 @@ type Service interface {
 
 // AuditStats represents audit statistics.
 type AuditStats struct {
-	TotalEvents     int64
-	SuccessCount    int64
-	ErrorCount      int64
-	DeniedCount     int64
-	EventsByType    map[models.AuditEventType]int64
-	EventsByOrg     map[string]int64
-	UniqueActors    int64
-	TimeRange       time.Duration
+	TotalEvents  int64
+	SuccessCount int64
+	ErrorCount   int64
+	DeniedCount  int64
+	EventsByType map[models.AuditEventType]int64
+	EventsByOrg  map[string]int64
+	UniqueActors int64
+	TimeRange    time.Duration
 }
 
 // NewAuditService creates a new audit service using a repository that implements the Repository interface.

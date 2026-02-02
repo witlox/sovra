@@ -3,7 +3,6 @@ package api
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -32,13 +31,13 @@ const (
 
 // MiddlewareConfig holds middleware configuration.
 type MiddlewareConfig struct {
-	RequireMTLS      bool
-	RequireAuth      bool
-	RateLimit        int
-	RateLimitWindow  time.Duration
-	TrustedCAs       [][]byte
-	SkipPaths        []string
-	Logger           *slog.Logger
+	RequireMTLS     bool
+	RequireAuth     bool
+	RateLimit       int
+	RateLimitWindow time.Duration
+	TrustedCAs      [][]byte
+	SkipPaths       []string
+	Logger          *slog.Logger
 }
 
 // DefaultMiddlewareConfig returns a sensible default configuration.
@@ -302,7 +301,7 @@ func ContentTypeMiddleware(next http.Handler) http.Handler {
 func writeJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(ErrorResponse{
+	_ = json.NewEncoder(w).Encode(ErrorResponse{
 		Error: ErrorDetail{
 			Code:    code,
 			Message: message,
@@ -331,8 +330,8 @@ type InMemoryRateLimiter struct {
 }
 
 type bucket struct {
-	count     int
-	resetAt   time.Time
+	count   int
+	resetAt time.Time
 }
 
 // NewInMemoryRateLimiter creates a new in-memory rate limiter.
@@ -399,9 +398,7 @@ func (r *InMemoryRateLimiter) GetRemaining(ctx context.Context, key string) (int
 }
 
 // DefaultMTLSVerifier is a basic mTLS verifier.
-type DefaultMTLSVerifier struct {
-	trustedCAs []*tls.Certificate
-}
+type DefaultMTLSVerifier struct{}
 
 // NewDefaultMTLSVerifier creates a new default mTLS verifier.
 func NewDefaultMTLSVerifier() *DefaultMTLSVerifier {

@@ -112,9 +112,9 @@ func handleLive(w http.ResponseWriter, r *http.Request) {
 
 // HealthResponse represents health check response.
 type HealthResponse struct {
-	Status     string                       `json:"status"`
-	Version    string                       `json:"version"`
-	Components map[string]*ComponentHealth  `json:"components,omitempty"`
+	Status     string                      `json:"status"`
+	Version    string                      `json:"version"`
+	Components map[string]*ComponentHealth `json:"components,omitempty"`
 }
 
 // ComponentHealth represents individual component health.

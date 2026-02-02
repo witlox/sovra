@@ -54,15 +54,15 @@ type HealthChecker interface {
 
 // HealthStatus represents edge node health.
 type HealthStatus struct {
-	Healthy         bool
-	LastChecked     time.Time
-	VaultSealed     bool
-	HAEnabled       bool
-	HAMode          string
-	ClusterNodes    int
-	Version         string
-	Latency         time.Duration
-	ErrorMessage    string
+	Healthy      bool
+	LastChecked  time.Time
+	VaultSealed  bool
+	HAEnabled    bool
+	HAMode       string
+	ClusterNodes int
+	Version      string
+	Latency      time.Duration
+	ErrorMessage string
 }
 
 // SyncManager handles edge node synchronization.
@@ -77,12 +77,12 @@ type SyncManager interface {
 
 // SyncStatus represents synchronization status.
 type SyncStatus struct {
-	LastSyncedAt    time.Time
-	SyncInProgress  bool
-	PoliciesSynced  int
-	KeysSynced      int
-	ErrorCount      int
-	LastError       string
+	LastSyncedAt   time.Time
+	SyncInProgress bool
+	PoliciesSynced int
+	KeysSynced     int
+	ErrorCount     int
+	LastError      string
 }
 
 // AuditService provides audit logging for edge operations.
@@ -125,13 +125,13 @@ type Service interface {
 
 // NodeConfig contains edge node configuration.
 type NodeConfig struct {
-	Name            string
-	VaultAddress    string
-	VaultToken      string
-	VaultCACert     string
-	Classification  models.Classification
-	Region          string
-	Tags            map[string]string
+	Name           string
+	VaultAddress   string
+	VaultToken     string
+	VaultCACert    string
+	Classification models.Classification
+	Region         string
+	Tags           map[string]string
 }
 
 // VaultFactory creates Vault clients for edge nodes.

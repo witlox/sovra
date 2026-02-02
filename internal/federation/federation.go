@@ -21,11 +21,11 @@ import (
 )
 
 const (
-	pkiMountPath        = "pki/federation"
-	federationRoleName  = "federation"
-	defaultCertTTL      = 365 * 24 * time.Hour
-	healthCheckTimeout  = 10 * time.Second
-	requestTimeout      = 30 * time.Second
+	pkiMountPath       = "pki/federation"
+	federationRoleName = "federation"
+	defaultCertTTL     = 365 * 24 * time.Hour
+	healthCheckTimeout = 10 * time.Second
+	requestTimeout     = 30 * time.Second
 )
 
 // productionServiceImpl is the production implementation of the federation Service.
@@ -35,12 +35,11 @@ type productionServiceImpl struct {
 	audit       AuditService
 	mtlsManager *mtlsManager
 	orgID       string
-	logger      *slog.Logger
 
 	// Health monitor
-	healthMu       sync.Mutex
-	healthStop     chan struct{}
-	healthRunning  bool
+	healthMu      sync.Mutex
+	healthStop    chan struct{}
+	healthRunning bool
 }
 
 // mtlsManager manages mTLS clients for partner connections.
@@ -226,7 +225,7 @@ func (s *productionServiceImpl) Init(ctx context.Context, req InitRequest) (*Ini
 			Actor:     "system",
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
-				"operation": "init",
+				"operation":   "init",
 				"common_name": csrReq.CommonName,
 			},
 		})
@@ -380,11 +379,11 @@ func (s *productionServiceImpl) Revoke(ctx context.Context, req RevocationReques
 			Actor:     "system",
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
-				"operation":       "revoke",
-				"partner_org":     req.PartnerOrgID,
-				"federation_id":   fed.ID,
-				"notify_partner":  req.NotifyPartner,
-				"revoke_certs":    req.RevokeCerts,
+				"operation":      "revoke",
+				"partner_org":    req.PartnerOrgID,
+				"federation_id":  fed.ID,
+				"notify_partner": req.NotifyPartner,
+				"revoke_certs":   req.RevokeCerts,
 			},
 		})
 	}
@@ -558,7 +557,7 @@ func (m *mtlsManager) request(ctx context.Context, partnerOrgID, method, path st
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

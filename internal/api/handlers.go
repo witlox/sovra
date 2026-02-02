@@ -29,7 +29,7 @@ import (
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 // readJSON reads and validates JSON request body.
@@ -38,7 +38,7 @@ func readJSON(r *http.Request, v any) error {
 	if err != nil {
 		return err
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	return json.Unmarshal(body, v)
 }
 
@@ -76,14 +76,6 @@ func getOrgID(r *http.Request) string {
 	return ""
 }
 
-// getUserID extracts user ID from context.
-func getUserID(r *http.Request) string {
-	if userID, ok := r.Context().Value(ContextKeyUserID).(string); ok {
-		return userID
-	}
-	return ""
-}
-
 // getPaginationParams extracts limit and offset from query params.
 func getPaginationParams(r *http.Request) (limit, offset int) {
 	limit = 50
@@ -117,12 +109,12 @@ func NewWorkspaceHandler(service workspace.Service) *WorkspaceHandler {
 
 // CreateWorkspaceRequest represents workspace creation request.
 type CreateWorkspaceRequest struct {
-	Name           string                  `json:"name"`
-	Participants   []string                `json:"participants"`
-	Classification models.Classification   `json:"classification"`
-	Mode           models.WorkspaceMode    `json:"mode"`
-	Purpose        string                  `json:"purpose"`
-	CRKSignature   []byte                  `json:"crk_signature"`
+	Name           string                `json:"name"`
+	Participants   []string              `json:"participants"`
+	Classification models.Classification `json:"classification"`
+	Mode           models.WorkspaceMode  `json:"mode"`
+	Purpose        string                `json:"purpose"`
+	CRKSignature   []byte                `json:"crk_signature"`
 }
 
 // Create handles POST /api/v1/workspaces.
@@ -855,11 +847,11 @@ func (h *AuditHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // ExportAuditRequest represents audit export request.
 type ExportAuditRequest struct {
-	OrgID     string           `json:"org_id"`
-	Workspace string           `json:"workspace"`
-	EventType string           `json:"event_type"`
-	Since     string           `json:"since"`
-	Until     string           `json:"until"`
+	OrgID     string             `json:"org_id"`
+	Workspace string             `json:"workspace"`
+	EventType string             `json:"event_type"`
+	Since     string             `json:"since"`
+	Until     string             `json:"until"`
 	Format    audit.ExportFormat `json:"format"`
 }
 
@@ -910,7 +902,7 @@ func (h *AuditHandler) Export(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", "attachment; filename=audit-export."+string(format))
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 // GetStats handles GET /api/v1/audit/stats.

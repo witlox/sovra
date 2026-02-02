@@ -76,7 +76,7 @@ func (c *Client) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -117,7 +117,7 @@ func (c *Client) UploadPolicy(ctx context.Context, id string, policy string) err
 	if err != nil {
 		return fmt.Errorf("uploading policy: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -139,7 +139,7 @@ func (c *Client) DeletePolicy(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("deleting policy: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
@@ -161,7 +161,7 @@ func (c *Client) ListPolicies(ctx context.Context) ([]Policy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing policies: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -188,7 +188,7 @@ func (c *Client) GetPolicy(ctx context.Context, id string) (*Policy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("getting policy: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("policy %q not found", id)
@@ -247,7 +247,7 @@ func (c *Client) Evaluate(ctx context.Context, path string, input models.PolicyI
 	if err != nil {
 		return nil, fmt.Errorf("evaluating policy: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -316,7 +316,7 @@ func (c *Client) EvaluateRaw(ctx context.Context, path string, input any) (*Eval
 	if err != nil {
 		return nil, fmt.Errorf("evaluating policy: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)

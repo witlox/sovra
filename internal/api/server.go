@@ -32,9 +32,9 @@ type ServerConfig struct {
 	TLSConfig   *tls.Config
 
 	// mTLS configuration
-	MTLSEnabled     bool
-	ClientCAFile    string
-	ClientCAs       *x509.CertPool
+	MTLSEnabled  bool
+	ClientCAFile string
+	ClientCAs    *x509.CertPool
 }
 
 // DefaultServerConfig returns a sensible default configuration.
@@ -177,11 +177,11 @@ func (s *Server) Start() error {
 	if s.config.TLSEnabled && s.config.TLSCertFile != "" {
 		err = s.server.ListenAndServeTLS(s.config.TLSCertFile, s.config.TLSKeyFile)
 	} else if s.config.TLSEnabled && s.server.TLSConfig != nil && len(s.server.TLSConfig.Certificates) > 0 {
-		listener, err := net.Listen("tcp", s.config.Addr)
-		if err != nil {
-			return err
+		listener, listenErr := net.Listen("tcp", s.config.Addr)
+		if listenErr != nil {
+			return listenErr
 		}
-		err = s.server.ServeTLS(listener, "", "")
+		return s.server.ServeTLS(listener, "", "")
 	} else {
 		err = s.server.ListenAndServe()
 	}
@@ -323,7 +323,7 @@ func (h *HealthChecker) Check(ctx context.Context) *HealthCheckResult {
 
 // HealthCheckResult represents the result of health checks.
 type HealthCheckResult struct {
-	Status     string                           `json:"status"`
+	Status     string                            `json:"status"`
 	Components map[string]*ComponentHealthResult `json:"components,omitempty"`
 }
 

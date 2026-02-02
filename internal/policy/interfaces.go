@@ -27,10 +27,10 @@ type Repository interface {
 
 // EvaluationResult represents the result of policy evaluation.
 type EvaluationResult struct {
-	Allowed     bool
-	DenyReason  string
-	PolicyID    string
-	EvalTimeMs  int64
+	Allowed    bool
+	DenyReason string
+	PolicyID   string
+	EvalTimeMs int64
 }
 
 // Engine handles OPA policy evaluation.

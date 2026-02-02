@@ -16,15 +16,15 @@ type TransitClient struct {
 type KeyType string
 
 const (
-	KeyTypeAES256GCM96    KeyType = "aes256-gcm96"
-	KeyTypeChacha20Poly   KeyType = "chacha20-poly1305"
-	KeyTypeED25519        KeyType = "ed25519"
-	KeyTypeECDSAP256      KeyType = "ecdsa-p256"
-	KeyTypeECDSAP384      KeyType = "ecdsa-p384"
-	KeyTypeECDSAP521      KeyType = "ecdsa-p521"
-	KeyTypeRSA2048        KeyType = "rsa-2048"
-	KeyTypeRSA3072        KeyType = "rsa-3072"
-	KeyTypeRSA4096        KeyType = "rsa-4096"
+	KeyTypeAES256GCM96  KeyType = "aes256-gcm96"
+	KeyTypeChacha20Poly KeyType = "chacha20-poly1305"
+	KeyTypeED25519      KeyType = "ed25519"
+	KeyTypeECDSAP256    KeyType = "ecdsa-p256"
+	KeyTypeECDSAP384    KeyType = "ecdsa-p384"
+	KeyTypeECDSAP521    KeyType = "ecdsa-p521"
+	KeyTypeRSA2048      KeyType = "rsa-2048"
+	KeyTypeRSA3072      KeyType = "rsa-3072"
+	KeyTypeRSA4096      KeyType = "rsa-4096"
 )
 
 // KeyConfig holds configuration for creating a transit key.
@@ -38,18 +38,18 @@ type KeyConfig struct {
 
 // KeyInfo contains information about a transit key.
 type KeyInfo struct {
-	Name                   string
-	Type                   string
-	Exportable             bool
-	DeletionAllowed        bool
-	Derived                bool
-	MinDecryptionVersion   int
-	MinEncryptionVersion   int
-	LatestVersion          int
-	SupportsEncryption     bool
-	SupportsDecryption     bool
-	SupportsSigning        bool
-	SupportsDerivation     bool
+	Name                 string
+	Type                 string
+	Exportable           bool
+	DeletionAllowed      bool
+	Derived              bool
+	MinDecryptionVersion int
+	MinEncryptionVersion int
+	LatestVersion        int
+	SupportsEncryption   bool
+	SupportsDecryption   bool
+	SupportsSigning      bool
+	SupportsDerivation   bool
 }
 
 // Transit returns a TransitClient for the given mount path.

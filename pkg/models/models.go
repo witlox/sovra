@@ -79,29 +79,29 @@ type WorkspaceParticipant struct {
 
 // Workspace represents a shared cryptographic domain for multi-organization data sharing.
 type Workspace struct {
-	ID                   string                 `json:"id"`
-	Name                 string                 `json:"name"`
-	OwnerOrgID           string                 `json:"owner_org_id"`
-	ParticipantOrgs      []string               `json:"participant_orgs,omitempty"`     // Simple list of org IDs
-	Participants         []WorkspaceParticipant `json:"participants,omitempty"`         // Detailed participants
-	Classification       Classification         `json:"classification"`
-	Mode                 WorkspaceMode          `json:"mode"`
-	Purpose              string                 `json:"purpose"`
-	DEKWrapped           map[string][]byte      `json:"dek_wrapped"`
-	Status               WorkspaceStatus        `json:"status"`
-	CreatedAt            time.Time              `json:"created_at"`
-	UpdatedAt            time.Time              `json:"updated_at"`
-	ExpiresAt            time.Time              `json:"expires_at,omitempty"`
-	Archived             bool                   `json:"archived"` // Deprecated: use Status
+	ID              string                 `json:"id"`
+	Name            string                 `json:"name"`
+	OwnerOrgID      string                 `json:"owner_org_id"`
+	ParticipantOrgs []string               `json:"participant_orgs,omitempty"` // Simple list of org IDs
+	Participants    []WorkspaceParticipant `json:"participants,omitempty"`     // Detailed participants
+	Classification  Classification         `json:"classification"`
+	Mode            WorkspaceMode          `json:"mode"`
+	Purpose         string                 `json:"purpose"`
+	DEKWrapped      map[string][]byte      `json:"dek_wrapped"`
+	Status          WorkspaceStatus        `json:"status"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
+	ExpiresAt       time.Time              `json:"expires_at,omitempty"`
+	Archived        bool                   `json:"archived"` // Deprecated: use Status
 }
 
 // FederationStatus represents the status of a federation link.
 type FederationStatus string
 
 const (
-	FederationStatusPending  FederationStatus = "pending"
-	FederationStatusActive   FederationStatus = "active"
-	FederationStatusRevoked  FederationStatus = "revoked"
+	FederationStatusPending FederationStatus = "pending"
+	FederationStatusActive  FederationStatus = "active"
+	FederationStatusRevoked FederationStatus = "revoked"
 )
 
 // Federation represents a bilateral trust relationship between two organizations.

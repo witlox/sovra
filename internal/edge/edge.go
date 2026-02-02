@@ -192,10 +192,10 @@ type edgeService struct {
 	audit        AuditService
 	logger       *slog.Logger
 
-	mu           sync.RWMutex
-	syncStatus   map[string]*SyncStatus
-	edgeClients  map[string]*vault.Client
-	edgeTokens   map[string]string
+	mu          sync.RWMutex
+	syncStatus  map[string]*SyncStatus
+	edgeClients map[string]*vault.Client
+	edgeTokens  map[string]string
 }
 
 func (s *edgeService) Register(ctx context.Context, orgID string, config *NodeConfig) (*models.EdgeNode, error) {

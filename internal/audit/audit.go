@@ -379,7 +379,7 @@ func (f *httpForwarder) Forward(ctx context.Context, event *models.AuditEvent) e
 			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return nil
@@ -414,7 +414,7 @@ func (f *httpForwarder) ForwardBatch(ctx context.Context, events []*models.Audit
 	if err != nil {
 		return fmt.Errorf("failed to forward batch: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
@@ -439,7 +439,7 @@ func (f *httpForwarder) HealthCheck(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil

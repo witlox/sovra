@@ -105,9 +105,9 @@ func (s *productionService) Create(ctx context.Context, req CreateRequest) (*mod
 			Purpose:   ws.Purpose,
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
-				"workspace_name":   ws.Name,
-				"classification":   string(ws.Classification),
-				"mode":             string(ws.Mode),
+				"workspace_name":    ws.Name,
+				"classification":    string(ws.Classification),
+				"mode":              string(ws.Mode),
 				"participant_count": len(ws.ParticipantOrgs),
 			},
 		}
@@ -292,7 +292,7 @@ func (s *productionService) Delete(ctx context.Context, workspaceID string, sign
 	}
 
 	// Verify signatures from all participants
-	if signatures != nil && len(signatures) > 0 {
+	if len(signatures) > 0 {
 		for _, orgID := range ws.ParticipantOrgs {
 			sig, ok := signatures[orgID]
 			if !ok {

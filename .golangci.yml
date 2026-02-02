@@ -1,0 +1,57 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - govet         # Go vet checks
+    - ineffassign   # Detect ineffective assignments
+    - staticcheck   # Static analysis
+    - unused        # Detect unused code
+    - misspell      # Detect spelling errors
+    - gosec         # Security checks
+    - bodyclose     # Check HTTP response body is closed
+    - prealloc      # Suggest preallocations
+    - unconvert     # Remove unnecessary conversions
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+      exclude-functions:
+        - io.Close
+        - (*os.File).Close
+        - (io.Closer).Close
+        - (*database/sql.Rows).Close
+    govet:
+      disable:
+        - fieldalignment  # Too noisy, minor optimization
+    gosec:
+      excludes:
+        - G104 # Audit errors not checked (too noisy for now)
+    misspell:
+      locale: US
+    staticcheck:
+      checks:
+        - all
+        - "-SA1019" # Disable deprecated warnings (OPA v0->v1 migration)
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+    - path: tests/
+      linters:
+        - gosec
+        - errcheck
+    - path: internal/edge/edge.go
+      text: "error is not nil"

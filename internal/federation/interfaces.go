@@ -86,11 +86,11 @@ type InitResponse struct {
 
 // EstablishRequest represents a federation establishment request.
 type EstablishRequest struct {
-	PartnerOrgID  string
-	PartnerURL    string
-	PartnerCert   []byte
-	PartnerCSR    []byte
-	CRKSignature  []byte
+	PartnerOrgID string
+	PartnerURL   string
+	PartnerCert  []byte
+	PartnerCSR   []byte
+	CRKSignature []byte
 }
 
 // EstablishResponse represents a federation establishment response.
@@ -109,10 +109,10 @@ type HealthCheckResult struct {
 
 // RevocationRequest represents a federation revocation request.
 type RevocationRequest struct {
-	PartnerOrgID    string
-	Signature       []byte
-	NotifyPartner   bool
-	RevokeCerts     bool
+	PartnerOrgID  string
+	Signature     []byte
+	NotifyPartner bool
+	RevokeCerts   bool
 }
 
 // Service handles federation business logic.
