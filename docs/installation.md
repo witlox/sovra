@@ -40,7 +40,7 @@ title: Installation
 
 ```bash
 # Clone repository
-git clone https://github.com/sovra-project/sovra.git
+git clone https://github.com/witlox/sovra.git
 cd sovra
 
 # Install with Kustomize

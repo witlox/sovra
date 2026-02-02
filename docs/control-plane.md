@@ -234,6 +234,6 @@ See [Disaster Recovery Guide](../operations/disaster-recovery.md)
 
 ## Next Steps
 
-- [Deploy Edge Nodes](edge-node.md)
+- [Deploy Edge Nodes](deployment/edge-node.md)
 - [Configure Federation](../federation/README.md)
 - [Set up Monitoring](../operations/monitoring.md)

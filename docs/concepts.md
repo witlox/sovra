@@ -384,4 +384,4 @@ Layer 6: Monitoring (anomaly detection)
 
 ---
 
-**Questions?** See [GitHub Discussions](https://github.com/sovra-project/sovra/discussions) <!-- FAQ coming soon -->
+**Questions?** See [GitHub Discussions](https://github.com/witlox/sovra/discussions) <!-- FAQ coming soon -->

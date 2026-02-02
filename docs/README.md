@@ -7,6 +7,7 @@ Welcome to Sovra! This guide will help you get started with deploying and using 
 - **[Quick Start](quickstart.md)** - Get running in 15 minutes
 - **[Installation](installation.md)** - Complete installation guide
 - **[Core Concepts](concepts.md)** - Understand the architecture
+- **[Security](security/README.md)** - Authentication, authorization, and best practices
 
 ## What is Sovra?
 
@@ -101,8 +102,8 @@ After getting started:
 ## Getting Help
 
 - **Documentation**: You're reading it!
-- **GitHub Issues**: [Report bugs](https://github.com/sovra-project/sovra/issues)
-- **Discussions**: [Ask questions](https://github.com/sovra-project/sovra/discussions)
+- **GitHub Issues**: [Report bugs](https://github.com/witlox/sovra/issues)
+- **Discussions**: [Ask questions](https://github.com/witlox/sovra/discussions)
 
 <!-- FAQ guide coming soon -->
 

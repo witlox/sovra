@@ -25,7 +25,7 @@ This guide walks through:
 ### Clone Repository
 
 ```bash
-git clone https://github.com/sovra-project/sovra.git
+git clone https://github.com/witlox/sovra.git
 cd sovra
 ```
 
@@ -135,7 +135,7 @@ terraform apply
 
 ```bash
 # Install CLI
-wget https://github.com/sovra-project/sovra/releases/download/v0.5.0/sovra-cli-linux-amd64
+wget https://github.com/witlox/sovra/releases/download/v0.5.0/sovra-cli-linux-amd64
 chmod +x sovra-cli-linux-amd64
 sudo mv sovra-cli-linux-amd64 /usr/local/bin/sovra-cli
 
@@ -349,4 +349,4 @@ sovra-cli federation cert verify org-b
 
 ---
 
-**Questions?** See [GitHub Discussions](https://github.com/sovra-project/sovra/discussions) <!-- FAQ coming soon -->
+**Questions?** See [GitHub Discussions](https://github.com/witlox/sovra/discussions) <!-- FAQ coming soon -->

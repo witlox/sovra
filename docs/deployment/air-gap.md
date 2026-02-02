@@ -61,21 +61,21 @@ All software must be transferred offline:
 mkdir -p /tmp/sovra-airgap/{images,manifests,binaries,certs}
 
 # Pull container images
-docker pull sovra-project/api-gateway:v0.5.0
-docker pull sovra-project/policy-engine:v0.5.0
-docker pull sovra-project/key-lifecycle:v0.5.0
-docker pull sovra-project/audit-service:v0.5.0
-docker pull sovra-project/federation-manager:v0.5.0
+docker pull ghcr.io/witlox/sovra-api-gateway:v0.5.0
+docker pull ghcr.io/witlox/sovra-policy-engine:v0.5.0
+docker pull ghcr.io/witlox/sovra-key-lifecycle:v0.5.0
+docker pull ghcr.io/witlox/sovra-audit-service:v0.5.0
+docker pull ghcr.io/witlox/sovra-federation-manager:v0.5.0
 docker pull vault:1.16.0
 docker pull postgres:15.4
 
 # Save images to tarball
 docker save -o /tmp/sovra-airgap/images/sovra-images.tar \
-  sovra-project/api-gateway:v0.5.0 \
-  sovra-project/policy-engine:v0.5.0 \
-  sovra-project/key-lifecycle:v0.5.0 \
-  sovra-project/audit-service:v0.5.0 \
-  sovra-project/federation-manager:v0.5.0 \
+  ghcr.io/witlox/sovra-api-gateway:v0.5.0 \
+  ghcr.io/witlox/sovra-policy-engine:v0.5.0 \
+  ghcr.io/witlox/sovra-key-lifecycle:v0.5.0 \
+  ghcr.io/witlox/sovra-audit-service:v0.5.0 \
+  ghcr.io/witlox/sovra-federation-manager:v0.5.0 \
   vault:1.16.0 \
   postgres:15.4
 ```
@@ -155,8 +155,8 @@ cd sovra-airgap
 docker load < images/sovra-images.tar
 
 # Tag for local registry
-docker tag sovra-project/api-gateway:v0.5.0 localhost:5000/sovra/api-gateway:v0.5.0
-docker tag sovra-project/policy-engine:v0.5.0 localhost:5000/sovra/policy-engine:v0.5.0
+docker tag ghcr.io/witlox/sovra-api-gateway:v0.5.0 localhost:5000/sovra/api-gateway:v0.5.0
+docker tag ghcr.io/witlox/sovra-policy-engine:v0.5.0 localhost:5000/sovra/policy-engine:v0.5.0
 # ... (repeat for all images)
 
 # Push to local registry
@@ -204,7 +204,7 @@ kubectl create secret generic sovra-ca \
 
 ```bash
 # Update image references in manifests to use local registry
-sed -i 's|sovra-project/|localhost:5000/sovra/|g' manifests/*.yaml
+sed -i 's|ghcr.io/witlox/sovra-|localhost:5000/sovra/|g' manifests/*.yaml
 
 # Deploy
 kubectl apply -k manifests/

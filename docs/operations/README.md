@@ -152,7 +152,7 @@ sovra-cli version check
 
 ### On-Call Procedures
 
-See [Incident Response Runbook](../runbooks/incident-response.md) (coming soon)
+See incident response section above for severity levels and response times.
 
 ## Metrics & SLOs
 
@@ -202,5 +202,5 @@ Edge Nodes:
 ## Next Steps
 
 - [Set up monitoring](monitoring.md)
-- [Configure alerting](alerting.md) (coming soon)
-- [Review runbooks](../runbooks/) (coming soon)
+- [Configure disaster recovery](disaster-recovery.md)
+- [Review troubleshooting guide](troubleshooting.md)

@@ -147,7 +147,7 @@ spec:
     spec:
       containers:
       - name: edge-agent
-        image: sovra-project/edge-agent:v0.5.0
+        image: ghcr.io/witlox/sovra-edge-agent:latest
         env:
         - name: NODE_ID
           value: "edge-1"

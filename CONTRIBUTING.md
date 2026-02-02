@@ -28,7 +28,7 @@ We pledge to make participation in this project a harassment-free experience for
 
 **Before submitting a bug report:**
 - Check the [documentation](docs/) to ensure it's not a configuration issue
-- Search [existing issues](https://github.com/sovra-project/sovra/issues) to avoid duplicates
+- Search [existing issues](https://github.com/witlox/sovra/issues) to avoid duplicates
 - Collect relevant information (logs, version numbers, environment details)
 
 **When submitting a bug report, include:**
@@ -174,7 +174,7 @@ git clone https://github.com/YOUR_USERNAME/sovra.git
 cd sovra
 
 # 2. Add upstream remote
-git remote add upstream https://github.com/sovra-project/sovra.git
+git remote add upstream https://github.com/witlox/sovra.git
 
 # 3. Install dependencies
 go mod download
@@ -263,8 +263,8 @@ import (
     "go.uber.org/zap"
     
     // Internal packages
-    "github.com/sovra-project/sovra/libraries/go-common/auth"
-    "github.com/sovra-project/sovra/libraries/go-common/logging"
+    "github.com/witlox/sovra/libraries/go-common/auth"
+    "github.com/witlox/sovra/libraries/go-common/logging"
 )
 
 // Public types/constants/variables
@@ -479,8 +479,8 @@ Include as much detail as possible:
 
 ## Questions?
 
-- **General questions**: [GitHub Discussions](https://github.com/sovra-project/sovra/discussions)
-- **Bugs**: [GitHub Issues](https://github.com/sovra-project/sovra/issues)
+- **General questions**: [GitHub Discussions](https://github.com/witlox/sovra/discussions)
+- **Bugs**: [GitHub Issues](https://github.com/witlox/sovra/issues)
 
 ## Recognition
 

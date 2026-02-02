@@ -62,7 +62,7 @@ Control Plane ← USB → Edge Nodes
 
 ```bash
 # Clone repository
-git clone https://github.com/sovra-project/sovra.git
+git clone https://github.com/witlox/sovra.git
 cd sovra
 
 # Choose deployment
@@ -100,4 +100,4 @@ See [Control Plane](control-plane.md) for details.
 ## Getting Help
 
 - [Troubleshooting](../operations/troubleshooting.md)
-- [GitHub Discussions](https://github.com/sovra-project/sovra/discussions)
+- [GitHub Discussions](https://github.com/witlox/sovra/discussions)
