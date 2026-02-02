@@ -64,7 +64,7 @@ jobs:
           gocovmerge coverage.out coverage-int.out > coverage-merged.out
 
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-${{ matrix.go-version }}
           path: coverage-merged.out
