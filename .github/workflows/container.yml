@@ -10,12 +10,14 @@ on:
       - 'docs/**'
       - '**.md'
       - 'LICENSE'
+      - '.github/workflows/docs.yml'
   pull_request:
     branches: [main]
     paths-ignore:
       - 'docs/**'
       - '**.md'
       - 'LICENSE'
+      - '.github/workflows/docs.yml'
 
 env:
   REGISTRY: ghcr.io

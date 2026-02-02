@@ -3,8 +3,18 @@ name: FOSSA
 on:
   push:
     branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.github/workflows/docs.yml'
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.github/workflows/docs.yml'
 
 jobs:
   # Run full CI pipeline first
