@@ -1,0 +1,46 @@
+# Codecov configuration for Sovra
+# https://docs.codecov.com/docs/codecov-yaml
+
+coverage:
+  precision: 2
+  round: down
+  range: "50...100"
+  
+  status:
+    project:
+      default:
+        target: 50%
+        threshold: 2%
+        if_ci_failed: error
+    patch:
+      default:
+        target: 60%
+        threshold: 5%
+        if_ci_failed: error
+
+parsers:
+  go:
+    partials_as_hits: true
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+  require_changes: true
+  require_base: false
+  require_head: true
+
+flags:
+  unittests:
+    paths:
+      - pkg/
+      - internal/
+      - cmd/
+    carryforward: true
+
+ignore:
+  - "tests/**/*"
+  - "docs/**/*"
+  - "infrastructure/**/*"
+  - "**/*_test.go"
+  - "**/mock_*.go"
+  - "**/mocks/**"
