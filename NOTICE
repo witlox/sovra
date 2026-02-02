@@ -1,0 +1,60 @@
+Sovra
+Copyright 2024-2026 The Sovra Authors
+
+This product includes software developed at The Sovra Project
+(https://github.com/witlox/sovra).
+
+================================================================================
+Third-Party Dependencies and Licenses
+================================================================================
+
+This software uses the following third-party dependencies:
+
+--------------------------------------------------------------------------------
+HashiCorp Vault API
+--------------------------------------------------------------------------------
+License: Mozilla Public License 2.0 (MPL-2.0)
+Source: https://github.com/hashicorp/vault
+
+The MPL-2.0 is a weak copyleft license. It requires that modifications to
+MPL-licensed files be released under the MPL, but allows combining with
+proprietary code. Sovra uses the Vault API client library without modification.
+
+--------------------------------------------------------------------------------
+OpenTelemetry Go Instrumentation
+--------------------------------------------------------------------------------
+License: LGPL-2.1 (transitive dependency)
+Source: https://github.com/open-telemetry/opentelemetry-go-instrumentation
+
+The LGPL-2.1 allows linking with proprietary software without requiring the
+proprietary software to be released under the LGPL, provided the LGPL-licensed
+component is not modified. This is a transitive dependency through the
+OpenTelemetry ecosystem.
+
+--------------------------------------------------------------------------------
+Other Dependencies
+--------------------------------------------------------------------------------
+
+Most dependencies are licensed under permissive licenses (Apache-2.0, MIT, BSD):
+
+- github.com/go-chi/chi/v5 - MIT License
+- github.com/google/uuid - BSD-3-Clause
+- github.com/lib/pq - MIT License
+- github.com/open-policy-agent/opa - Apache-2.0
+- github.com/testcontainers/testcontainers-go - MIT License
+- And others (see go.mod for full list)
+
+For the complete list of dependencies and their licenses, see:
+https://app.fossa.com/projects/git%2Bgithub.com%2Fwitlox%2Fsovra
+
+================================================================================
+License Compatibility
+================================================================================
+
+Sovra is licensed under the Apache License 2.0. The use of MPL-2.0 and LGPL-2.1
+licensed dependencies is compatible with Apache-2.0:
+
+- MPL-2.0: File-level copyleft only; compatible with Apache-2.0
+- LGPL-2.1: Allows linking; compatible when used as a library
+
+No modifications have been made to any copyleft-licensed code.

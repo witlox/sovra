@@ -27,8 +27,8 @@ Sovra is an open source federated control plane for managing cryptographic keys 
   <a href="https://goreportcard.com/report/github.com/witlox/sovra">
     <img src="https://goreportcard.com/badge/github.com/witlox/sovra" alt="Go Report Card">
   </a>
-  <a href="https://app.fossa.com/projects/git%2Bgithub.com%2Fwitlox%2Fsovra">
-    <img src="https://app.fossa.com/api/projects/git%2Bgithub.com%2Fwitlox%2Fsovra.svg?type=shield" alt="FOSSA Status">
+  <a href="https://app.fossa.com/projects/custom%2B4756%2Fgithub.com%2Fwitlox%2Fsovra">
+    <img src="https://app.fossa.com/projects/custom%2B4756%2Fgithub.com%2Fwitlox%2Fsovra?ref=badge_shield&issueType=license" alt="FOSSA Status">
   </a>
   <a href="https://github.com/witlox/sovra/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/witlox/sovra" alt="License">

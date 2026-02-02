@@ -11,6 +11,12 @@ analyze:
     - path: .
       type: gomod
 
+# Allow copyleft licenses used by transitive dependencies
+# MPL-2.0: HashiCorp Vault API - weak copyleft, only affects modified files
+# LGPL-2.1: OpenTelemetry instrumentation - allows linking without copyleft
+vendoredDependencies:
+  forceRescans: false
+
 paths:
   exclude:
     - tests/
