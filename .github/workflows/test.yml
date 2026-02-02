@@ -6,9 +6,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ["1.24"]
 
     services:
       postgres:
@@ -28,10 +25,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go ${{ matrix.go-version }}
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version-file: go.mod
 
       - name: Cache Go modules
         uses: actions/cache@v5
@@ -39,9 +36,9 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-go-${{ hashFiles('go.mod') }}-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-${{ matrix.go-version }}-
+            ${{ runner.os }}-go-${{ hashFiles('go.mod') }}-
 
       - name: Download dependencies
         run: go mod download
@@ -64,9 +61,9 @@ jobs:
           gocovmerge coverage.out coverage-int.out > coverage-merged.out
 
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ matrix.go-version }}
+          name: coverage
           path: coverage-merged.out
           retention-days: 7
 
@@ -75,7 +72,7 @@ jobs:
         with:
           files: coverage-merged.out
           flags: unittests
-          name: codecov-${{ matrix.go-version }}
+          name: codecov
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 

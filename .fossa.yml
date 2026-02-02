@@ -1,0 +1,21 @@
+version: 3
+
+server: https://app.fossa.com
+
+project:
+  id: github.com/witlox/sovra
+  name: sovra
+  team: witlox
+  policy: default
+
+analyze:
+  modules:
+    - path: .
+      type: gomod
+
+paths:
+  exclude:
+    - tests/
+    - docs/
+    - infrastructure/
+    - vendor/
