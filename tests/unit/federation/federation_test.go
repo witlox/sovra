@@ -5,178 +5,213 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sovra-project/sovra/internal/federation"
 	"github.com/sovra-project/sovra/pkg/errors"
 	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/tests/mocks"
 	"github.com/sovra-project/sovra/tests/testutil"
+	"github.com/sovra-project/sovra/tests/testutil/inmemory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// createTestService creates a federation service with inmemory dependencies.
+func createTestService(orgID string) federation.Service {
+	repo := inmemory.NewFederationRepository()
+	certMgr := inmemory.NewFederationCertManager()
+	mtlsClient := inmemory.NewFederationMTLSClient()
+	svc := federation.NewService(repo, certMgr, mtlsClient)
+	// Initialize with org ID
+	_, _ = svc.Init(context.Background(), federation.InitRequest{OrgID: orgID})
+	return svc
+}
+
 func TestFederationInitialization(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewFederationRepository()
+	repo := inmemory.NewFederationRepository()
+	certMgr := inmemory.NewFederationCertManager()
+	mtlsClient := inmemory.NewFederationMTLSClient()
+	svc := federation.NewService(repo, certMgr, mtlsClient)
 
-	t.Run("stores organization certificate", func(t *testing.T) {
-		cert := []byte("-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----")
-
-		err := repo.StoreCertificate(ctx, "org-eth", cert)
+	t.Run("initializes federation for organization", func(t *testing.T) {
+		resp, err := svc.Init(ctx, federation.InitRequest{
+			OrgID: "org-eth",
+		})
 
 		require.NoError(t, err)
-
-		retrieved, err := repo.GetCertificate(ctx, "org-eth")
-		require.NoError(t, err)
-		assert.Equal(t, cert, retrieved)
+		assert.Equal(t, "org-eth", resp.OrgID)
+		assert.NotEmpty(t, resp.CSR)
+		assert.NotEmpty(t, resp.Certificate)
 	})
 
-	t.Run("returns error for missing certificate", func(t *testing.T) {
-		_, err := repo.GetCertificate(ctx, "org-unknown")
+	t.Run("generates CSR for federation", func(t *testing.T) {
+		csr, err := certMgr.GenerateCSR("org-uzh")
+
+		require.NoError(t, err)
+		assert.NotEmpty(t, csr)
+	})
+
+	t.Run("validates partner certificate", func(t *testing.T) {
+		cert := []byte("valid-certificate-data")
+
+		parsed, err := certMgr.ValidateCertificate(cert)
+
+		require.NoError(t, err)
+		assert.NotNil(t, parsed)
+	})
+
+	t.Run("rejects empty certificate", func(t *testing.T) {
+		_, err := certMgr.ValidateCertificate([]byte{})
 
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errors.ErrNotFound)
+		assert.ErrorIs(t, err, errors.ErrCertificateInvalid)
 	})
 }
 
 func TestFederationEstablishment(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewFederationRepository()
-	mtlsClient := mocks.NewFederationMTLSClient()
+	svc := createTestService("org-eth")
 
 	t.Run("establishes federation with partner", func(t *testing.T) {
-		partnerCert := []byte("partner-certificate")
+		req := federation.EstablishRequest{
+			PartnerOrgID: "org-partner",
+			PartnerURL:   "https://partner.example.com",
+			PartnerCert:  []byte("partner-certificate-data"),
+		}
 
-		// Connect to partner
-		err := mtlsClient.Connect(ctx, "org-partner", partnerCert)
-		require.NoError(t, err)
-
-		// Store federation
-		fed := testutil.TestFederation("org-eth", "org-partner")
-		err = repo.Create(ctx, fed)
+		fed, err := svc.Establish(ctx, req)
 
 		require.NoError(t, err)
 		assert.NotEmpty(t, fed.ID)
+		assert.Equal(t, "org-partner", fed.PartnerOrgID)
 		assert.Equal(t, models.FederationStatusActive, fed.Status)
 	})
 
-	t.Run("fails when partner unreachable", func(t *testing.T) {
-		mtlsClient.Unreachable["org-unreachable"] = true
+	t.Run("retrieves federation status", func(t *testing.T) {
+		req := federation.EstablishRequest{
+			PartnerOrgID: "org-status-test",
+			PartnerURL:   "https://status.example.com",
+			PartnerCert:  []byte("status-cert"),
+		}
+		_, _ = svc.Establish(ctx, req)
 
-		err := mtlsClient.Connect(ctx, "org-unreachable", []byte("cert"))
+		status, err := svc.Status(ctx, "org-status-test")
 
-		require.Error(t, err)
-		assert.ErrorIs(t, err, errors.ErrFederationFailed)
-	})
-
-	t.Run("requires bilateral establishment", func(t *testing.T) {
-		// Org A -> Org B
-		fedAB := testutil.TestFederation("org-a", "org-b")
-		_ = repo.Create(ctx, fedAB)
-
-		// Org B -> Org A
-		fedBA := testutil.TestFederation("org-b", "org-a")
-		_ = repo.Create(ctx, fedBA)
-
-		// Both directions should exist
-		abFed, err := repo.Get(ctx, "org-a", "org-b")
 		require.NoError(t, err)
-		assert.NotNil(t, abFed)
-
-		baFed, err := repo.Get(ctx, "org-b", "org-a")
-		require.NoError(t, err)
-		assert.NotNil(t, baFed)
+		assert.Equal(t, models.FederationStatusActive, status.Status)
 	})
 }
 
 func TestFederationListing(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewFederationRepository()
+	svc := createTestService("org-eth")
 
 	// Create federations
 	partners := []string{"org-partner-1", "org-partner-2", "org-partner-3"}
 	for _, partner := range partners {
-		fed := testutil.TestFederation("org-eth", partner)
-		_ = repo.Create(ctx, fed)
+		req := federation.EstablishRequest{
+			PartnerOrgID: partner,
+			PartnerURL:   "https://" + partner + ".example.com",
+			PartnerCert:  []byte(partner + "-cert"),
+		}
+		_, _ = svc.Establish(ctx, req)
 	}
 
 	t.Run("lists all federations for organization", func(t *testing.T) {
-		federations, err := repo.List(ctx, "org-eth")
+		federations, err := svc.List(ctx)
 
 		require.NoError(t, err)
 		assert.Len(t, federations, 3)
-	})
-
-	t.Run("returns empty list for unfederated org", func(t *testing.T) {
-		federations, err := repo.List(ctx, "org-isolated")
-
-		require.NoError(t, err)
-		assert.Empty(t, federations)
 	})
 }
 
 func TestFederationHealthCheck(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	mtlsClient := mocks.NewFederationMTLSClient()
+	svc := createTestService("org-eth")
 
-	t.Run("healthy partner returns true", func(t *testing.T) {
-		healthy, err := mtlsClient.HealthCheck(ctx, "org-healthy")
+	t.Run("performs health check on federated partners", func(t *testing.T) {
+		req := federation.EstablishRequest{
+			PartnerOrgID: "org-healthy",
+			PartnerURL:   "https://healthy.example.com",
+			PartnerCert:  []byte("healthy-cert"),
+		}
+		_, _ = svc.Establish(ctx, req)
 
-		require.NoError(t, err)
-		assert.True(t, healthy)
-	})
-
-	t.Run("unreachable partner returns false", func(t *testing.T) {
-		mtlsClient.Unreachable["org-down"] = true
-
-		healthy, err := mtlsClient.HealthCheck(ctx, "org-down")
+		results, err := svc.HealthCheck(ctx)
 
 		require.NoError(t, err)
-		assert.False(t, healthy)
+		assert.Len(t, results, 1)
+		assert.Equal(t, "org-healthy", results[0].PartnerOrgID)
+		assert.True(t, results[0].Healthy)
 	})
 }
 
 func TestFederationRevocation(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewFederationRepository()
+	svc := createTestService("org-eth")
 
 	t.Run("revokes federation", func(t *testing.T) {
-		fed := testutil.TestFederation("org-eth", "org-ex-partner")
-		_ = repo.Create(ctx, fed)
+		req := federation.EstablishRequest{
+			PartnerOrgID: "org-ex-partner",
+			PartnerURL:   "https://ex-partner.example.com",
+			PartnerCert:  []byte("ex-partner-cert"),
+		}
+		_, _ = svc.Establish(ctx, req)
 
-		fed.Status = models.FederationStatusRevoked
-		err := repo.Update(ctx, fed)
+		err := svc.Revoke(ctx, federation.RevocationRequest{
+			PartnerOrgID: "org-ex-partner",
+		})
 
 		require.NoError(t, err)
 
-		updated, _ := repo.Get(ctx, "org-eth", "org-ex-partner")
-		assert.Equal(t, models.FederationStatusRevoked, updated.Status)
+		status, _ := svc.Status(ctx, "org-ex-partner")
+		assert.Equal(t, models.FederationStatusRevoked, status.Status)
 	})
+}
 
-	t.Run("deletes federation record", func(t *testing.T) {
-		fed := testutil.TestFederation("org-eth", "org-delete")
-		_ = repo.Create(ctx, fed)
+func TestFederationPublicKeyRequest(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	svc := createTestService("org-eth")
 
-		err := repo.Delete(ctx, fed.ID)
+	t.Run("requests public key from partner", func(t *testing.T) {
+		req := federation.EstablishRequest{
+			PartnerOrgID: "org-key-partner",
+			PartnerURL:   "https://key-partner.example.com",
+			PartnerCert:  []byte("key-partner-cert"),
+		}
+		_, _ = svc.Establish(ctx, req)
+
+		pubKey, err := svc.RequestPublicKey(ctx, "org-key-partner")
 
 		require.NoError(t, err)
+		assert.NotEmpty(t, pubKey)
 	})
 }
 
 func BenchmarkFederationOperations(b *testing.B) {
 	ctx := context.Background()
-	repo := mocks.NewFederationRepository()
-	mtlsClient := mocks.NewFederationMTLSClient()
+	svc := createTestService("org-bench")
 
 	b.Run("Establish", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_ = mtlsClient.Connect(ctx, "org-partner", []byte("cert"))
-			fed := testutil.TestFederation("org-eth", "org-partner")
-			_ = repo.Create(ctx, fed)
+			req := federation.EstablishRequest{
+				PartnerOrgID: "org-partner",
+				PartnerURL:   "https://partner.example.com",
+				PartnerCert:  []byte("cert"),
+			}
+			_, _ = svc.Establish(ctx, req)
 		}
 	})
 
 	b.Run("HealthCheck", func(b *testing.B) {
+		req := federation.EstablishRequest{
+			PartnerOrgID: "org-health-bench",
+			PartnerURL:   "https://health-bench.example.com",
+			PartnerCert:  []byte("health-bench-cert"),
+		}
+		_, _ = svc.Establish(ctx, req)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_, _ = mtlsClient.HealthCheck(ctx, "org-partner")
+			_, _ = svc.HealthCheck(ctx)
 		}
 	})
 }

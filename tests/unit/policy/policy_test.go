@@ -5,67 +5,120 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sovra-project/sovra/internal/policy"
 	"github.com/sovra-project/sovra/pkg/errors"
 	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/tests/mocks"
 	"github.com/sovra-project/sovra/tests/testutil"
+	"github.com/sovra-project/sovra/tests/testutil/inmemory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// createTestService creates a policy service with inmemory dependencies.
+func createTestService() (policy.Service, *inmemory.PolicyRepository, *inmemory.OPAClient) {
+	repo := inmemory.NewPolicyRepository()
+	opaClient := inmemory.NewOPAClient()
+	svc := policy.NewPolicyService(repo, opaClient, nil)
+	return svc, repo, opaClient
+}
+
 func TestPolicyCreation(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewPolicyRepository()
+	svc, _, opaClient := createTestService()
 
 	t.Run("creates policy with valid rego", func(t *testing.T) {
-		policy := testutil.TestPolicy("encrypt-only", "ws-123")
+		req := policy.CreateRequest{
+			Name:      "encrypt-only",
+			Workspace: "ws-123",
+			Rego: `package sovra.workspace
+default allow = false
+allow { input.operation == "encrypt" }`,
+		}
 
-		err := repo.Create(ctx, policy)
+		p, err := svc.Create(ctx, req)
 
 		require.NoError(t, err)
-		assert.NotEmpty(t, policy.ID)
-		assert.False(t, policy.CreatedAt.IsZero())
+		assert.NotEmpty(t, p.ID)
+		assert.Equal(t, "encrypt-only", p.Name)
+		assert.Equal(t, "ws-123", p.WorkspaceID)
+		assert.Equal(t, 1, p.Version)
+		assert.False(t, p.CreatedAt.IsZero())
+
+		// Verify policy was uploaded to OPA
+		_, exists := opaClient.GetPolicy("sovra-policy-" + p.ID)
+		assert.True(t, exists)
 	})
 
-	t.Run("associates policy with workspace", func(t *testing.T) {
-		policy := testutil.TestPolicy("workspace-policy", "ws-specific")
+	t.Run("rejects invalid rego syntax", func(t *testing.T) {
+		req := policy.CreateRequest{
+			Name:      "invalid-policy",
+			Workspace: "ws-123",
+			Rego:      "this is not valid rego {{{",
+		}
 
-		err := repo.Create(ctx, policy)
+		_, err := svc.Create(ctx, req)
 
-		require.NoError(t, err)
-		assert.Equal(t, "ws-specific", policy.WorkspaceID)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrPolicyInvalid)
+	})
+
+	t.Run("rejects empty rego", func(t *testing.T) {
+		req := policy.CreateRequest{
+			Name:      "empty-policy",
+			Workspace: "ws-123",
+			Rego:      "",
+		}
+
+		_, err := svc.Create(ctx, req)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrPolicyInvalid)
 	})
 }
 
 func TestPolicyRetrieval(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewPolicyRepository()
+	svc, _, _ := createTestService()
 
 	t.Run("retrieves existing policy", func(t *testing.T) {
-		policy := testutil.TestPolicy("test-policy", "ws-123")
-		_ = repo.Create(ctx, policy)
+		req := policy.CreateRequest{
+			Name:      "test-policy",
+			Workspace: "ws-123",
+			Rego: `package test
+default allow = true`,
+		}
+		created, err := svc.Create(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, created)
 
-		retrieved, err := repo.Get(ctx, policy.ID)
+		retrieved, err := svc.Get(ctx, created.ID)
 
 		require.NoError(t, err)
-		assert.Equal(t, policy.ID, retrieved.ID)
-		assert.Equal(t, policy.Name, retrieved.Name)
+		assert.Equal(t, created.ID, retrieved.ID)
+		assert.Equal(t, created.Name, retrieved.Name)
 	})
 
 	t.Run("returns error for non-existent policy", func(t *testing.T) {
-		_, err := repo.Get(ctx, "non-existent")
+		_, err := svc.Get(ctx, "non-existent")
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrNotFound)
 	})
 
 	t.Run("retrieves policies by workspace", func(t *testing.T) {
+		// Create policies for specific workspace
 		for i := 0; i < 3; i++ {
-			policy := testutil.TestPolicy("policy-"+string(rune('a'+i)), "ws-multi")
-			_ = repo.Create(ctx, policy)
+			req := policy.CreateRequest{
+				Name:      "policy-" + string(rune('a'+i)),
+				Workspace: "ws-multi",
+				Rego: `package test
+default allow = true`,
+			}
+			_, err := svc.Create(ctx, req)
+			require.NoError(t, err)
 		}
 
-		policies, err := repo.GetByWorkspace(ctx, "ws-multi")
+		policies, err := svc.GetForWorkspace(ctx, "ws-multi")
 
 		require.NoError(t, err)
 		assert.Len(t, policies, 3)
@@ -74,12 +127,9 @@ func TestPolicyRetrieval(t *testing.T) {
 
 func TestPolicyEvaluation(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	engine := mocks.NewPolicyEngine()
+	svc, _, opaClient := createTestService()
 
 	t.Run("allows action when policy permits", func(t *testing.T) {
-		policy := testutil.TestPolicy("allow-encrypt", "ws-123")
-		_ = engine.LoadPolicy(ctx, policy)
-
 		input := models.PolicyInput{
 			Actor:     "user-123",
 			Role:      "researcher",
@@ -87,14 +137,14 @@ func TestPolicyEvaluation(t *testing.T) {
 			Workspace: "ws-123",
 		}
 
-		allowed, err := engine.Evaluate(ctx, input)
+		result, err := svc.Evaluate(ctx, input)
 
 		require.NoError(t, err)
-		assert.True(t, allowed)
+		assert.True(t, result.Allowed)
 	})
 
 	t.Run("denies action when policy denies", func(t *testing.T) {
-		engine.DenyNext = true
+		opaClient.SetDenyNext(true)
 
 		input := models.PolicyInput{
 			Actor:     "user-123",
@@ -102,26 +152,17 @@ func TestPolicyEvaluation(t *testing.T) {
 			Operation: "delete",
 		}
 
-		allowed, err := engine.Evaluate(ctx, input)
+		result, err := svc.Evaluate(ctx, input)
 
 		require.NoError(t, err)
-		assert.False(t, allowed)
-	})
-
-	t.Run("tracks evaluation count", func(t *testing.T) {
-		initialCount := engine.EvalCount
-		input := models.PolicyInput{Operation: "test"}
-
-		_, _ = engine.Evaluate(ctx, input)
-		_, _ = engine.Evaluate(ctx, input)
-		_, _ = engine.Evaluate(ctx, input)
-
-		assert.Equal(t, initialCount+3, engine.EvalCount)
+		assert.False(t, result.Allowed)
+		assert.NotEmpty(t, result.DenyReason)
 	})
 }
 
 func TestPolicyValidation(t *testing.T) {
-	engine := mocks.NewPolicyEngine()
+	ctx := testutil.TestContext(t)
+	svc, _, _ := createTestService()
 
 	t.Run("validates valid rego", func(t *testing.T) {
 		rego := `
@@ -130,13 +171,20 @@ func TestPolicyValidation(t *testing.T) {
 			allow { input.action == "encrypt" }
 		`
 
-		err := engine.ValidateRego(rego)
+		err := svc.Validate(ctx, rego)
 
 		require.NoError(t, err)
 	})
 
 	t.Run("rejects empty rego", func(t *testing.T) {
-		err := engine.ValidateRego("")
+		err := svc.Validate(ctx, "")
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrPolicyInvalid)
+	})
+
+	t.Run("rejects invalid rego syntax", func(t *testing.T) {
+		err := svc.Validate(ctx, "invalid rego {{{}}")
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrPolicyInvalid)
@@ -145,74 +193,109 @@ func TestPolicyValidation(t *testing.T) {
 
 func TestPolicyUpdate(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewPolicyRepository()
+	svc, _, opaClient := createTestService()
 
 	t.Run("updates policy rego", func(t *testing.T) {
-		policy := testutil.TestPolicy("mutable-policy", "ws-123")
-		_ = repo.Create(ctx, policy)
+		req := policy.CreateRequest{
+			Name:      "mutable-policy",
+			Workspace: "ws-123",
+			Rego: `package test
+default allow = false`,
+		}
+		created, err := svc.Create(ctx, req)
+		require.NoError(t, err)
 
 		newRego := `
 			package sovra.workspace
 			default allow = true
 		`
-		policy.Rego = newRego
-		err := repo.Update(ctx, policy)
+		updated, err := svc.Update(ctx, created.ID, newRego, nil)
 
 		require.NoError(t, err)
+		assert.Equal(t, 2, updated.Version)
+		assert.Contains(t, updated.Rego, "default allow = true")
 
-		updated, _ := repo.Get(ctx, policy.ID)
-		assert.Equal(t, newRego, updated.Rego)
+		// Verify OPA was updated
+		_, exists := opaClient.GetPolicy("sovra-policy-" + created.ID)
+		assert.True(t, exists)
 	})
 
-	t.Run("updates timestamp on modification", func(t *testing.T) {
-		policy := testutil.TestPolicy("timestamp-policy", "ws-123")
-		_ = repo.Create(ctx, policy)
-		originalUpdatedAt := policy.UpdatedAt
+	t.Run("rejects update with invalid rego", func(t *testing.T) {
+		req := policy.CreateRequest{
+			Name:      "update-test",
+			Workspace: "ws-123",
+			Rego: `package test
+default allow = false`,
+		}
+		created, err := svc.Create(ctx, req)
+		require.NoError(t, err)
 
-		policy.Name = "renamed-policy"
-		_ = repo.Update(ctx, policy)
+		_, err = svc.Update(ctx, created.ID, "invalid rego {{{", nil)
 
-		assert.True(t, policy.UpdatedAt.After(originalUpdatedAt) || policy.UpdatedAt.Equal(originalUpdatedAt))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrPolicyInvalid)
+	})
+
+	t.Run("returns error for non-existent policy", func(t *testing.T) {
+		_, err := svc.Update(ctx, "non-existent", `package test`, nil)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrNotFound)
 	})
 }
 
 func TestPolicyDeletion(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewPolicyRepository()
+	svc, _, opaClient := createTestService()
 
 	t.Run("deletes policy", func(t *testing.T) {
-		policy := testutil.TestPolicy("to-delete", "ws-123")
-		_ = repo.Create(ctx, policy)
+		req := policy.CreateRequest{
+			Name:      "to-delete",
+			Workspace: "ws-123",
+			Rego: `package test
+default allow = false`,
+		}
+		created, err := svc.Create(ctx, req)
+		require.NoError(t, err)
+		policyOPAID := "sovra-policy-" + created.ID
 
-		err := repo.Delete(ctx, policy.ID)
+		// Verify policy exists in OPA
+		_, exists := opaClient.GetPolicy(policyOPAID)
+		assert.True(t, exists)
+
+		err = svc.Delete(ctx, created.ID, nil)
 
 		require.NoError(t, err)
 
-		_, err = repo.Get(ctx, policy.ID)
+		// Verify policy was removed from OPA
+		_, exists = opaClient.GetPolicy(policyOPAID)
+		assert.False(t, exists)
+
+		// Verify policy cannot be retrieved
+		_, err = svc.Get(ctx, created.ID)
 		assert.ErrorIs(t, err, errors.ErrNotFound)
 	})
-}
 
-func TestPolicyUnloading(t *testing.T) {
-	ctx := testutil.TestContext(t)
-	engine := mocks.NewPolicyEngine()
+	t.Run("returns error for non-existent policy", func(t *testing.T) {
+		err := svc.Delete(ctx, "non-existent", nil)
 
-	t.Run("unloads policy from engine", func(t *testing.T) {
-		policy := testutil.TestPolicy("temporary", "ws-123")
-		_ = engine.LoadPolicy(ctx, policy)
-
-		err := engine.UnloadPolicy(ctx, policy.ID)
-
-		require.NoError(t, err)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrNotFound)
 	})
 }
 
 func BenchmarkPolicyOperations(b *testing.B) {
 	ctx := context.Background()
-	engine := mocks.NewPolicyEngine()
+	svc, _, _ := createTestService()
 
-	policy := testutil.TestPolicy("bench-policy", "ws-bench")
-	_ = engine.LoadPolicy(ctx, policy)
+	// Create a policy for benchmarking
+	req := policy.CreateRequest{
+		Name:      "bench-policy",
+		Workspace: "ws-bench",
+		Rego: `package bench
+default allow = true`,
+	}
+	_, _ = svc.Create(ctx, req)
 
 	b.Run("Evaluate", func(b *testing.B) {
 		input := models.PolicyInput{
@@ -222,15 +305,15 @@ func BenchmarkPolicyOperations(b *testing.B) {
 		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_, _ = engine.Evaluate(ctx, input)
+			_, _ = svc.Evaluate(ctx, input)
 		}
 	})
 
-	b.Run("ValidateRego", func(b *testing.B) {
+	b.Run("Validate", func(b *testing.B) {
 		rego := `package test; default allow = false`
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = engine.ValidateRego(rego)
+			_ = svc.Validate(ctx, rego)
 		}
 	})
 }

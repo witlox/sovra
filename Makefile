@@ -25,9 +25,26 @@ test-acceptance:
 test-integration:
 	go test -v ./tests/integration/...
 
-# Run all tests with coverage
+# Run tests with coverage (short mode - uses mocks)
 coverage:
-	go test -short -coverprofile=coverage.out ./tests/...
+	go test -short -coverprofile=coverage.out -coverpkg=github.com/sovra-project/sovra/internal/...,github.com/sovra-project/sovra/pkg/... ./tests/...
+	go tool cover -func=coverage.out | tail -1
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
+
+# Run integration tests with full coverage (requires Docker)
+coverage-full:
+	@echo "Running integration tests with coverage (requires Docker)..."
+	go test -v -coverprofile=coverage.out -coverpkg=github.com/sovra-project/sovra/internal/...,github.com/sovra-project/sovra/pkg/... ./tests/integration/...
+	go tool cover -func=coverage.out | tail -1
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
+
+# Run all tests with full coverage (requires Docker)
+coverage-all:
+	@echo "Running all tests with coverage (requires Docker)..."
+	go test -v -coverprofile=coverage.out -coverpkg=github.com/sovra-project/sovra/internal/...,github.com/sovra-project/sovra/pkg/... ./tests/...
+	go tool cover -func=coverage.out | tail -1
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
@@ -70,18 +87,20 @@ test-race:
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  all            - lint, test, build (default)"
-	@echo "  build          - build all packages"
-	@echo "  test           - run tests (short mode)"
-	@echo "  test-unit      - run unit tests only"
-	@echo "  test-acceptance - run acceptance tests"
+	@echo "  all              - lint, test, build (default)"
+	@echo "  build            - build all packages"
+	@echo "  test             - run tests (short mode)"
+	@echo "  test-unit        - run unit tests only"
+	@echo "  test-acceptance  - run acceptance tests"
 	@echo "  test-integration - run integration tests (requires Docker)"
-	@echo "  coverage       - run tests with coverage report"
-	@echo "  lint           - run golangci-lint"
-	@echo "  fmt            - format code"
-	@echo "  install-tools  - install development tools"
-	@echo "  setup          - install tools and git hooks"
-	@echo "  clean          - clean build artifacts"
-	@echo "  tidy           - tidy go.mod"
-	@echo "  security       - run security scan"
-	@echo "  test-race      - run tests with race detector"
+	@echo "  coverage         - run tests with coverage (short mode)"
+	@echo "  coverage-full    - run integration tests with full coverage (requires Docker)"
+	@echo "  coverage-all     - run all tests with full coverage (requires Docker)"
+	@echo "  lint             - run golangci-lint"
+	@echo "  fmt              - format code"
+	@echo "  install-tools    - install development tools"
+	@echo "  setup            - install tools and git hooks"
+	@echo "  clean            - clean build artifacts"
+	@echo "  tidy             - tidy go.mod"
+	@echo "  security         - run security scan"
+	@echo "  test-race        - run tests with race detector"

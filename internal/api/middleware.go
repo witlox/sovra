@@ -47,7 +47,7 @@ func DefaultMiddlewareConfig() *MiddlewareConfig {
 		RequireAuth:     true,
 		RateLimit:       100,
 		RateLimitWindow: time.Minute,
-		SkipPaths:       []string{"/health", "/ready"},
+		SkipPaths:       []string{"/health", "/ready", "/live"},
 		Logger:          slog.Default(),
 	}
 }

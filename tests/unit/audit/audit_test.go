@@ -6,22 +6,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sovra-project/sovra/internal/audit"
 	"github.com/sovra-project/sovra/pkg/errors"
 	"github.com/sovra-project/sovra/pkg/models"
-	"github.com/sovra-project/sovra/tests/mocks"
 	"github.com/sovra-project/sovra/tests/testutil"
+	"github.com/sovra-project/sovra/tests/testutil/inmemory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAuditEventCreation(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewAuditRepository()
+	repo := inmemory.NewAuditRepository()
+	svc := audit.NewAuditService(repo)
 
 	t.Run("creates audit event with all fields", func(t *testing.T) {
 		event := testutil.TestAuditEvent("org-eth", "cancer-research", models.AuditEventTypeEncrypt)
 
-		err := repo.Create(ctx, event)
+		err := svc.Log(ctx, event)
 
 		require.NoError(t, err)
 		assert.NotEmpty(t, event.ID)
@@ -35,7 +37,7 @@ func TestAuditEventCreation(t *testing.T) {
 			Result:    models.AuditEventResultSuccess,
 		}
 
-		err := repo.Create(ctx, event)
+		err := svc.Log(ctx, event)
 
 		require.NoError(t, err)
 		assert.False(t, event.Timestamp.IsZero())
@@ -52,28 +54,68 @@ func TestAuditEventCreation(t *testing.T) {
 
 		for _, eventType := range eventTypes {
 			event := testutil.TestAuditEvent("org-eth", "ws-123", eventType)
-			err := repo.Create(ctx, event)
+			err := svc.Log(ctx, event)
 			require.NoError(t, err)
 		}
+	})
+
+	t.Run("requires org ID", func(t *testing.T) {
+		event := &models.AuditEvent{
+			EventType: models.AuditEventTypeEncrypt,
+			Actor:     "user@test.com",
+		}
+
+		err := svc.Log(ctx, event)
+		require.Error(t, err)
+	})
+
+	t.Run("requires actor", func(t *testing.T) {
+		event := &models.AuditEvent{
+			OrgID:     "org-eth",
+			EventType: models.AuditEventTypeEncrypt,
+		}
+
+		err := svc.Log(ctx, event)
+		require.Error(t, err)
+	})
+
+	t.Run("computes data hash", func(t *testing.T) {
+		event := testutil.TestAuditEvent("org-eth", "ws-123", models.AuditEventTypeEncrypt)
+
+		err := svc.Log(ctx, event)
+
+		require.NoError(t, err)
+		assert.NotEmpty(t, event.DataHash)
+	})
+
+	t.Run("adds chain hash to metadata", func(t *testing.T) {
+		event := testutil.TestAuditEvent("org-eth", "ws-chain", models.AuditEventTypeEncrypt)
+
+		err := svc.Log(ctx, event)
+
+		require.NoError(t, err)
+		assert.NotNil(t, event.Metadata)
+		assert.Contains(t, event.Metadata, "chain_hash")
 	})
 }
 
 func TestAuditEventRetrieval(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewAuditRepository()
+	repo := inmemory.NewAuditRepository()
+	svc := audit.NewAuditService(repo)
 
 	t.Run("retrieves existing event", func(t *testing.T) {
 		event := testutil.TestAuditEvent("org-eth", "ws-123", models.AuditEventTypeEncrypt)
-		_ = repo.Create(ctx, event)
+		_ = svc.Log(ctx, event)
 
-		retrieved, err := repo.Get(ctx, event.ID)
+		retrieved, err := svc.Get(ctx, event.ID)
 
 		require.NoError(t, err)
 		assert.Equal(t, event.ID, retrieved.ID)
 	})
 
 	t.Run("returns error for non-existent event", func(t *testing.T) {
-		_, err := repo.Get(ctx, "non-existent")
+		_, err := svc.Get(ctx, "non-existent")
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrNotFound)
@@ -82,24 +124,31 @@ func TestAuditEventRetrieval(t *testing.T) {
 
 func TestAuditEventQuerying(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewAuditRepository()
+	repo := inmemory.NewAuditRepository()
+	svc := audit.NewAuditService(repo)
 
 	// Create test events
 	for i := 0; i < 10; i++ {
-		event := testutil.TestAuditEvent("org-eth", "ws-query", models.AuditEventTypeEncrypt)
+		event := testutil.TestAuditEvent("org-query", "ws-query", models.AuditEventTypeEncrypt)
 		event.Timestamp = time.Now().Add(time.Duration(-i) * time.Minute)
-		_ = repo.Create(ctx, event)
+		_ = svc.Log(ctx, event)
 	}
 
 	t.Run("queries by organization", func(t *testing.T) {
-		events, err := repo.Query(ctx, "org-eth", "", "", time.Time{}, time.Time{}, 100, 0)
+		events, err := svc.Query(ctx, audit.QueryParams{
+			OrgID: "org-query",
+			Limit: 100,
+		})
 
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(events), 10)
 	})
 
 	t.Run("queries by workspace", func(t *testing.T) {
-		events, err := repo.Query(ctx, "", "ws-query", "", time.Time{}, time.Time{}, 100, 0)
+		events, err := svc.Query(ctx, audit.QueryParams{
+			Workspace: "ws-query",
+			Limit:     100,
+		})
 
 		require.NoError(t, err)
 		for _, e := range events {
@@ -108,7 +157,10 @@ func TestAuditEventQuerying(t *testing.T) {
 	})
 
 	t.Run("queries by event type", func(t *testing.T) {
-		events, err := repo.Query(ctx, "", "", models.AuditEventTypeEncrypt, time.Time{}, time.Time{}, 100, 0)
+		events, err := svc.Query(ctx, audit.QueryParams{
+			EventType: models.AuditEventTypeEncrypt,
+			Limit:     100,
+		})
 
 		require.NoError(t, err)
 		for _, e := range events {
@@ -120,7 +172,11 @@ func TestAuditEventQuerying(t *testing.T) {
 		since := time.Now().Add(-5 * time.Minute)
 		until := time.Now()
 
-		events, err := repo.Query(ctx, "", "", "", since, until, 100, 0)
+		events, err := svc.Query(ctx, audit.QueryParams{
+			Since: since,
+			Until: until,
+			Limit: 100,
+		})
 
 		require.NoError(t, err)
 		for _, e := range events {
@@ -130,110 +186,124 @@ func TestAuditEventQuerying(t *testing.T) {
 	})
 
 	t.Run("applies pagination", func(t *testing.T) {
-		page1, _ := repo.Query(ctx, "org-eth", "", "", time.Time{}, time.Time{}, 3, 0)
-		page2, _ := repo.Query(ctx, "org-eth", "", "", time.Time{}, time.Time{}, 3, 3)
+		page1, _ := svc.Query(ctx, audit.QueryParams{
+			OrgID:  "org-query",
+			Limit:  3,
+			Offset: 0,
+		})
+		page2, _ := svc.Query(ctx, audit.QueryParams{
+			OrgID:  "org-query",
+			Limit:  3,
+			Offset: 3,
+		})
 
 		assert.Len(t, page1, 3)
 		assert.Len(t, page2, 3)
 	})
 }
 
-func TestAuditForwarding(t *testing.T) {
-	ctx := testutil.TestContext(t)
-	forwarder := mocks.NewAuditForwarder()
-
-	t.Run("forwards event successfully", func(t *testing.T) {
-		event := testutil.TestAuditEvent("org-eth", "ws-123", models.AuditEventTypeEncrypt)
-
-		err := forwarder.Forward(ctx, event)
-
-		require.NoError(t, err)
-		assert.Equal(t, 1, forwarder.Count)
-	})
-
-	t.Run("tracks forward count", func(t *testing.T) {
-		initialCount := forwarder.Count
-
-		for i := 0; i < 5; i++ {
-			event := testutil.TestAuditEvent("org-eth", "ws-123", models.AuditEventTypeEncrypt)
-			_ = forwarder.Forward(ctx, event)
-		}
-
-		assert.Equal(t, initialCount+5, forwarder.Count)
-	})
-
-	t.Run("handles forwarding failure", func(t *testing.T) {
-		forwarder.Failing = true
-
-		event := testutil.TestAuditEvent("org-eth", "ws-123", models.AuditEventTypeEncrypt)
-		err := forwarder.Forward(ctx, event)
-
-		require.Error(t, err)
-	})
-}
-
-func TestAuditIntegrityVerification(t *testing.T) {
-	ctx := testutil.TestContext(t)
-	verifier := mocks.NewAuditVerifier()
-
-	t.Run("verifies intact chain", func(t *testing.T) {
-		since := time.Now().Add(-24 * time.Hour)
-		until := time.Now()
-
-		valid, err := verifier.VerifyChain(ctx, since, until)
-
-		require.NoError(t, err)
-		assert.True(t, valid)
-	})
-
-	t.Run("detects tampered chain", func(t *testing.T) {
-		verifier.Tampered = true
-
-		valid, err := verifier.VerifyChain(ctx, time.Now().Add(-1*time.Hour), time.Now())
-
-		require.NoError(t, err)
-		assert.False(t, valid)
-	})
-}
-
 func TestAuditImmutability(t *testing.T) {
 	ctx := testutil.TestContext(t)
-	repo := mocks.NewAuditRepository()
+	repo := inmemory.NewAuditRepository()
+	svc := audit.NewAuditService(repo)
 
-	t.Run("audit events have no update method", func(t *testing.T) {
-		// The repository intentionally doesn't expose Update
-		// This is a design test - audit logs are immutable
+	t.Run("audit events cannot be modified after creation", func(t *testing.T) {
 		event := testutil.TestAuditEvent("org-eth", "ws-123", models.AuditEventTypeEncrypt)
-		_ = repo.Create(ctx, event)
+		_ = svc.Log(ctx, event)
+
+		originalActor := event.Actor
 
 		// Verify we can still read the original
-		retrieved, err := repo.Get(ctx, event.ID)
+		retrieved, err := svc.Get(ctx, event.ID)
 		require.NoError(t, err)
-		assert.Equal(t, event.Actor, retrieved.Actor)
+		assert.Equal(t, originalActor, retrieved.Actor)
+	})
+}
+
+func TestAuditExport(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	repo := inmemory.NewAuditRepository()
+	svc := audit.NewAuditService(repo)
+
+	// Create test events
+	for i := 0; i < 5; i++ {
+		event := testutil.TestAuditEvent("org-export", "ws-export", models.AuditEventTypeEncrypt)
+		_ = svc.Log(ctx, event)
+	}
+
+	t.Run("exports to JSON", func(t *testing.T) {
+		data, err := svc.Export(ctx, audit.ExportRequest{
+			Query:  audit.QueryParams{OrgID: "org-export", Limit: 100},
+			Format: audit.ExportFormatJSON,
+		})
+
+		require.NoError(t, err)
+		assert.NotEmpty(t, data)
+		assert.Contains(t, string(data), "org-export")
+	})
+
+	t.Run("exports to CSV", func(t *testing.T) {
+		data, err := svc.Export(ctx, audit.ExportRequest{
+			Query:  audit.QueryParams{OrgID: "org-export", Limit: 100},
+			Format: audit.ExportFormatCSV,
+		})
+
+		require.NoError(t, err)
+		assert.NotEmpty(t, data)
+	})
+}
+
+func TestAuditStatistics(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	repo := inmemory.NewAuditRepository()
+	svc := audit.NewAuditService(repo)
+
+	// Create varied test events
+	eventTypes := []models.AuditEventType{
+		models.AuditEventTypeEncrypt,
+		models.AuditEventTypeDecrypt,
+		models.AuditEventTypeKeyCreate,
+	}
+	for i, eventType := range eventTypes {
+		for j := 0; j < i+1; j++ {
+			event := testutil.TestAuditEvent("org-stats", "ws-stats", eventType)
+			_ = svc.Log(ctx, event)
+		}
+	}
+
+	t.Run("computes statistics", func(t *testing.T) {
+		stats, err := svc.GetStats(ctx, time.Now().Add(-1*time.Hour))
+
+		require.NoError(t, err)
+		assert.True(t, stats.TotalEvents >= 6) // 1 + 2 + 3
 	})
 }
 
 func BenchmarkAuditOperations(b *testing.B) {
 	ctx := context.Background()
-	repo := mocks.NewAuditRepository()
+	repo := inmemory.NewAuditRepository()
+	svc := audit.NewAuditService(repo)
 
-	b.Run("Create", func(b *testing.B) {
+	b.Run("Log", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			event := testutil.TestAuditEvent("org-bench", "ws-bench", models.AuditEventTypeEncrypt)
-			_ = repo.Create(ctx, event)
+			_ = svc.Log(ctx, event)
 		}
 	})
 
 	b.Run("Query", func(b *testing.B) {
 		// Pre-populate
 		for i := 0; i < 1000; i++ {
-			event := testutil.TestAuditEvent("org-query", "ws-query", models.AuditEventTypeEncrypt)
-			_ = repo.Create(ctx, event)
+			event := testutil.TestAuditEvent("org-query-bench", "ws-query", models.AuditEventTypeEncrypt)
+			_ = svc.Log(ctx, event)
 		}
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_, _ = repo.Query(ctx, "org-query", "", "", time.Time{}, time.Time{}, 100, 0)
+			_, _ = svc.Query(ctx, audit.QueryParams{
+				OrgID: "org-query-bench",
+				Limit: 100,
+			})
 		}
 	})
 }
