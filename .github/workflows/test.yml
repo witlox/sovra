@@ -45,38 +45,44 @@ jobs:
 
       - name: Run unit tests with coverage
         run: |
-          go test -v -race -coverprofile=coverage.out -covermode=atomic ./tests/unit/...
+          go test -v -race -coverprofile=unit.out -covermode=atomic ./tests/unit/...
         env:
           DATABASE_URL: postgres://sovra:sovra@localhost:5432/sovra_test?sslmode=disable
 
-      - name: Run integration tests
+      - name: Run integration tests with coverage
         run: |
-          go test -v -race -coverprofile=coverage-int.out -covermode=atomic ./tests/integration/...
+          go test -v -race -coverprofile=integration.out -covermode=atomic ./tests/integration/...
+        env:
+          DATABASE_URL: postgres://sovra:sovra@localhost:5432/sovra_test?sslmode=disable
+
+      - name: Run acceptance tests with coverage
+        run: |
+          go test -v -race -coverprofile=acceptance.out -covermode=atomic ./tests/acceptance/...
         env:
           DATABASE_URL: postgres://sovra:sovra@localhost:5432/sovra_test?sslmode=disable
 
       - name: Merge coverage reports
         run: |
           go install github.com/wadey/gocovmerge@latest
-          gocovmerge coverage.out coverage-int.out > coverage-merged.out
+          gocovmerge unit.out integration.out acceptance.out > coverage.txt
 
       - name: Upload coverage reports
         uses: actions/upload-artifact@v4
         with:
           name: coverage
-          path: coverage-merged.out
+          path: coverage.txt
           retention-days: 7
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: coverage-merged.out
-          flags: unittests
-          name: codecov
+          files: coverage.txt
+          flags: unittests,integration,acceptance
+          name: sovra-coverage
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Check coverage threshold
         run: |
-          go tool cover -func=coverage-merged.out | grep total | awk '{print $3}' | sed 's/%//' | \
+          go tool cover -func=coverage.txt | grep total | awk '{print $3}' | sed 's/%//' | \
           awk '{if ($1 < 50) {print "Coverage is below 50%: " $1 "%"; exit 1} else {print "Coverage: " $1 "%"}}'
