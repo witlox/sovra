@@ -79,7 +79,7 @@ curl -LO https://github.com/witlox/sovra/releases/download/2026.3.71/sovra_2026.
 tar xzf sovra_2026.3.71_darwin_arm64.tar.gz
 
 # Add to PATH
-sudo mv sovra /usr/local/bin/
+sudo mv sovra /usr/local/bin/sovra-cli
 ```
 
 ### Build from Source
