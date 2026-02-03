@@ -718,7 +718,7 @@ gcloud sql instances list
 
 ## Next Steps
 
-- [Configure Federation](federation/)
+- [Configure Federation](../federation/)
 - [Deploy Edge Nodes](edge-node)
 - [Set up Monitoring](../operations/monitoring)
 - [Security Best Practices](../security/best-practices) <!-- GCP-specific hardening guide coming soon -->

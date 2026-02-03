@@ -342,4 +342,4 @@ terraform destroy
 - [Deploy edge nodes](edge-node)
 - [Configure TLS certificates](../security/authentication.md#mtls)
 - [Set up monitoring](../operations/monitoring)
-- [Configure federation](federation/)
+- [Configure federation](../federation/)

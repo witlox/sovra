@@ -169,7 +169,7 @@ Federated organizations authenticate using bilateral mTLS:
 3. Certificates are signed by respective org root keys
 4. mTLS channels are established
 
-See [Federation Guide](federation/) for details.
+See [Federation Guide](../federation/) for details.
 
 ## API Authentication Examples
 
@@ -249,4 +249,4 @@ sovra-cli auth check
 
 - [Authorization Guide](authorization)
 - [Security Best Practices](best-practices)
-- [Federation Guide](federation/)
+- [Federation Guide](../federation/)
