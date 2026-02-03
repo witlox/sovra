@@ -429,6 +429,69 @@ func (m *PolicyRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *PolicyRepository) List(ctx context.Context, limit, offset int) ([]*models.Policy, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.Policy
+	for _, p := range m.policies {
+		result = append(result, p)
+	}
+	if offset >= len(result) {
+		return nil, nil
+	}
+	result = result[offset:]
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (m *PolicyRepository) GetOrganizationPolicies(ctx context.Context, orgID string) ([]*models.Policy, error) {
+	return nil, nil
+}
+
+// VersionedPolicyRepository extends PolicyRepository with version history.
+type VersionedPolicyRepository struct {
+	*PolicyRepository
+	mu       sync.RWMutex
+	versions map[string][]*models.PolicyVersion // policyID -> versions
+}
+
+func NewVersionedPolicyRepository() *VersionedPolicyRepository {
+	return &VersionedPolicyRepository{
+		PolicyRepository: NewPolicyRepository(),
+		versions:         make(map[string][]*models.PolicyVersion),
+	}
+}
+
+func (m *VersionedPolicyRepository) CreateVersion(ctx context.Context, version *models.PolicyVersion) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.versions[version.PolicyID] = append(m.versions[version.PolicyID], version)
+	return nil
+}
+
+func (m *VersionedPolicyRepository) GetVersion(ctx context.Context, policyID string, version int) (*models.PolicyVersion, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	versions, ok := m.versions[policyID]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	for _, v := range versions {
+		if v.Version == version {
+			return v, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *VersionedPolicyRepository) ListVersions(ctx context.Context, policyID string) ([]*models.PolicyVersion, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.versions[policyID], nil
+}
+
 // PolicyEngine mock for OPA policy evaluation.
 type PolicyEngine struct {
 	mu        sync.Mutex

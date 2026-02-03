@@ -111,10 +111,13 @@ type Federation struct {
 	PartnerOrgID    string           `json:"partner_org_id"`
 	PartnerURL      string           `json:"partner_url"`
 	PartnerCert     []byte           `json:"partner_cert"`
+	Certificate     []byte           `json:"certificate,omitempty"`
 	Status          FederationStatus `json:"status"`
 	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at,omitempty"`
 	EstablishedAt   time.Time        `json:"established_at"`
 	LastHealthCheck time.Time        `json:"last_health_check"`
+	Metadata        map[string]any   `json:"metadata,omitempty"`
 }
 
 // EdgeNodeStatus represents the status of an edge node.
@@ -134,6 +137,7 @@ type EdgeNode struct {
 	OrgID          string         `json:"org_id"`
 	Name           string         `json:"name"`
 	VaultAddress   string         `json:"vault_address"`
+	Region         string         `json:"region,omitempty"`
 	Status         EdgeNodeStatus `json:"status"`
 	Classification Classification `json:"classification"`
 	LastHeartbeat  time.Time      `json:"last_heartbeat"`
@@ -154,6 +158,13 @@ const (
 	AuditEventTypeFederationCreate AuditEventType = "federation.create"
 	AuditEventTypePolicyViolation  AuditEventType = "policy.violation"
 	AuditEventTypeCRKSign          AuditEventType = "crk.sign"
+	AuditEventTypeCRKGenerate      AuditEventType = "crk.generate"
+	AuditEventTypeCRKReconstruct   AuditEventType = "crk.reconstruct"
+	AuditEventTypeCRKCeremony      AuditEventType = "crk.ceremony"
+	AuditEventTypeEmergencyRequest AuditEventType = "emergency.request"
+	AuditEventTypeEmergencyApprove AuditEventType = "emergency.approve"
+	AuditEventTypeEmergencyDeny    AuditEventType = "emergency.deny"
+	AuditEventTypeEmergencyAccess  AuditEventType = "emergency.access"
 )
 
 // AuditEventResult represents the result of an audited operation.
@@ -189,6 +200,37 @@ type Policy struct {
 	Version     int       `json:"version"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// PolicyVersion represents a historical version of a policy.
+type PolicyVersion struct {
+	ID        string    `json:"id"`
+	PolicyID  string    `json:"policy_id"`
+	Version   int       `json:"version"`
+	Rego      string    `json:"rego"`
+	CreatedBy string    `json:"created_by,omitempty"`
+	Reason    string    `json:"reason,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// WorkspaceBundle represents an exported workspace for air-gap transfer.
+type WorkspaceBundle struct {
+	Workspace  *Workspace `json:"workspace"`
+	Policies   []byte     `json:"policies,omitempty"`
+	ExportedAt time.Time  `json:"exported_at"`
+	ExportedBy string     `json:"exported_by"`
+	Checksum   string     `json:"checksum"`
+}
+
+// WorkspaceInvitation represents a pending workspace invitation.
+type WorkspaceInvitation struct {
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	OrgID       string    `json:"org_id"`
+	InvitedBy   string    `json:"invited_by"`
+	Status      string    `json:"status"` // pending, accepted, declined
+	CreatedAt   time.Time `json:"created_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
 }
 
 // PolicyInput represents the input to policy evaluation.

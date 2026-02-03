@@ -322,3 +322,69 @@ func NewDatabaseMetrics() *DatabaseMetrics {
 	reg.MustRegister(m.QueriesTotal, m.QueryLatency, m.ConnectionsActive, m.ConnectionsIdle)
 	return m
 }
+
+// EdgeMetrics contains metrics for edge node operations.
+type EdgeMetrics struct {
+	HeartbeatAge      *prometheus.GaugeVec
+	CertExpirySeconds *prometheus.GaugeVec
+	SyncDuration      *prometheus.HistogramVec
+	NodesTotal        *prometheus.GaugeVec
+	OperationsTotal   *prometheus.CounterVec
+}
+
+// NewEdgeMetrics creates edge node metrics.
+func NewEdgeMetrics() *EdgeMetrics {
+	reg := GetRegistry()
+
+	m := &EdgeMetrics{
+		HeartbeatAge: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: "sovra",
+				Subsystem: "edge",
+				Name:      "heartbeat_age_seconds",
+				Help:      "Time since last heartbeat for each edge node",
+			},
+			[]string{"node_id"},
+		),
+		CertExpirySeconds: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: "sovra",
+				Subsystem: "edge",
+				Name:      "cert_expiry_seconds",
+				Help:      "Seconds until certificate expiry for each edge node",
+			},
+			[]string{"node_id"},
+		),
+		SyncDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: "sovra",
+				Subsystem: "edge",
+				Name:      "sync_duration_seconds",
+				Help:      "Duration of sync operations",
+				Buckets:   prometheus.DefBuckets,
+			},
+			[]string{"sync_type"},
+		),
+		NodesTotal: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: "sovra",
+				Subsystem: "edge",
+				Name:      "nodes_total",
+				Help:      "Total number of edge nodes by status",
+			},
+			[]string{"status"},
+		),
+		OperationsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "sovra",
+				Subsystem: "edge",
+				Name:      "operations_total",
+				Help:      "Total edge operations",
+			},
+			[]string{"operation", "result"},
+		),
+	}
+
+	reg.MustRegister(m.HeartbeatAge, m.CertExpirySeconds, m.SyncDuration, m.NodesTotal, m.OperationsTotal)
+	return m
+}

@@ -365,7 +365,9 @@ func TestAdminIdentityManagement(t *testing.T) {
 		secret, err := mgr.EnableMFA(ctx, admin.ID)
 		require.NoError(t, err)
 		assert.NotEmpty(t, secret)
-		assert.Len(t, secret, 40)
+		// EnableMFA now returns a TOTP provisioning URL (otpauth://...)
+		assert.Contains(t, secret, "otpauth://totp/")
+		assert.Contains(t, secret, "Sovra")
 	})
 
 	t.Run("Scenario: Admin role hierarchy is respected", func(t *testing.T) {

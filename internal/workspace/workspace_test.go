@@ -4,6 +4,7 @@ package workspace_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -452,5 +453,175 @@ func BenchmarkWorkspaceOperations(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			_, _ = svc.Decrypt(ctx, ws.ID, ciphertext)
 		}
+	})
+}
+
+func TestRotateDEK(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	svc := createTestService()
+
+	t.Run("rotates DEK for workspace", func(t *testing.T) {
+		req := workspace.CreateRequest{
+			Name:         "rotate-dek-test",
+			Participants: []string{"org-eth"},
+		}
+		ws, err := svc.Create(ctx, req)
+		require.NoError(t, err)
+
+		// Encrypt data with original DEK
+		plaintext := []byte("test data before rotation")
+		ciphertext, err := svc.Encrypt(ctx, ws.ID, plaintext)
+		require.NoError(t, err)
+
+		// Rotate DEK
+		err = svc.RotateDEK(ctx, ws.ID, []byte("test-signature"))
+		require.NoError(t, err)
+
+		// Data encrypted with old DEK should still be decryptable
+		// (in real impl, old wrapped DEKs would be maintained)
+		decrypted, err := svc.Decrypt(ctx, ws.ID, ciphertext)
+		require.NoError(t, err)
+		assert.Equal(t, plaintext, decrypted)
+	})
+
+	t.Run("fails for non-existent workspace", func(t *testing.T) {
+		err := svc.RotateDEK(ctx, "non-existent-ws", []byte("sig"))
+		assert.Error(t, err)
+	})
+}
+
+func TestExportImportWorkspace(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	svc := createTestService()
+
+	t.Run("exports workspace to bundle", func(t *testing.T) {
+		req := workspace.CreateRequest{
+			Name:         "export-test",
+			Participants: []string{"org-eth"},
+		}
+		ws, err := svc.Create(ctx, req)
+		require.NoError(t, err)
+
+		bundle, err := svc.ExportWorkspace(ctx, ws.ID)
+		require.NoError(t, err)
+		assert.NotNil(t, bundle)
+		assert.NotNil(t, bundle.Workspace)
+		assert.Equal(t, ws.ID, bundle.Workspace.ID)
+		assert.False(t, bundle.ExportedAt.IsZero())
+		assert.NotEmpty(t, bundle.Checksum)
+	})
+
+	t.Run("imports workspace from bundle", func(t *testing.T) {
+		// Create and export
+		req := workspace.CreateRequest{
+			Name:         "import-source",
+			Participants: []string{"org-eth"},
+		}
+		ws, _ := svc.Create(ctx, req)
+		bundle, _ := svc.ExportWorkspace(ctx, ws.ID)
+
+		// Modify bundle for import (new workspace)
+		bundle.Workspace.ID = ""
+		bundle.Workspace.Name = "imported-ws"
+
+		imported, err := svc.ImportWorkspace(ctx, bundle)
+		require.NoError(t, err)
+		assert.NotEmpty(t, imported.ID)
+		assert.Equal(t, "imported-ws", imported.Name)
+	})
+
+	t.Run("fails export for non-existent workspace", func(t *testing.T) {
+		_, err := svc.ExportWorkspace(ctx, "non-existent")
+		assert.Error(t, err)
+	})
+}
+
+func TestWorkspaceInvitations(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	svc := createTestService()
+
+	t.Run("invites participant to workspace", func(t *testing.T) {
+		req := workspace.CreateRequest{
+			Name:         "invite-test",
+			Participants: []string{"org-eth"},
+		}
+		ws, err := svc.Create(ctx, req)
+		require.NoError(t, err)
+
+		invitation, err := svc.InviteParticipant(ctx, ws.ID, "org-basel", []byte("sig"))
+		require.NoError(t, err)
+		assert.NotNil(t, invitation)
+		assert.Equal(t, ws.ID, invitation.WorkspaceID)
+		assert.Equal(t, "org-basel", invitation.OrgID)
+		assert.Equal(t, "pending", invitation.Status)
+	})
+
+	t.Run("accepts invitation", func(t *testing.T) {
+		req := workspace.CreateRequest{
+			Name:         "accept-test",
+			Participants: []string{"org-eth"},
+		}
+		ws, _ := svc.Create(ctx, req)
+		_, _ = svc.InviteParticipant(ctx, ws.ID, "org-basel", []byte("sig"))
+
+		err := svc.AcceptInvitation(ctx, ws.ID, "org-basel", []byte("accept-sig"))
+		require.NoError(t, err)
+
+		// Verify participant was added
+		retrieved, _ := svc.Get(ctx, ws.ID)
+		found := false
+		for _, p := range retrieved.Participants {
+			if p.OrgID == "org-basel" {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "org-basel should be a participant")
+	})
+
+	t.Run("declines invitation", func(t *testing.T) {
+		req := workspace.CreateRequest{
+			Name:         "decline-test",
+			Participants: []string{"org-eth"},
+		}
+		ws, _ := svc.Create(ctx, req)
+		_, _ = svc.InviteParticipant(ctx, ws.ID, "org-decline", []byte("sig"))
+
+		err := svc.DeclineInvitation(ctx, ws.ID, "org-decline")
+		require.NoError(t, err)
+
+		// Verify participant was NOT added
+		retrieved, _ := svc.Get(ctx, ws.ID)
+		for _, p := range retrieved.Participants {
+			assert.NotEqual(t, "org-decline", p.OrgID)
+		}
+	})
+}
+
+func TestExtendExpiration(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	svc := createTestService()
+
+	t.Run("extends workspace expiration", func(t *testing.T) {
+		originalExpiry := time.Now().Add(24 * time.Hour)
+		req := workspace.CreateRequest{
+			Name:         "extend-test",
+			Participants: []string{"org-eth"},
+			ExpiresAt:    originalExpiry,
+		}
+		ws, err := svc.Create(ctx, req)
+		require.NoError(t, err)
+
+		newExpiry := time.Now().Add(7 * 24 * time.Hour)
+		err = svc.ExtendExpiration(ctx, ws.ID, newExpiry, []byte("sig"))
+		require.NoError(t, err)
+
+		retrieved, _ := svc.Get(ctx, ws.ID)
+		assert.True(t, retrieved.ExpiresAt.After(originalExpiry))
+	})
+
+	t.Run("fails for non-existent workspace", func(t *testing.T) {
+		err := svc.ExtendExpiration(ctx, "non-existent", time.Now().Add(time.Hour), []byte("sig"))
+		assert.Error(t, err)
 	})
 }

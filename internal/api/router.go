@@ -14,6 +14,7 @@ import (
 	"github.com/witlox/sovra/internal/federation"
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/workspace"
+	"github.com/witlox/sovra/pkg/metrics"
 )
 
 // RouterConfig holds router configuration.
@@ -23,6 +24,7 @@ type RouterConfig struct {
 	Authenticator    Authenticator
 	RateLimiter      RateLimiter
 	MiddlewareConfig *MiddlewareConfig
+	HealthCheckers   map[string]func() error
 }
 
 // DefaultRouterConfig returns a default router configuration.
@@ -33,6 +35,7 @@ func DefaultRouterConfig() *RouterConfig {
 		Authenticator:    NewDefaultAuthenticator(),
 		RateLimiter:      NewInMemoryRateLimiter(100, 60),
 		MiddlewareConfig: DefaultMiddlewareConfig(),
+		HealthCheckers:   make(map[string]func() error),
 	}
 }
 
@@ -74,7 +77,7 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	}
 
 	// Register routes
-	registerHealthRoutes(r)
+	registerHealthRoutes(r, config.HealthCheckers)
 	registerWorkspaceRoutes(r, services)
 	registerFederationRoutes(r, services)
 	registerPolicyRoutes(r, services)
@@ -86,18 +89,46 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 }
 
 // registerHealthRoutes registers health check endpoints.
-func registerHealthRoutes(r chi.Router) {
-	r.Get("/health", handleHealth)
+func registerHealthRoutes(r chi.Router, healthCheckers map[string]func() error) {
+	r.Get("/health", makeHealthHandler(healthCheckers))
 	r.Get("/ready", handleReady)
 	r.Get("/live", handleLive)
+	r.Handle("/metrics", metrics.Handler())
 }
 
-// handleHealth returns overall API health.
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, HealthResponse{
-		Status:  "healthy",
-		Version: "1.0.0",
-	})
+// makeHealthHandler creates a health handler that checks all registered components.
+func makeHealthHandler(healthCheckers map[string]func() error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		response := HealthResponse{
+			Status:     "healthy",
+			Version:    "1.0.0",
+			Components: make(map[string]*ComponentHealth),
+		}
+
+		// Check all registered health checkers
+		for name, checker := range healthCheckers {
+			component := &ComponentHealth{Status: "healthy"}
+			if checker != nil {
+				if err := checker(); err != nil {
+					component.Status = "unhealthy"
+					component.Message = err.Error()
+					response.Status = "degraded"
+				}
+			}
+			response.Components[name] = component
+		}
+
+		// If no components were checked, remove empty map
+		if len(response.Components) == 0 {
+			response.Components = nil
+		}
+
+		statusCode := http.StatusOK
+		if response.Status == "degraded" {
+			statusCode = http.StatusServiceUnavailable
+		}
+		writeJSON(w, statusCode, response)
+	}
 }
 
 // handleReady returns readiness status.

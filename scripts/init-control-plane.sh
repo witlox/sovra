@@ -69,10 +69,10 @@ check_dependencies() {
         missing+=("vault")
     fi
     
-    if ! command -v sovra &> /dev/null; then
+    if ! command -v sovra-cli &> /dev/null; then
         # Check if built locally
-        if [[ ! -f "./bin/sovra" ]]; then
-            missing+=("sovra")
+        if [[ ! -f "./bin/sovra-cli" ]]; then
+            missing+=("sovra-cli")
         fi
     fi
     
@@ -93,36 +93,12 @@ run_migrations() {
     
     log_info "Running database migrations..."
     
-    # Find migration files
-    local migration_dir=""
-    for dir in "./db/migrations" "./internal/migrations" "./migrations"; do
-        if [[ -d "$dir" ]]; then
-            migration_dir="$dir"
-            break
-        fi
-    done
+    # Migrations are now run automatically by the api-gateway on startup
+    # This step is kept for manual control when needed
+    log_info "Note: Migrations run automatically on api-gateway startup"
+    log_info "To force migrations, start api-gateway with SOVRA_RUN_MIGRATIONS=true"
     
-    if [[ -z "$migration_dir" ]]; then
-        log_warn "No migration directory found, skipping migrations"
-        return
-    fi
-    
-    # Use golang-migrate if available
-    if command -v migrate &> /dev/null; then
-        log_info "Using golang-migrate..."
-        migrate -path "$migration_dir" -database "$DB_URL" up
-    else
-        # Fallback to direct psql
-        log_info "Using psql for migrations..."
-        for f in "$migration_dir"/*.up.sql; do
-            if [[ -f "$f" ]]; then
-                log_info "Applying $(basename "$f")..."
-                psql "$DB_URL" -f "$f"
-            fi
-        done
-    fi
-    
-    log_info "Database migrations complete"
+    log_info "Database setup complete"
 }
 
 init_vault_bundled() {
@@ -223,58 +199,47 @@ configure_vault() {
 create_admin_user() {
     log_info "Creating admin user: $ADMIN_EMAIL"
     
-    # Use sovra CLI if available
-    local sovra_cmd="sovra"
-    if [[ -f "./bin/sovra" ]]; then
-        sovra_cmd="./bin/sovra"
-    fi
+    # Note: Identity creation is done via direct database insert
+    # The api-gateway exposes /api/v1/identities endpoints when running
+    log_info "Admin user creation via API requires running api-gateway"
+    log_info "Use: curl -X POST http://localhost:8080/api/v1/identities -d '{...}'"
+    log_info "Or start api-gateway and use sovra-cli once implemented"
     
-    # Check if admin already exists
-    if $sovra_cmd identity get --email "$ADMIN_EMAIL" &> /dev/null; then
-        log_info "Admin user already exists"
-        return
-    fi
-    
-    # Create admin identity
-    $sovra_cmd identity create \
-        --email "$ADMIN_EMAIL" \
-        --role admin \
-        --db-url "$DB_URL"
-    
-    log_info "Admin user created"
+    log_info "Skipping admin user creation (use API after services start)"
 }
 
 generate_admin_crk() {
-    log_info "Generating CRK for admin user..."
+    log_info "Generating CRK for admin organization..."
     
-    local sovra_cmd="sovra"
-    if [[ -f "./bin/sovra" ]]; then
-        sovra_cmd="./bin/sovra"
+    local sovra_cmd="sovra-cli"
+    if [[ -f "./bin/sovra-cli" ]]; then
+        sovra_cmd="./bin/sovra-cli"
     fi
     
-    # Generate CRK
+    # Generate CRK using proper flags
     local crk_output
     crk_output=$($sovra_cmd crk generate \
-        --email "$ADMIN_EMAIL" \
+        --org-id "admin-org" \
         --shares "$SHARES" \
         --threshold "$THRESHOLD" \
-        --db-url "$DB_URL" \
-        --vault-addr "$VAULT_ADDR" \
-        2>&1)
+        --output "./admin-crk-shares.json" \
+        2>&1) || true
     
-    # Save CRK shares to file
-    local crk_file="./admin-crk-shares.json"
-    echo "$crk_output" > "$crk_file"
-    chmod 600 "$crk_file"
-    
-    log_warn "========================================"
-    log_warn "ADMIN CRK SHARES SAVED TO:"
-    log_warn "  $crk_file"
-    log_warn ""
-    log_warn "DISTRIBUTE TO KEY CUSTODIANS AND DELETE!"
-    log_warn "========================================"
-    
-    log_info "Admin CRK generated"
+    if [[ -f "./admin-crk-shares.json" ]]; then
+        chmod 600 "./admin-crk-shares.json"
+        
+        log_warn "========================================"
+        log_warn "ADMIN CRK SHARES SAVED TO:"
+        log_warn "  ./admin-crk-shares.json"
+        log_warn ""
+        log_warn "DISTRIBUTE TO KEY CUSTODIANS AND DELETE!"
+        log_warn "========================================"
+        
+        log_info "Admin CRK generated"
+    else
+        log_warn "CRK generation output: $crk_output"
+        log_info "CRK generation skipped or failed"
+    fi
 }
 
 main() {

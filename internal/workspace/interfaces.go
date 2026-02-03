@@ -3,6 +3,7 @@ package workspace
 
 import (
 	"context"
+	"time"
 
 	"github.com/witlox/sovra/pkg/models"
 )
@@ -64,7 +65,28 @@ type CreateRequest struct {
 	Classification models.Classification
 	Mode           models.WorkspaceMode
 	Purpose        string
+	ExpiresAt      time.Time
 	CRKSignature   []byte
+}
+
+// WorkspaceBundle represents an exported workspace for air-gap transfer.
+type WorkspaceBundle struct {
+	Workspace  *models.Workspace `json:"workspace"`
+	Policies   []byte            `json:"policies,omitempty"`
+	ExportedAt time.Time         `json:"exported_at"`
+	ExportedBy string            `json:"exported_by"`
+	Checksum   string            `json:"checksum"`
+}
+
+// WorkspaceInvitation represents a pending workspace invitation.
+type WorkspaceInvitation struct {
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	OrgID       string    `json:"org_id"`
+	InvitedBy   string    `json:"invited_by"`
+	Status      string    `json:"status"` // pending, accepted, declined
+	CreatedAt   time.Time `json:"created_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
 }
 
 // Service handles workspace business logic.
@@ -87,4 +109,18 @@ type Service interface {
 	Encrypt(ctx context.Context, workspaceID string, plaintext []byte) ([]byte, error)
 	// Decrypt decrypts data from a workspace.
 	Decrypt(ctx context.Context, workspaceID string, ciphertext []byte) ([]byte, error)
+	// RotateDEK generates a new DEK and re-wraps for all participants.
+	RotateDEK(ctx context.Context, workspaceID string, signature []byte) error
+	// ExportWorkspace exports a workspace for air-gap transfer.
+	ExportWorkspace(ctx context.Context, workspaceID string) (*WorkspaceBundle, error)
+	// ImportWorkspace imports a workspace from an air-gap bundle.
+	ImportWorkspace(ctx context.Context, bundle *WorkspaceBundle) (*models.Workspace, error)
+	// ExtendExpiration extends the workspace expiration time.
+	ExtendExpiration(ctx context.Context, workspaceID string, newExpiry time.Time, signature []byte) error
+	// InviteParticipant creates an invitation for a new participant.
+	InviteParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) (*WorkspaceInvitation, error)
+	// AcceptInvitation accepts a workspace invitation.
+	AcceptInvitation(ctx context.Context, workspaceID, orgID string, signature []byte) error
+	// DeclineInvitation declines a workspace invitation.
+	DeclineInvitation(ctx context.Context, workspaceID, orgID string) error
 }

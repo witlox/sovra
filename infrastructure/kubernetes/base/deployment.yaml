@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sovra-api-gateway
+  labels:
+    app: sovra
+    component: api-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sovra
+      component: api-gateway
+  template:
+    metadata:
+      labels:
+        app: sovra
+        component: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: sovra:latest
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 8443
+              name: https
+          env:
+            - name: SOVRA_SERVICE
+              value: "api-gateway"
+            - name: SOVRA_LOG_LEVEL
+              value: "info"
+            - name: SOVRA_DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: sovra-config
+                  key: database.host
+            - name: SOVRA_DATABASE_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: sovra-config
+                  key: database.port
+            - name: SOVRA_DATABASE_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: sovra-config
+                  key: database.database
+            - name: SOVRA_DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: sovra-secrets
+                  key: database.username
+            - name: SOVRA_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sovra-secrets
+                  key: database.password
+            - name: SOVRA_VAULT_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: sovra-config
+                  key: vault.address
+            - name: SOVRA_VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sovra-secrets
+                  key: vault.token
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/sovra/tls
+              readOnly: true
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: sovra-tls

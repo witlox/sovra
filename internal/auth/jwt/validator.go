@@ -53,13 +53,19 @@ type Claims struct {
 
 // Valid checks if the claims are valid.
 func (c *Claims) Valid() error {
-	now := time.Now().Unix()
+	return c.ValidWithSkew(0)
+}
 
-	if c.ExpiresAt != 0 && now > c.ExpiresAt {
+// ValidWithSkew checks if the claims are valid with the given clock skew tolerance.
+func (c *Claims) ValidWithSkew(clockSkew time.Duration) error {
+	now := time.Now()
+	skewSeconds := int64(clockSkew.Seconds())
+
+	if c.ExpiresAt != 0 && now.Unix() > c.ExpiresAt+skewSeconds {
 		return ErrTokenExpired
 	}
 
-	if c.NotBefore != 0 && now < c.NotBefore {
+	if c.NotBefore != 0 && now.Unix() < c.NotBefore-skewSeconds {
 		return ErrTokenNotYetValid
 	}
 
@@ -149,8 +155,8 @@ func (v *Validator) Validate(token string) (*Claims, error) {
 		return nil, ErrInvalidToken
 	}
 
-	// Validate claims
-	if err := claims.Valid(); err != nil {
+	// Validate claims with clock skew
+	if err := claims.ValidWithSkew(v.clockSkew); err != nil {
 		return nil, err
 	}
 

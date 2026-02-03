@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sovra-config
+  labels:
+    app: sovra
+data:
+  database.host: "postgres.sovra.svc.cluster.local"
+  database.port: "5432"
+  database.database: "sovra"
+  vault.address: "http://vault.sovra.svc.cluster.local:8200"
+  opa.address: "http://opa.sovra.svc.cluster.local:8181"
+  federation.enabled: "true"
+  telemetry.enabled: "false"
+  telemetry.endpoint: "otel-collector.monitoring.svc.cluster.local:4318"

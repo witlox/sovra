@@ -105,9 +105,6 @@ sovra edge-node register --control-plane https://sovra.example.org
 # Federate with partner
 sovra federation establish --partner https://partner.example.org
 ```
-
-See [Quick Start Guide](docs/quickstart.md)
-
 ---
 
 ## Architecture

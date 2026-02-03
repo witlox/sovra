@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pquerna/otp/totp"
 	"github.com/witlox/sovra/pkg/errors"
 	"github.com/witlox/sovra/pkg/models"
 )
@@ -139,22 +140,24 @@ func (m *Manager) CreateAdmin(ctx context.Context, orgID, email, name string, ro
 	return admin, nil
 }
 
-// EnableMFA enables MFA for an admin and returns the secret.
+// EnableMFA enables MFA for an admin and returns the secret and provisioning URL.
 func (m *Manager) EnableMFA(ctx context.Context, adminID string) (string, error) {
 	admin, err := m.admins.Get(ctx, adminID)
 	if err != nil {
 		return "", fmt.Errorf("get admin: %w", err)
 	}
 
-	// Generate TOTP secret (32 bytes base32 encoded)
-	secret := make([]byte, 20)
-	if _, err := rand.Read(secret); err != nil {
-		return "", fmt.Errorf("generate MFA secret: %w", err)
+	// Generate TOTP secret using proper RFC 6238 TOTP library
+	key, err := totp.Generate(totp.GenerateOpts{
+		Issuer:      "Sovra",
+		AccountName: admin.Email,
+	})
+	if err != nil {
+		return "", fmt.Errorf("generate TOTP key: %w", err)
 	}
 
-	// In production, this would be base32 encoded for TOTP
-	secretStr := fmt.Sprintf("%x", secret)
-	admin.MFASecret = secretStr
+	// Store the base32-encoded secret
+	admin.MFASecret = key.Secret()
 	admin.MFAEnabled = true
 	admin.UpdatedAt = time.Now()
 
@@ -162,7 +165,28 @@ func (m *Manager) EnableMFA(ctx context.Context, adminID string) (string, error)
 		return "", fmt.Errorf("update admin MFA: %w", err)
 	}
 
-	return secretStr, nil
+	// Return the provisioning URL (includes secret, can be displayed as QR code)
+	return key.URL(), nil
+}
+
+// VerifyMFA validates a 6-digit TOTP code against the stored secret.
+func (m *Manager) VerifyMFA(ctx context.Context, identityID, totpCode string) error {
+	admin, err := m.admins.Get(ctx, identityID)
+	if err != nil {
+		return fmt.Errorf("get admin: %w", err)
+	}
+
+	if !admin.MFAEnabled || admin.MFASecret == "" {
+		return fmt.Errorf("MFA not enabled for this identity")
+	}
+
+	// Validate the TOTP code
+	valid := totp.Validate(totpCode, admin.MFASecret)
+	if !valid {
+		return fmt.Errorf("invalid TOTP code")
+	}
+
+	return nil
 }
 
 // CreateUserFromSSO creates or updates a user identity from SSO claims.

@@ -32,6 +32,9 @@ type Config struct {
 
 	// Federation configuration
 	Federation FederationConfig `mapstructure:"federation"`
+
+	// Telemetry configuration
+	Telemetry TelemetryConfig `mapstructure:"telemetry"`
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -89,6 +92,15 @@ type FederationConfig struct {
 	Enabled           bool          `mapstructure:"enabled"`
 	HealthInterval    time.Duration `mapstructure:"health_interval"`
 	CertificateExpiry time.Duration `mapstructure:"certificate_expiry"`
+}
+
+// TelemetryConfig holds telemetry/tracing configuration.
+type TelemetryConfig struct {
+	Enabled        bool    `mapstructure:"enabled"`
+	ServiceName    string  `mapstructure:"service_name"`
+	ServiceVersion string  `mapstructure:"service_version"`
+	Endpoint       string  `mapstructure:"endpoint"`
+	SampleRate     float64 `mapstructure:"sample_rate"`
 }
 
 // Load loads configuration from environment variables and config file.
@@ -170,6 +182,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("federation.enabled", true)
 	v.SetDefault("federation.health_interval", 30*time.Second)
 	v.SetDefault("federation.certificate_expiry", 8760*time.Hour) // 1 year
+
+	// Telemetry defaults
+	v.SetDefault("telemetry.enabled", false)
+	v.SetDefault("telemetry.service_name", "sovra")
+	v.SetDefault("telemetry.service_version", "1.0.0")
+	v.SetDefault("telemetry.endpoint", "localhost:4318")
+	v.SetDefault("telemetry.sample_rate", 1.0)
 }
 
 // Addr returns the server address.

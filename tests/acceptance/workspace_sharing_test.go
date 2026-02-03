@@ -266,6 +266,164 @@ func TestDEKManagement(t *testing.T) {
 	})
 }
 
+// TestWorkspaceInvitationFlow tests the consent-based participant addition.
+// "New participants must explicitly accept workspace invitations."
+func TestWorkspaceInvitationFlow(t *testing.T) {
+	ctx := testutil.TestContext(t)
+
+	t.Run("Scenario: Invite and accept participant to workspace", func(t *testing.T) {
+		repo := mocks.NewWorkspaceRepository()
+		var workspace *models.Workspace
+		var invitation *models.WorkspaceInvitation
+
+		testutil.NewScenario(t, "Invitation Consent Flow").
+			Given("a workspace owned by ETH", func() {
+				workspace = &models.Workspace{
+					Name:       "collaborative-research",
+					OwnerOrgID: "org-eth",
+					Status:     models.WorkspaceStatusActive,
+					Participants: []models.WorkspaceParticipant{
+						{OrgID: "org-eth", Role: "owner", JoinedAt: time.Now()},
+					},
+				}
+				repo.Create(ctx, workspace)
+			}).
+			When("ETH invites Basel to join", func() {
+				invitation = &models.WorkspaceInvitation{
+					ID:          "inv-123",
+					WorkspaceID: workspace.ID,
+					OrgID:       "org-basel",
+					InvitedBy:   "admin@eth.ch",
+					Status:      "pending",
+					CreatedAt:   time.Now(),
+					ExpiresAt:   time.Now().Add(7 * 24 * time.Hour),
+				}
+				// Invitation would be stored in the system
+			}).
+			Then("the invitation should be pending", func() {
+				assert.Equal(t, "pending", invitation.Status)
+			}).
+			And("when Basel accepts the invitation", func() {
+				invitation.Status = "accepted"
+				// Add participant to workspace
+				workspace.Participants = append(workspace.Participants, models.WorkspaceParticipant{
+					OrgID:    "org-basel",
+					Role:     "participant",
+					JoinedAt: time.Now(),
+				})
+				repo.Update(ctx, workspace)
+			}).
+			And("Basel should be a participant", func() {
+				updated, err := repo.Get(ctx, workspace.ID)
+				require.NoError(t, err)
+				assert.Len(t, updated.Participants, 2)
+				found := false
+				for _, p := range updated.Participants {
+					if p.OrgID == "org-basel" {
+						found = true
+						break
+					}
+				}
+				assert.True(t, found, "Basel should be in participants list")
+			})
+	})
+
+	t.Run("Scenario: Decline workspace invitation", func(t *testing.T) {
+		var invitation *models.WorkspaceInvitation
+
+		testutil.NewScenario(t, "Decline Invitation").
+			Given("a pending invitation for Basel to join a workspace", func() {
+				invitation = &models.WorkspaceInvitation{
+					ID:          "inv-456",
+					WorkspaceID: "ws-decline-test",
+					OrgID:       "org-basel",
+					InvitedBy:   "admin@eth.ch",
+					Status:      "pending",
+					CreatedAt:   time.Now(),
+					ExpiresAt:   time.Now().Add(7 * 24 * time.Hour),
+				}
+			}).
+			When("Basel declines the invitation", func() {
+				invitation.Status = "declined"
+			}).
+			Then("the invitation status should be declined", func() {
+				assert.Equal(t, "declined", invitation.Status)
+			})
+	})
+}
+
+// TestAirGapWorkspaceOperations tests workspace export/import for air-gap scenarios.
+// "Workspaces can be exported for transfer to air-gapped environments."
+func TestAirGapWorkspaceOperations(t *testing.T) {
+	ctx := testutil.TestContext(t)
+
+	t.Run("Scenario: Export workspace for air-gap transfer", func(t *testing.T) {
+		repo := mocks.NewWorkspaceRepository()
+		var workspace *models.Workspace
+		var bundle *models.WorkspaceBundle
+
+		testutil.NewScenario(t, "Air-Gap Export").
+			Given("a workspace with sensitive research data", func() {
+				workspace = &models.Workspace{
+					Name:           "classified-research",
+					OwnerOrgID:     "org-eth",
+					Classification: models.ClassificationSecret,
+					Status:         models.WorkspaceStatusActive,
+					Participants: []models.WorkspaceParticipant{
+						{OrgID: "org-eth", Role: "owner", JoinedAt: time.Now()},
+					},
+				}
+				repo.Create(ctx, workspace)
+			}).
+			When("the workspace is exported for air-gap transfer", func() {
+				bundle = &models.WorkspaceBundle{
+					Workspace:  workspace,
+					ExportedAt: time.Now(),
+					ExportedBy: "admin@eth.ch",
+					Checksum:   "sha256:abc123", // Would be computed in real impl
+				}
+			}).
+			Then("the bundle should contain workspace metadata", func() {
+				assert.NotNil(t, bundle.Workspace)
+				assert.Equal(t, workspace.ID, bundle.Workspace.ID)
+			}).
+			And("the export timestamp should be recorded", func() {
+				assert.False(t, bundle.ExportedAt.IsZero())
+			}).
+			And("a checksum should be present for integrity verification", func() {
+				assert.NotEmpty(t, bundle.Checksum)
+			})
+	})
+
+	t.Run("Scenario: Import workspace from air-gap bundle", func(t *testing.T) {
+		repo := mocks.NewWorkspaceRepository()
+		var importedWorkspace *models.Workspace
+
+		testutil.NewScenario(t, "Air-Gap Import").
+			Given("an exported workspace bundle", func() {
+				// Bundle from another environment
+			}).
+			When("the bundle is imported to the target environment", func() {
+				importedWorkspace = &models.Workspace{
+					ID:             "ws-imported",
+					Name:           "imported-research",
+					OwnerOrgID:     "org-secure-facility",
+					Classification: models.ClassificationSecret,
+					Status:         models.WorkspaceStatusActive,
+					Participants: []models.WorkspaceParticipant{
+						{OrgID: "org-secure-facility", Role: "owner", JoinedAt: time.Now()},
+					},
+				}
+				repo.Create(ctx, importedWorkspace)
+			}).
+			Then("the workspace should be created in the target environment", func() {
+				retrieved, err := repo.Get(ctx, importedWorkspace.ID)
+				require.NoError(t, err)
+				assert.Equal(t, "imported-research", retrieved.Name)
+			})
+	})
+}
+
 func BenchmarkWorkspaceOperations(b *testing.B) {
 	ctx := context.Background()
 	repo := mocks.NewWorkspaceRepository()

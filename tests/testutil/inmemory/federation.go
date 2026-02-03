@@ -250,3 +250,9 @@ func (s *FederationService) StartHealthMonitor(ctx context.Context, interval tim
 }
 
 func (s *FederationService) StopHealthMonitor() {}
+
+func (s *FederationService) RotateCertificate(ctx context.Context, partnerOrgID string, signature []byte) ([]byte, error) {
+	cert := make([]byte, 512)
+	rand.Read(cert)
+	return cert, nil
+}

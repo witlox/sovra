@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,6 +43,7 @@ type CRKProvider interface {
 type TokenGenerator interface {
 	Generate(ctx context.Context, orgID, requestID string, ttl time.Duration) (string, error)
 	Revoke(ctx context.Context, tokenID string) error
+	Validate(tokenID string) bool
 }
 
 // EmergencyAccessManager handles break-glass procedures.
@@ -48,8 +51,14 @@ type EmergencyAccessManager struct {
 	repo         EmergencyAccessRepository
 	crkProvider  CRKProvider
 	tokenGen     TokenGenerator
+	auditor      Auditor
 	defaultTTL   time.Duration
 	minApprovals int
+}
+
+// Auditor is an optional interface for audit logging operations.
+type Auditor interface {
+	Log(ctx context.Context, event *models.AuditEvent) error
 }
 
 // NewEmergencyAccessManager creates a new emergency access manager.
@@ -62,6 +71,23 @@ func NewEmergencyAccessManager(
 		repo:         repo,
 		crkProvider:  crkProvider,
 		tokenGen:     tokenGen,
+		defaultTTL:   1 * time.Hour,
+		minApprovals: 2,
+	}
+}
+
+// NewEmergencyAccessManagerWithAudit creates a new emergency access manager with audit logging.
+func NewEmergencyAccessManagerWithAudit(
+	repo EmergencyAccessRepository,
+	crkProvider CRKProvider,
+	tokenGen TokenGenerator,
+	auditor Auditor,
+) *EmergencyAccessManager {
+	return &EmergencyAccessManager{
+		repo:         repo,
+		crkProvider:  crkProvider,
+		tokenGen:     tokenGen,
+		auditor:      auditor,
 		defaultTTL:   1 * time.Hour,
 		minApprovals: 2,
 	}
@@ -86,6 +112,23 @@ func (m *EmergencyAccessManager) RequestEmergencyAccess(ctx context.Context, org
 
 	if err := m.repo.Create(ctx, req); err != nil {
 		return nil, fmt.Errorf("create emergency access request: %w", err)
+	}
+
+	// Audit log the request
+	if m.auditor != nil {
+		_ = m.auditor.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     orgID,
+			EventType: models.AuditEventTypeEmergencyRequest,
+			Actor:     requestedBy,
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"request_id":         req.ID,
+				"reason":             reason,
+				"required_approvals": m.minApprovals,
+			},
+		})
 	}
 
 	return req, nil
@@ -128,6 +171,42 @@ func (m *EmergencyAccessManager) ApproveEmergencyAccess(ctx context.Context, req
 		}
 		req.TokenID = tokenID
 		req.TokenExpiry = time.Now().Add(m.defaultTTL)
+
+		// Audit log the approval that triggered access grant
+		if m.auditor != nil {
+			_ = m.auditor.Log(ctx, &models.AuditEvent{
+				ID:        uuid.New().String(),
+				Timestamp: time.Now(),
+				OrgID:     req.OrgID,
+				EventType: models.AuditEventTypeEmergencyAccess,
+				Actor:     approverID,
+				Result:    models.AuditEventResultSuccess,
+				Metadata: map[string]any{
+					"request_id":   requestID,
+					"requested_by": req.RequestedBy,
+					"approved_by":  req.ApprovedBy,
+					"token_expiry": req.TokenExpiry,
+				},
+			})
+		}
+	}
+
+	// Audit log the approval
+	if m.auditor != nil {
+		_ = m.auditor.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     req.OrgID,
+			EventType: models.AuditEventTypeEmergencyApprove,
+			Actor:     approverID,
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"request_id":       requestID,
+				"requested_by":     req.RequestedBy,
+				"approval_count":   len(req.ApprovedBy),
+				"approvals_needed": req.RequiredApprovals,
+			},
+		})
 	}
 
 	if err := m.repo.Update(ctx, req); err != nil {
@@ -148,7 +227,25 @@ func (m *EmergencyAccessManager) DenyEmergencyAccess(ctx context.Context, reques
 	}
 
 	req.Status = models.EmergencyAccessDenied
+	req.DeniedBy = deniedBy
 	req.ResolvedAt = time.Now()
+
+	// Audit log the denial
+	if m.auditor != nil {
+		_ = m.auditor.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     req.OrgID,
+			EventType: models.AuditEventTypeEmergencyDeny,
+			Actor:     deniedBy,
+			Result:    models.AuditEventResultDenied,
+			Metadata: map[string]any{
+				"request_id":   requestID,
+				"requested_by": req.RequestedBy,
+				"reason":       req.Reason,
+			},
+		})
+	}
 
 	if err := m.repo.Update(ctx, req); err != nil {
 		return fmt.Errorf("update emergency access request: %w", err)
@@ -352,8 +449,10 @@ func (m *AccountRecoveryManager) FailRecovery(ctx context.Context, recoveryID, r
 }
 
 // SimpleTokenGenerator generates simple hex tokens for emergency access.
+// Tokens are hashed before storage for security.
 type SimpleTokenGenerator struct {
-	tokens map[string]time.Time
+	mu     sync.RWMutex
+	tokens map[string]time.Time // hashed token -> expiry
 }
 
 // NewSimpleTokenGenerator creates a new simple token generator.
@@ -361,6 +460,12 @@ func NewSimpleTokenGenerator() *SimpleTokenGenerator {
 	return &SimpleTokenGenerator{
 		tokens: make(map[string]time.Time),
 	}
+}
+
+// hashToken returns the SHA-256 hash of a token for secure storage.
+func hashToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
 }
 
 // Generate creates a new emergency access token.
@@ -371,25 +476,41 @@ func (g *SimpleTokenGenerator) Generate(ctx context.Context, orgID, requestID st
 	}
 
 	token := hex.EncodeToString(tokenBytes)
-	g.tokens[token] = time.Now().Add(ttl)
+	hashedToken := hashToken(token)
+
+	g.mu.Lock()
+	g.tokens[hashedToken] = time.Now().Add(ttl)
+	g.mu.Unlock()
 
 	return token, nil
 }
 
 // Revoke invalidates a token.
 func (g *SimpleTokenGenerator) Revoke(ctx context.Context, tokenID string) error {
-	delete(g.tokens, tokenID)
+	hashedToken := hashToken(tokenID)
+
+	g.mu.Lock()
+	delete(g.tokens, hashedToken)
+	g.mu.Unlock()
+
 	return nil
 }
 
 // Validate checks if a token is valid.
 func (g *SimpleTokenGenerator) Validate(tokenID string) bool {
-	expiry, ok := g.tokens[tokenID]
+	hashedToken := hashToken(tokenID)
+
+	g.mu.RLock()
+	expiry, ok := g.tokens[hashedToken]
+	g.mu.RUnlock()
+
 	if !ok {
 		return false
 	}
 	if time.Now().After(expiry) {
-		delete(g.tokens, tokenID)
+		g.mu.Lock()
+		delete(g.tokens, hashedToken)
+		g.mu.Unlock()
 		return false
 	}
 	return true
@@ -469,9 +590,15 @@ func (g *VaultPolicyGenerator) actionsToCapabilities(actions []string) string {
 }
 
 // GenerateSignatureMessage creates the message to sign for CRK operations.
-func GenerateSignatureMessage(orgID, operation string, timestamp time.Time) []byte {
-	msg := fmt.Sprintf("%s:%s:%d", orgID, operation, timestamp.Unix())
+// Format: orgID:requestID:reason:timestamp (matches VerifyEmergencyAccessWithCRK)
+func GenerateSignatureMessage(orgID, requestID, reason string, timestamp time.Time) []byte {
+	msg := fmt.Sprintf("%s:%s:%s:%d", orgID, requestID, reason, timestamp.Unix())
 	return []byte(msg)
+}
+
+// GenerateEmergencyAccessMessage is an alias for generating emergency access signatures.
+func GenerateEmergencyAccessMessage(orgID, requestID, reason string, timestamp time.Time) []byte {
+	return GenerateSignatureMessage(orgID, requestID, reason, timestamp)
 }
 
 // VerifyEd25519Signature verifies an Ed25519 signature.

@@ -137,4 +137,6 @@ type Service interface {
 	StartHealthMonitor(ctx context.Context, interval time.Duration) error
 	// StopHealthMonitor stops the background health monitor.
 	StopHealthMonitor()
+	// RotateCertificate rotates the federation certificate for a partner.
+	RotateCertificate(ctx context.Context, partnerOrgID string, signature []byte) ([]byte, error)
 }

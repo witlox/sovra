@@ -25,6 +25,17 @@ type Repository interface {
 	List(ctx context.Context, limit, offset int) ([]*models.Policy, error)
 }
 
+// VersionedRepository extends Repository with version history operations.
+type VersionedRepository interface {
+	Repository
+	// CreateVersion stores a policy version in history.
+	CreateVersion(ctx context.Context, version *models.PolicyVersion) error
+	// GetVersion retrieves a specific version of a policy.
+	GetVersion(ctx context.Context, policyID string, version int) (*models.PolicyVersion, error)
+	// ListVersions retrieves all versions of a policy.
+	ListVersions(ctx context.Context, policyID string) ([]*models.PolicyVersion, error)
+}
+
 // EvaluationResult represents the result of policy evaluation.
 type EvaluationResult struct {
 	Allowed    bool
@@ -87,6 +98,17 @@ type Service interface {
 	Evaluate(ctx context.Context, input models.PolicyInput) (*EvaluationResult, error)
 	// Validate validates policy Rego syntax.
 	Validate(ctx context.Context, rego string) error
+}
+
+// VersionedService extends Service with version history operations.
+type VersionedService interface {
+	Service
+	// GetVersion retrieves a specific version of a policy.
+	GetVersion(ctx context.Context, policyID string, version int) (*models.PolicyVersion, error)
+	// ListVersions retrieves all versions of a policy.
+	ListVersions(ctx context.Context, policyID string) ([]*models.PolicyVersion, error)
+	// RollbackToVersion reverts a policy to a previous version.
+	RollbackToVersion(ctx context.Context, policyID string, version int, signature []byte) (*models.Policy, error)
 }
 
 // AuditService defines audit logging operations.

@@ -195,6 +195,7 @@ type EmergencyAccessRequest struct {
 	TokenID           string                `json:"token_id,omitempty"`
 	TokenExpiry       time.Time             `json:"token_expiry,omitempty"`
 	ApprovedBy        []string              `json:"approved_by,omitempty"`
+	DeniedBy          string                `json:"denied_by,omitempty"`
 	RequiredApprovals int                   `json:"required_approvals"`
 	RequestedAt       time.Time             `json:"requested_at"`
 	ResolvedAt        time.Time             `json:"resolved_at,omitempty"`

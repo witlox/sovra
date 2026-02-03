@@ -1,6 +1,6 @@
 # Sovra Makefile
 
-.PHONY: all build test lint clean install-tools setup
+.PHONY: all build test lint clean install-tools setup install docker-build
 
 # Coverage threshold (50%)
 COVERAGE_THRESHOLD := 50
@@ -11,6 +11,33 @@ all: lint test build
 # Build all packages
 build:
 	go build ./...
+
+# Build binaries
+build-bin:
+	mkdir -p bin
+	go build -o bin/api-gateway ./cmd/api-gateway
+	go build -o bin/audit-service ./cmd/audit-service
+	go build -o bin/federation-manager ./cmd/federation-manager
+	go build -o bin/key-lifecycle ./cmd/key-lifecycle
+	go build -o bin/policy-engine ./cmd/policy-engine
+	go build -o bin/sovra-cli ./cmd/sovra-cli
+
+# Install binaries to GOPATH/bin or /usr/local/bin
+install: build-bin
+	@if [ -w "$$(go env GOPATH)/bin" ]; then \
+		cp bin/* "$$(go env GOPATH)/bin/"; \
+		echo "Installed to $$(go env GOPATH)/bin"; \
+	elif [ -w "/usr/local/bin" ]; then \
+		cp bin/* /usr/local/bin/; \
+		echo "Installed to /usr/local/bin"; \
+	else \
+		echo "Cannot install: no write access to GOPATH/bin or /usr/local/bin"; \
+		exit 1; \
+	fi
+
+# Build Docker image
+docker-build:
+	docker build -t sovra:latest -f Dockerfile .
 
 # Run all tests (short mode)
 test:
@@ -103,6 +130,9 @@ help:
 	@echo "Available targets:"
 	@echo "  all              - lint, test, build (default)"
 	@echo "  build            - build all packages"
+	@echo "  build-bin        - build all binaries to bin/"
+	@echo "  install          - install binaries to GOPATH/bin"
+	@echo "  docker-build     - build Docker image"
 	@echo "  test             - run tests (short mode)"
 	@echo "  test-unit        - run unit tests only (in-package)"
 	@echo "  test-acceptance  - run acceptance tests"

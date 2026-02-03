@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sovra
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - configmap.yaml
+  - secrets.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: sovra
+      app.kubernetes.io/part-of: sovra
+    includeSelectors: false
+
+commonAnnotations:
+  app.kubernetes.io/managed-by: kustomize
+
+images:
+  - name: sovra
+    newTag: latest

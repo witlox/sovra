@@ -21,7 +21,6 @@ This guide covers operational aspects of running Sovra in production.
 - **[Monitoring](monitoring)** - Prometheus + Grafana setup
 - **[Logging](monitoring#log-aggregation)** - Centralized log aggregation
 - **[Alerting](monitoring#alerts)** - Alert configuration
-- **Tracing** - Distributed tracing <!-- Coming soon -->
 
 ### Maintenance
 

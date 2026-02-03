@@ -230,30 +230,31 @@ func TestDefaultMTLSVerifier(t *testing.T) {
 	verifier := api.NewDefaultMTLSVerifier()
 	ctx := context.Background()
 
-	t.Run("verifies certificate", func(t *testing.T) {
+	t.Run("denies verification by default (security)", func(t *testing.T) {
 		cert := []byte("test-cert")
-		info, err := verifier.VerifyCertificate(ctx, cert)
+		_, err := verifier.VerifyCertificate(ctx, cert)
 
-		require.NoError(t, err)
-		assert.NotNil(t, info)
-		assert.NotEmpty(t, info.CommonName)
-		assert.NotEmpty(t, info.Organization)
+		// Default stub denies access for security
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no mTLS verifier configured")
 	})
 
-	t.Run("gets organization from certificate", func(t *testing.T) {
+	t.Run("denies organization lookup by default (security)", func(t *testing.T) {
 		cert := []byte("test-cert")
-		org, err := verifier.GetOrganization(ctx, cert)
+		_, err := verifier.GetOrganization(ctx, cert)
 
-		require.NoError(t, err)
-		assert.NotEmpty(t, org)
+		// Default stub denies access for security
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no mTLS verifier configured")
 	})
 
-	t.Run("checks if certificate is trusted", func(t *testing.T) {
+	t.Run("denies trust check by default (security)", func(t *testing.T) {
 		cert := []byte("test-cert")
-		trusted, err := verifier.IsTrusted(ctx, cert)
+		_, err := verifier.IsTrusted(ctx, cert)
 
-		require.NoError(t, err)
-		assert.True(t, trusted)
+		// Default stub denies access for security
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no mTLS verifier configured")
 	})
 }
 
@@ -262,33 +263,34 @@ func TestDefaultAuthenticator(t *testing.T) {
 	auth := api.NewDefaultAuthenticator()
 	ctx := context.Background()
 
-	t.Run("authenticates HTTP request", func(t *testing.T) {
+	t.Run("denies HTTP request by default (security)", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/test", nil)
 		result, err := auth.AuthenticateRequest(ctx, req)
 
-		require.NoError(t, err)
-		assert.NotNil(t, result)
-		assert.True(t, result.Authenticated)
+		// Default stub denies access for security
+		require.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "no authenticator configured")
 	})
 
-	t.Run("authenticates certificate", func(t *testing.T) {
+	t.Run("denies certificate by default (security)", func(t *testing.T) {
 		cert := []byte("test-cert")
 		result, err := auth.AuthenticateCertificate(ctx, cert)
 
-		require.NoError(t, err)
-		assert.NotNil(t, result)
-		assert.True(t, result.Authenticated)
+		// Default stub denies access for security
+		require.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "no authenticator configured")
 	})
 
-	t.Run("authenticates token", func(t *testing.T) {
+	t.Run("denies token by default (security)", func(t *testing.T) {
 		token := "test-token"
 		result, err := auth.AuthenticateToken(ctx, token)
 
-		require.NoError(t, err)
-		assert.NotNil(t, result)
-		assert.True(t, result.Authenticated)
-		assert.NotEmpty(t, result.UserID)
-		assert.NotEmpty(t, result.OrgID)
+		// Default stub denies access for security
+		require.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "no authenticator configured")
 	})
 }
 

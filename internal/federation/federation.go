@@ -204,6 +204,14 @@ func (s *legacyServiceAdapter) StartHealthMonitor(ctx context.Context, interval 
 
 func (s *legacyServiceAdapter) StopHealthMonitor() {}
 
+func (s *legacyServiceAdapter) RotateCertificate(ctx context.Context, partnerOrgID string, signature []byte) ([]byte, error) {
+	cert, err := s.certMgr.RotateCertificate(partnerOrgID, signature)
+	if err != nil {
+		return nil, fmt.Errorf("rotate certificate: %w", err)
+	}
+	return cert, nil
+}
+
 // Production implementation methods
 
 // Init initializes federation capability by generating a CSR using Vault PKI.
@@ -496,6 +504,63 @@ func (s *productionServiceImpl) StopHealthMonitor() {
 		close(s.healthStop)
 		s.healthRunning = false
 	}
+}
+
+// RotateCertificate rotates the federation certificate for a partner.
+func (s *productionServiceImpl) RotateCertificate(ctx context.Context, partnerOrgID string, signature []byte) ([]byte, error) {
+	fed, err := s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
+	if err != nil {
+		return nil, fmt.Errorf("get federation: %w", err)
+	}
+
+	if fed.Status != models.FederationStatusActive {
+		return nil, errors.NewValidationError("federation", "can only rotate certificate for active federation")
+	}
+
+	pki := s.vaultClient.PKI(pkiMountPath)
+
+	// Generate new certificate
+	newCert, err := pki.IssueCertificate(ctx, federationRoleName, &vault.CertificateRequest{
+		CommonName: fmt.Sprintf("%s.federation.sovra", s.orgID),
+		TTL:        defaultCertTTL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("issue new federation certificate: %w", err)
+	}
+
+	// Update federation with new certificate
+	fed.Certificate = []byte(newCert.Certificate)
+	fed.UpdatedAt = time.Now()
+	fed.Metadata["cert_rotated_at"] = time.Now().Format(time.RFC3339)
+
+	if err := s.repo.Update(ctx, fed); err != nil {
+		return nil, fmt.Errorf("update federation: %w", err)
+	}
+
+	// Reconnect mTLS with new certificate
+	s.mtlsManager.close(partnerOrgID)
+	if err := s.mtlsManager.connect(ctx, partnerOrgID, fed.PartnerURL, fed.PartnerCert); err != nil {
+		return nil, fmt.Errorf("reconnect with new certificate: %w", err)
+	}
+
+	// Audit the rotation
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     s.orgID,
+			EventType: models.AuditEventTypeKeyRotate,
+			Actor:     "system",
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"operation":     "rotate_federation_cert",
+				"partner_org":   partnerOrgID,
+				"federation_id": fed.ID,
+			},
+		})
+	}
+
+	return fed.Certificate, nil
 }
 
 // mTLS manager methods

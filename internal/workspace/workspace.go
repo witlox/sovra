@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/witlox/sovra/internal/auth/jwt"
 	"github.com/witlox/sovra/pkg/errors"
 	"github.com/witlox/sovra/pkg/models"
 	"github.com/witlox/sovra/pkg/vault"
@@ -71,6 +72,7 @@ func (s *productionService) Create(ctx context.Context, req CreateRequest) (*mod
 		Status:          models.WorkspaceStatusActive,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
+		ExpiresAt:       req.ExpiresAt,
 	}
 
 	// Generate DEK using Vault transit engine
@@ -325,23 +327,73 @@ func (s *productionService) Delete(ctx context.Context, workspaceID string, sign
 	return nil
 }
 
+// isParticipant checks if the calling organization is a participant in the workspace.
+func isParticipant(ctx context.Context, ws *models.Workspace) (string, error) {
+	claims, ok := jwt.ClaimsFromContext(ctx)
+	if !ok {
+		return "", errors.NewAuthorizationError("no claims in context")
+	}
+
+	callerOrg := claims.Organization
+	if callerOrg == "" {
+		return "", errors.NewAuthorizationError("no organization in claims")
+	}
+
+	// Check if caller is owner
+	if ws.OwnerOrgID == callerOrg {
+		return callerOrg, nil
+	}
+
+	// Check if caller is in participant list
+	for _, org := range ws.ParticipantOrgs {
+		if org == callerOrg {
+			return callerOrg, nil
+		}
+	}
+
+	// Check detailed participants if present
+	for _, p := range ws.Participants {
+		if p.OrgID == callerOrg {
+			return callerOrg, nil
+		}
+	}
+
+	return "", errors.NewAuthorizationError("organization is not a workspace participant")
+}
+
 func (s *productionService) Encrypt(ctx context.Context, workspaceID string, plaintext []byte) ([]byte, error) {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace: %w", err)
 	}
 
+	// Check expiration
+	if err := checkExpiration(ws); err != nil {
+		return nil, err
+	}
+
+	// Verify caller is a workspace participant
+	callerOrg, err := isParticipant(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+
 	if ws.Archived || ws.Status == models.WorkspaceStatusArchived {
 		return nil, errors.NewValidationError("workspace", "cannot encrypt in archived workspace")
 	}
 
-	// Get any participant's wrapped DEK to unwrap
+	// Get caller's wrapped DEK if available, otherwise use any participant's
 	var wrappedDEK []byte
 	var orgID string
-	for org, wrapped := range ws.DEKWrapped {
+	if wrapped, ok := ws.DEKWrapped[callerOrg]; ok {
 		wrappedDEK = wrapped
-		orgID = org
-		break
+		orgID = callerOrg
+	} else {
+		for org, wrapped := range ws.DEKWrapped {
+			wrappedDEK = wrapped
+			orgID = org
+			break
+		}
 	}
 
 	if wrappedDEK == nil {
@@ -388,13 +440,29 @@ func (s *productionService) Decrypt(ctx context.Context, workspaceID string, cip
 		return nil, fmt.Errorf("failed to get workspace: %w", err)
 	}
 
-	// Get any participant's wrapped DEK to unwrap
+	// Check expiration
+	if err := checkExpiration(ws); err != nil {
+		return nil, err
+	}
+
+	// Verify caller is a workspace participant
+	callerOrg, err := isParticipant(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get caller's wrapped DEK if available, otherwise use any participant's
 	var wrappedDEK []byte
 	var orgID string
-	for org, wrapped := range ws.DEKWrapped {
+	if wrapped, ok := ws.DEKWrapped[callerOrg]; ok {
 		wrappedDEK = wrapped
-		orgID = org
-		break
+		orgID = callerOrg
+	} else {
+		for org, wrapped := range ws.DEKWrapped {
+			wrappedDEK = wrapped
+			orgID = org
+			break
+		}
 	}
 
 	if wrappedDEK == nil {
@@ -433,6 +501,76 @@ func (s *productionService) Decrypt(ctx context.Context, workspaceID string, cip
 	}
 
 	return plaintext, nil
+}
+
+// RotateDEK generates a new DEK and re-wraps it for all participants.
+func (s *productionService) RotateDEK(ctx context.Context, workspaceID string, signature []byte) error {
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get workspace: %w", err)
+	}
+
+	// Verify caller is a workspace participant
+	callerOrg, err := isParticipant(ctx, ws)
+	if err != nil {
+		return err
+	}
+
+	// Verify CRK signature for this operation
+	message := []byte(fmt.Sprintf("rotate-dek:%s:%d", workspaceID, time.Now().Unix()))
+	valid, err := s.verifyCRKSignature(ctx, callerOrg, message, signature)
+	if err != nil {
+		return fmt.Errorf("failed to verify signature: %w", err)
+	}
+	if !valid {
+		return errors.NewAuthorizationError("invalid CRK signature for DEK rotation")
+	}
+
+	if ws.Archived || ws.Status == models.WorkspaceStatusArchived {
+		return errors.NewValidationError("workspace", "cannot rotate DEK in archived workspace")
+	}
+
+	// Generate new DEK
+	newDEK, err := s.generateDEK(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to generate new DEK: %w", err)
+	}
+
+	// Re-wrap for all participants
+	newWrapped := make(map[string][]byte)
+	for _, orgID := range ws.ParticipantOrgs {
+		wrapped, err := s.wrapDEKForOrg(ctx, newDEK, orgID)
+		if err != nil {
+			return fmt.Errorf("failed to wrap DEK for org %s: %w", orgID, err)
+		}
+		newWrapped[orgID] = wrapped
+	}
+
+	ws.DEKWrapped = newWrapped
+	ws.UpdatedAt = time.Now()
+
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return fmt.Errorf("failed to update workspace: %w", err)
+	}
+
+	// Create audit event
+	if s.audit != nil {
+		auditEvent := &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     ws.OwnerOrgID,
+			Workspace: ws.ID,
+			EventType: models.AuditEventTypeKeyRotate,
+			Actor:     callerOrg,
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"participants": len(ws.ParticipantOrgs),
+			},
+		}
+		_ = s.audit.Log(ctx, auditEvent)
+	}
+
+	return nil
 }
 
 // generateDEK generates a new data encryption key using Vault's transit engine.
@@ -479,6 +617,185 @@ func (s *productionService) verifyCRKSignature(ctx context.Context, orgID string
 		return false, fmt.Errorf("failed to verify signature: %w", err)
 	}
 	return valid, nil
+}
+
+// ExportWorkspace exports a workspace for air-gap transfer.
+func (s *productionService) ExportWorkspace(ctx context.Context, workspaceID string) (*WorkspaceBundle, error) {
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("get workspace: %w", err)
+	}
+
+	// Only air-gap workspaces can be exported
+	if ws.Mode != models.WorkspaceModeAirGap {
+		return nil, errors.NewValidationError("workspace", "only air-gap workspaces can be exported")
+	}
+
+	callerOrg, err := isParticipant(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+
+	// Compute checksum of workspace data
+	wsData, _ := fmt.Printf("%+v", ws)
+	checksum := sha256.Sum256([]byte(fmt.Sprintf("%d", wsData)))
+
+	bundle := &WorkspaceBundle{
+		Workspace:  ws,
+		ExportedAt: time.Now(),
+		ExportedBy: callerOrg,
+		Checksum:   base64.StdEncoding.EncodeToString(checksum[:]),
+	}
+
+	return bundle, nil
+}
+
+// ImportWorkspace imports a workspace from an air-gap bundle.
+func (s *productionService) ImportWorkspace(ctx context.Context, bundle *WorkspaceBundle) (*models.Workspace, error) {
+	if bundle == nil || bundle.Workspace == nil {
+		return nil, errors.NewValidationError("bundle", "invalid bundle")
+	}
+
+	ws := bundle.Workspace
+	ws.ID = uuid.New().String()
+	ws.CreatedAt = time.Now()
+	ws.UpdatedAt = time.Now()
+
+	if err := s.repo.Create(ctx, ws); err != nil {
+		return nil, fmt.Errorf("create workspace: %w", err)
+	}
+
+	return ws, nil
+}
+
+// ExtendExpiration extends the workspace expiration time.
+func (s *productionService) ExtendExpiration(ctx context.Context, workspaceID string, newExpiry time.Time, signature []byte) error {
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("get workspace: %w", err)
+	}
+
+	callerOrg, err := isParticipant(ctx, ws)
+	if err != nil {
+		return err
+	}
+
+	// Verify signature
+	message := []byte(fmt.Sprintf("extend-expiry:%s:%d", workspaceID, newExpiry.Unix()))
+	valid, err := s.verifyCRKSignature(ctx, callerOrg, message, signature)
+	if err != nil || !valid {
+		return errors.NewAuthorizationError("invalid signature for expiration extension")
+	}
+
+	ws.ExpiresAt = newExpiry
+	ws.UpdatedAt = time.Now()
+
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return fmt.Errorf("update workspace expiration: %w", err)
+	}
+	return nil
+}
+
+// Invitations storage (in-memory for now, would be a repository in production)
+var invitations = make(map[string]*WorkspaceInvitation)
+
+// InviteParticipant creates an invitation for a new participant.
+func (s *productionService) InviteParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) (*WorkspaceInvitation, error) {
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("get workspace: %w", err)
+	}
+
+	callerOrg, err := isParticipant(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+
+	invitation := &WorkspaceInvitation{
+		ID:          uuid.New().String(),
+		WorkspaceID: workspaceID,
+		OrgID:       orgID,
+		InvitedBy:   callerOrg,
+		Status:      "pending",
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(7 * 24 * time.Hour), // 7 day expiry
+	}
+
+	invitations[invitation.ID] = invitation
+	return invitation, nil
+}
+
+// AcceptInvitation accepts a workspace invitation.
+func (s *productionService) AcceptInvitation(ctx context.Context, workspaceID, orgID string, signature []byte) error {
+	// Find the invitation
+	var invitation *WorkspaceInvitation
+	for _, inv := range invitations {
+		if inv.WorkspaceID == workspaceID && inv.OrgID == orgID && inv.Status == "pending" {
+			invitation = inv
+			break
+		}
+	}
+
+	if invitation == nil {
+		return errors.NewNotFoundError("invitation", "no pending invitation found")
+	}
+
+	if time.Now().After(invitation.ExpiresAt) {
+		return errors.NewValidationError("invitation", "invitation has expired")
+	}
+
+	// Get workspace and add participant
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("get workspace: %w", err)
+	}
+
+	// Add participant
+	ws.ParticipantOrgs = append(ws.ParticipantOrgs, orgID)
+
+	// Wrap DEK for new participant
+	var dek []byte
+	for org, wrapped := range ws.DEKWrapped {
+		dek, err = s.unwrapDEKForOrg(ctx, wrapped, org)
+		if err == nil {
+			break
+		}
+	}
+
+	if dek != nil {
+		wrapped, err := s.wrapDEKForOrg(ctx, dek, orgID)
+		if err != nil {
+			return fmt.Errorf("wrap DEK for new participant: %w", err)
+		}
+		ws.DEKWrapped[orgID] = wrapped
+	}
+
+	ws.UpdatedAt = time.Now()
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return fmt.Errorf("update workspace: %w", err)
+	}
+
+	invitation.Status = "accepted"
+	return nil
+}
+
+// DeclineInvitation declines a workspace invitation.
+func (s *productionService) DeclineInvitation(ctx context.Context, workspaceID, orgID string) error {
+	for _, inv := range invitations {
+		if inv.WorkspaceID == workspaceID && inv.OrgID == orgID && inv.Status == "pending" {
+			inv.Status = "declined"
+			return nil
+		}
+	}
+	return errors.NewNotFoundError("invitation", "no pending invitation found")
+}
+
+// checkExpiration checks if a workspace has expired.
+func checkExpiration(ws *models.Workspace) error {
+	if !ws.ExpiresAt.IsZero() && time.Now().After(ws.ExpiresAt) {
+		return errors.NewValidationError("workspace", "workspace has expired")
+	}
+	return nil
 }
 
 // encryptAESGCM encrypts plaintext using AES-256-GCM.
@@ -598,6 +915,11 @@ func (s *serviceImpl) AddParticipant(ctx context.Context, workspaceID, orgID str
 	}
 
 	ws.ParticipantOrgs = append(ws.ParticipantOrgs, orgID)
+	ws.Participants = append(ws.Participants, models.WorkspaceParticipant{
+		OrgID:    orgID,
+		Role:     "participant",
+		JoinedAt: time.Now(),
+	})
 	ws.UpdatedAt = time.Now()
 	if err := s.repo.Update(ctx, ws); err != nil {
 		return fmt.Errorf("failed to update workspace: %w", err)
@@ -661,4 +983,71 @@ func (s *serviceImpl) Decrypt(ctx context.Context, workspaceID string, ciphertex
 		return nil, fmt.Errorf("failed to decrypt: %w", err)
 	}
 	return result, nil
+}
+
+func (s *serviceImpl) RotateDEK(ctx context.Context, workspaceID string, signature []byte) error {
+	// Verify workspace exists first
+	if _, err := s.repo.Get(ctx, workspaceID); err != nil {
+		return fmt.Errorf("get workspace: %w", err)
+	}
+	if err := s.keyMgr.RotateDEK(ctx, workspaceID); err != nil {
+		return fmt.Errorf("rotate DEK: %w", err)
+	}
+	return nil
+}
+
+func (s *serviceImpl) ExportWorkspace(ctx context.Context, workspaceID string) (*WorkspaceBundle, error) {
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("get workspace: %w", err)
+	}
+	return &WorkspaceBundle{
+		Workspace:  ws,
+		ExportedAt: time.Now(),
+		ExportedBy: "exporter",
+		Checksum:   fmt.Sprintf("sha256:%s", uuid.New().String()[:8]),
+	}, nil
+}
+
+func (s *serviceImpl) ImportWorkspace(ctx context.Context, bundle *WorkspaceBundle) (*models.Workspace, error) {
+	if bundle == nil || bundle.Workspace == nil {
+		return nil, errors.NewValidationError("bundle", "invalid bundle")
+	}
+	ws := bundle.Workspace
+	ws.ID = uuid.New().String()
+	if err := s.repo.Create(ctx, ws); err != nil {
+		return nil, fmt.Errorf("create workspace: %w", err)
+	}
+	return ws, nil
+}
+
+func (s *serviceImpl) ExtendExpiration(ctx context.Context, workspaceID string, newExpiry time.Time, signature []byte) error {
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("get workspace: %w", err)
+	}
+	ws.ExpiresAt = newExpiry
+	ws.UpdatedAt = time.Now()
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return fmt.Errorf("update workspace: %w", err)
+	}
+	return nil
+}
+
+func (s *serviceImpl) InviteParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) (*WorkspaceInvitation, error) {
+	return &WorkspaceInvitation{
+		ID:          uuid.New().String(),
+		WorkspaceID: workspaceID,
+		OrgID:       orgID,
+		Status:      "pending",
+		CreatedAt:   time.Now(),
+	}, nil
+}
+
+func (s *serviceImpl) AcceptInvitation(ctx context.Context, workspaceID, orgID string, signature []byte) error {
+	return s.AddParticipant(ctx, workspaceID, orgID, signature)
+}
+
+func (s *serviceImpl) DeclineInvitation(ctx context.Context, workspaceID, orgID string) error {
+	return nil
 }

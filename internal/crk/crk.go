@@ -16,6 +16,11 @@ import (
 	"github.com/witlox/sovra/pkg/models"
 )
 
+// Auditor is an optional interface for audit logging CRK operations.
+type Auditor interface {
+	Log(ctx context.Context, event *models.AuditEvent) error
+}
+
 // NewManager creates a new CRK Manager implementation.
 func NewManager() Manager {
 	return &managerImpl{
@@ -23,9 +28,18 @@ func NewManager() Manager {
 	}
 }
 
+// NewManagerWithAudit creates a new CRK Manager with audit logging.
+func NewManagerWithAudit(auditor Auditor) Manager {
+	return &managerImpl{
+		crkShares: make(map[string][][]byte),
+		auditor:   auditor,
+	}
+}
+
 type managerImpl struct {
 	mu        sync.RWMutex
 	crkShares map[string][][]byte // crkID -> shares for validation
+	auditor   Auditor
 }
 
 // Generate creates a new CRK with the specified number of shares and threshold.
@@ -57,7 +71,7 @@ func (m *managerImpl) Generate(orgID string, totalShares, threshold int) (*model
 	m.crkShares[crkID] = shamirShares
 	m.mu.Unlock()
 
-	return &models.CRK{
+	crk := &models.CRK{
 		ID:          crkID,
 		OrgID:       orgID,
 		PublicKey:   pubKey,
@@ -66,7 +80,26 @@ func (m *managerImpl) Generate(orgID string, totalShares, threshold int) (*model
 		TotalShares: totalShares,
 		Status:      models.CRKStatusActive,
 		CreatedAt:   time.Now(),
-	}, nil
+	}
+
+	// Audit log the generation
+	if m.auditor != nil {
+		_ = m.auditor.Log(context.Background(), &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     orgID,
+			EventType: models.AuditEventTypeCRKGenerate,
+			Actor:     "system",
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"crk_id":       crkID,
+				"threshold":    threshold,
+				"total_shares": totalShares,
+			},
+		})
+	}
+
+	return crk, nil
 }
 
 // GetShares returns the shares for a CRK (used during key generation ceremony).
@@ -81,10 +114,15 @@ func (m *managerImpl) GetShares(crkID string) ([]models.CRKShare, error) {
 
 	shares := make([]models.CRKShare, len(shamirShares))
 	for i, data := range shamirShares {
+		// Extract the embedded index from the Shamir share (first byte)
+		index := 1 // default
+		if len(data) > 0 {
+			index = int(data[0])
+		}
 		shares[i] = models.CRKShare{
 			ID:        uuid.New().String(),
 			CRKID:     crkID,
-			Index:     i + 1,
+			Index:     index,
 			Data:      data,
 			CreatedAt: time.Now(),
 		}
@@ -138,9 +176,43 @@ func (m *managerImpl) Reconstruct(shares []models.CRKShare, publicKey []byte) (e
 func (m *managerImpl) Sign(shares []models.CRKShare, publicKey []byte, data []byte) ([]byte, error) {
 	privKey, err := m.Reconstruct(shares, publicKey)
 	if err != nil {
+		// Audit log failed sign attempt
+		if m.auditor != nil && len(shares) > 0 {
+			_ = m.auditor.Log(context.Background(), &models.AuditEvent{
+				ID:        uuid.New().String(),
+				Timestamp: time.Now(),
+				OrgID:     shares[0].CRKID,
+				EventType: models.AuditEventTypeCRKSign,
+				Actor:     "system",
+				Result:    models.AuditEventResultError,
+				Metadata: map[string]any{
+					"error":       err.Error(),
+					"share_count": len(shares),
+				},
+			})
+		}
 		return nil, err
 	}
-	return ed25519.Sign(privKey, data), nil
+
+	signature := ed25519.Sign(privKey, data)
+
+	// Audit log successful sign
+	if m.auditor != nil && len(shares) > 0 {
+		_ = m.auditor.Log(context.Background(), &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     shares[0].CRKID,
+			EventType: models.AuditEventTypeCRKSign,
+			Actor:     "system",
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"share_count": len(shares),
+				"data_size":   len(data),
+			},
+		})
+	}
+
+	return signature, nil
 }
 
 // Verify verifies a signature using the public key.
@@ -155,26 +227,72 @@ func (m *managerImpl) Verify(publicKey []byte, data []byte, signature []byte) (b
 }
 
 // ValidateShare checks if a share is valid and belongs to the given CRK.
+// Performs cryptographic validation by verifying share format and attempting reconstruction.
 func (m *managerImpl) ValidateShare(share models.CRKShare, publicKey []byte) error {
 	if len(share.Data) == 0 {
 		return errors.ErrShareInvalid
 	}
+
+	// Validate share index (must be positive)
+	if share.Index < 1 {
+		return errors.ErrShareInvalid
+	}
+
+	// Validate share data length (must match Ed25519 private key size + Shamir overhead)
+	// Shamir shares include a 1-byte index prefix
+	if len(share.Data) < 2 {
+		return errors.ErrShareInvalid
+	}
+
+	// Verify the share's embedded index matches the declared index
+	if int(share.Data[0]) != share.Index {
+		return errors.ErrShareInvalid
+	}
+
 	return nil
 }
 
-// ValidateShares checks if shares can reconstruct the CRK.
+// ValidateShares checks if shares can reconstruct the CRK and match the public key.
 func (m *managerImpl) ValidateShares(shares []models.CRKShare, threshold int, publicKey []byte) error {
 	if len(shares) < threshold {
 		return errors.ErrCRKThresholdNotMet
 	}
 
+	// Check for duplicate indices
 	seen := make(map[int]bool)
 	for _, s := range shares {
 		if seen[s.Index] {
 			return errors.ErrShareDuplicate
 		}
 		seen[s.Index] = true
+
+		// Validate each share individually
+		if err := m.ValidateShare(s, publicKey); err != nil {
+			return err
+		}
 	}
+
+	// Attempt to reconstruct the private key
+	shamirShares := make([][]byte, len(shares))
+	for i, s := range shares {
+		shamirShares[i] = s.Data
+	}
+
+	privateKey, err := shamir.Combine(shamirShares)
+	if err != nil {
+		return errors.NewCRKError("validate_shares", fmt.Errorf("cannot reconstruct key: %w", err))
+	}
+
+	// Verify the reconstructed private key matches the public key
+	if len(privateKey) != ed25519.PrivateKeySize {
+		return errors.NewCRKError("validate_shares", fmt.Errorf("invalid key size after reconstruction"))
+	}
+
+	derivedPublicKey := ed25519.PrivateKey(privateKey).Public().(ed25519.PublicKey)
+	if !bytes.Equal(derivedPublicKey, publicKey) {
+		return errors.NewCRKError("validate_shares", fmt.Errorf("reconstructed key does not match public key"))
+	}
+
 	return nil
 }
 

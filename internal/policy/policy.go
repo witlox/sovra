@@ -118,9 +118,10 @@ func (s *legacyServiceImpl) Validate(ctx context.Context, rego string) error {
 
 // serviceImpl is the production service implementation using repository and OPA interfaces.
 type serviceImpl struct {
-	repo  Repository
-	opa   OPAClient
-	audit AuditService
+	repo     Repository
+	opa      OPAClient
+	audit    AuditService
+	versRepo VersionedRepository // optional: for version history
 }
 
 // validateRego validates Rego policy syntax using OPA's AST parser.
@@ -135,6 +136,24 @@ func (s *serviceImpl) validateRego(rego string) error {
 	}
 
 	return nil
+}
+
+// saveVersion stores a policy version to history if versioned repository is available.
+func (s *serviceImpl) saveVersion(ctx context.Context, policy *models.Policy, createdBy, reason string) {
+	if s.versRepo == nil {
+		return
+	}
+	version := &models.PolicyVersion{
+		ID:        uuid.New().String(),
+		PolicyID:  policy.ID,
+		Version:   policy.Version,
+		Rego:      policy.Rego,
+		CreatedBy: createdBy,
+		Reason:    reason,
+		CreatedAt: time.Now(),
+	}
+	// Best effort - don't fail the operation if version save fails
+	_ = s.versRepo.CreateVersion(ctx, version)
 }
 
 // opaPolicyID generates a unique OPA policy ID.
@@ -163,6 +182,9 @@ func (s *serviceImpl) Create(ctx context.Context, req CreateRequest) (*models.Po
 	if err := s.repo.Create(ctx, policy); err != nil {
 		return nil, fmt.Errorf("failed to create policy: %w", err)
 	}
+
+	// Save initial version to history
+	s.saveVersion(ctx, policy, "", "initial creation")
 
 	// Upload to OPA
 	if err := s.opa.UploadPolicy(ctx, s.opaPolicyID(policy), policy.Rego); err != nil {
@@ -222,6 +244,9 @@ func (s *serviceImpl) Update(ctx context.Context, id string, rego string, signat
 	policy.Rego = rego
 	policy.Version++
 	policy.UpdatedAt = time.Now()
+
+	// Save version to history before updating
+	s.saveVersion(ctx, policy, "", "policy update")
 
 	// Update in database
 	if err := s.repo.Update(ctx, policy); err != nil {
@@ -339,4 +364,59 @@ func (s *serviceImpl) Evaluate(ctx context.Context, input models.PolicyInput) (*
 
 func (s *serviceImpl) Validate(ctx context.Context, rego string) error {
 	return s.validateRego(rego)
+}
+
+// versionedServiceImpl extends serviceImpl with version history operations.
+type versionedServiceImpl struct {
+	*serviceImpl
+	versRepo VersionedRepository
+}
+
+// NewVersionedPolicyService creates a new policy service with version history support.
+func NewVersionedPolicyService(
+	repo VersionedRepository,
+	opa OPAClient,
+	audit AuditService,
+) VersionedService {
+	base := &serviceImpl{
+		repo:     repo,
+		opa:      opa,
+		audit:    audit,
+		versRepo: repo,
+	}
+	return &versionedServiceImpl{
+		serviceImpl: base,
+		versRepo:    repo,
+	}
+}
+
+// GetVersion retrieves a specific version of a policy.
+func (s *versionedServiceImpl) GetVersion(ctx context.Context, policyID string, version int) (*models.PolicyVersion, error) {
+	pv, err := s.versRepo.GetVersion(ctx, policyID, version)
+	if err != nil {
+		return nil, fmt.Errorf("get policy version: %w", err)
+	}
+	return pv, nil
+}
+
+// ListVersions retrieves all versions of a policy.
+func (s *versionedServiceImpl) ListVersions(ctx context.Context, policyID string) ([]*models.PolicyVersion, error) {
+	versions, err := s.versRepo.ListVersions(ctx, policyID)
+	if err != nil {
+		return nil, fmt.Errorf("list policy versions: %w", err)
+	}
+	return versions, nil
+}
+
+// RollbackToVersion reverts a policy to a previous version.
+func (s *versionedServiceImpl) RollbackToVersion(ctx context.Context, policyID string, version int, signature []byte) (*models.Policy, error) {
+	// Get the historical version
+	pv, err := s.versRepo.GetVersion(ctx, policyID, version)
+	if err != nil {
+		return nil, fmt.Errorf("get version %d: %w", version, err)
+	}
+
+	// Update the current policy with the historical Rego
+	// This will create a new version in history
+	return s.Update(ctx, policyID, pv.Rego, signature)
 }

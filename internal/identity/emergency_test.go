@@ -361,18 +361,12 @@ func TestVerifyEmergencyAccessWithCRK(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create valid signature
-		message := identity.GenerateSignatureMessage(req.OrgID, req.ID+":"+req.Reason, req.RequestedAt)
-		// Note: The actual message format in the implementation is different
-		// We need to match: fmt.Sprintf("%s:%s:%s:%d", req.OrgID, req.ID, req.Reason, req.RequestedAt.Unix())
-		realMessage := []byte(req.OrgID + ":" + req.ID + ":" + req.Reason + ":" + string(rune(req.RequestedAt.Unix())))
-		_ = message // unused
-		signature := crkProvider.Sign(realMessage)
+		message := identity.GenerateSignatureMessage(req.OrgID, req.ID, req.Reason, req.RequestedAt)
+		signature := crkProvider.Sign(message)
 
 		err = mgr.VerifyEmergencyAccessWithCRK(ctx, req.ID, signature)
-		// This will fail because the message format doesn't match, which is expected
-		// The implementation builds: fmt.Sprintf("%s:%s:%s:%d", ...)
-		// We're demonstrating the pattern here
-		assert.Error(t, err) // Expected: signature verification mismatch
+		// With correct signature format, verification should pass
+		assert.NoError(t, err)
 	})
 
 	t.Run("rejects request with invalid CRK signature", func(t *testing.T) {
@@ -780,9 +774,9 @@ func TestVaultPolicyGenerator(t *testing.T) {
 func TestGenerateSignatureMessage(t *testing.T) {
 	t.Run("creates consistent message format", func(t *testing.T) {
 		timestamp := time.Unix(1700000000, 0)
-		msg := identity.GenerateSignatureMessage("org-123", "emergency-access", timestamp)
+		msg := identity.GenerateSignatureMessage("org-123", "req-456", "emergency-access", timestamp)
 
-		expected := "org-123:emergency-access:1700000000"
+		expected := "org-123:req-456:emergency-access:1700000000"
 		assert.Equal(t, expected, string(msg))
 	})
 }

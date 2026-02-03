@@ -4,10 +4,17 @@ package oidc
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -94,6 +101,8 @@ func (p *Provider) Validate(ctx context.Context, token string) (*jwt.Claims, err
 	// Refresh JWKS if stale (every 24 hours)
 	p.mu.RLock()
 	stale := time.Since(p.lastRefresh) > 24*time.Hour
+	jwks := p.jwks
+	discovery := p.discovery
 	p.mu.RUnlock()
 
 	if stale {
@@ -101,6 +110,10 @@ func (p *Provider) Validate(ctx context.Context, token string) (*jwt.Claims, err
 			// Log error but continue with cached keys
 			_ = err
 		}
+		p.mu.RLock()
+		jwks = p.jwks
+		discovery = p.discovery
+		p.mu.RUnlock()
 	}
 
 	// Parse token header to get kid
@@ -109,17 +122,50 @@ func (p *Provider) Validate(ctx context.Context, token string) (*jwt.Claims, err
 		return nil, jwt.ErrInvalidToken
 	}
 
-	// For now, we'll validate using the standard JWT validator
-	// In production, you'd look up the specific key by kid from JWKS
-	p.mu.RLock()
-	discovery := p.discovery
-	p.mu.RUnlock()
+	// Decode header to get kid
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, jwt.ErrInvalidToken
+	}
 
-	// Validate issuer from discovery
-	validator, err := jwt.NewValidator(jwt.ValidatorConfig{
+	var header struct {
+		Kid string `json:"kid"`
+		Alg string `json:"alg"`
+	}
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return nil, jwt.ErrInvalidToken
+	}
+
+	// Look up the signing key by kid from JWKS
+	var signingKey *JWK
+	if jwks != nil && header.Kid != "" {
+		for i := range jwks.Keys {
+			if jwks.Keys[i].Kid == header.Kid {
+				signingKey = &jwks.Keys[i]
+				break
+			}
+		}
+	}
+
+	// Build public key PEM from JWK if we found the key
+	var publicKeyPEM []byte
+	if signingKey != nil {
+		publicKeyPEM, err = jwkToPublicKeyPEM(signingKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert JWK to public key: %w", err)
+		}
+	}
+
+	// Validate using the JWT validator with the looked-up key
+	validatorCfg := jwt.ValidatorConfig{
 		ExpectedIssuer: discovery.Issuer,
 		ExpectedAuds:   []string{p.config.ClientID},
-	})
+	}
+	if len(publicKeyPEM) > 0 {
+		validatorCfg.PublicKeyPEM = publicKeyPEM
+	}
+
+	validator, err := jwt.NewValidator(validatorCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create validator: %w", err)
 	}
@@ -137,6 +183,79 @@ func (p *Provider) Validate(ctx context.Context, token string) (*jwt.Claims, err
 	}
 
 	return claims, nil
+}
+
+// jwkToPublicKeyPEM converts a JWK to PEM-encoded public key
+func jwkToPublicKeyPEM(jwk *JWK) ([]byte, error) {
+	switch jwk.Kty {
+	case "RSA":
+		// Decode RSA components
+		nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode RSA modulus: %w", err)
+		}
+		eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode RSA exponent: %w", err)
+		}
+
+		// Convert exponent bytes to int
+		var e int
+		for _, b := range eBytes {
+			e = e<<8 + int(b)
+		}
+
+		n := new(big.Int).SetBytes(nBytes)
+		pubKey := &rsa.PublicKey{N: n, E: e}
+
+		derBytes, err := x509.MarshalPKIXPublicKey(pubKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal public key: %w", err)
+		}
+
+		pemBlock := &pem.Block{Type: "PUBLIC KEY", Bytes: derBytes}
+		return pem.EncodeToMemory(pemBlock), nil
+
+	case "EC":
+		// Decode EC components
+		xBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode EC x: %w", err)
+		}
+		yBytes, err := base64.RawURLEncoding.DecodeString(jwk.Y)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode EC y: %w", err)
+		}
+
+		var curve elliptic.Curve
+		switch jwk.Crv {
+		case "P-256":
+			curve = elliptic.P256()
+		case "P-384":
+			curve = elliptic.P384()
+		case "P-521":
+			curve = elliptic.P521()
+		default:
+			return nil, fmt.Errorf("unsupported curve: %s", jwk.Crv)
+		}
+
+		pubKey := &ecdsa.PublicKey{
+			Curve: curve,
+			X:     new(big.Int).SetBytes(xBytes),
+			Y:     new(big.Int).SetBytes(yBytes),
+		}
+
+		derBytes, err := x509.MarshalPKIXPublicKey(pubKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal public key: %w", err)
+		}
+
+		pemBlock := &pem.Block{Type: "PUBLIC KEY", Bytes: derBytes}
+		return pem.EncodeToMemory(pemBlock), nil
+
+	default:
+		return nil, fmt.Errorf("unsupported key type: %s", jwk.Kty)
+	}
 }
 
 func (p *Provider) refresh(ctx context.Context) error {
@@ -229,6 +348,36 @@ func Middleware(provider *Provider) func(http.Handler) http.Handler {
 
 			claims, err := provider.Validate(r.Context(), token)
 			if err != nil {
+				http.Error(w, "Invalid token", http.StatusUnauthorized)
+				return
+			}
+
+			ctx := jwt.ContextWithClaims(r.Context(), claims)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// OptionalMiddleware validates OIDC tokens if present but allows requests through without a token.
+func OptionalMiddleware(provider *Provider) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip if already authenticated via mTLS or JWT
+			if _, ok := jwt.ClaimsFromContext(r.Context()); ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			token := extractBearerToken(r)
+			if token == "" {
+				// No token - let request proceed without OIDC auth
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			claims, err := provider.Validate(r.Context(), token)
+			if err != nil {
+				// Token present but invalid
 				http.Error(w, "Invalid token", http.StatusUnauthorized)
 				return
 			}

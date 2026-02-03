@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,6 +21,7 @@ import (
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/workspace"
 	"github.com/witlox/sovra/pkg/postgres"
+	"github.com/witlox/sovra/pkg/telemetry"
 	"github.com/witlox/sovra/pkg/vault"
 )
 
@@ -43,6 +46,22 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Initialize telemetry
+	telemetryCfg := telemetry.Config{
+		Enabled:        cfg.Telemetry.Enabled,
+		ServiceName:    cfg.Telemetry.ServiceName,
+		ServiceVersion: cfg.Telemetry.ServiceVersion,
+		Endpoint:       cfg.Telemetry.Endpoint,
+		SampleRate:     cfg.Telemetry.SampleRate,
+	}
+	tp, err := telemetry.Init(ctx, telemetryCfg)
+	if err != nil {
+		logger.Warn("failed to initialize telemetry", "error", err)
+	} else if tp != nil {
+		defer tp.Shutdown(ctx)
+		logger.Info("telemetry initialized", "enabled", cfg.Telemetry.Enabled)
+	}
 
 	db, err := postgres.Connect(ctx, cfg.Database.DSN())
 	if err != nil {
@@ -109,10 +128,43 @@ func main() {
 	}
 
 	go func() {
-		logger.Info("starting HTTP server", "addr", cfg.Server.Addr())
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("server error", "error", err)
-			cancel()
+		if cfg.Server.TLSEnabled {
+			// Configure TLS
+			tlsConfig := &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
+
+			// Configure mTLS if enabled
+			if cfg.Server.MTLSEnabled && cfg.Server.TLSCAFile != "" {
+				caCert, err := os.ReadFile(cfg.Server.TLSCAFile)
+				if err != nil {
+					logger.Error("failed to read CA file", "error", err)
+					cancel()
+					return
+				}
+				caCertPool := x509.NewCertPool()
+				if !caCertPool.AppendCertsFromPEM(caCert) {
+					logger.Error("failed to parse CA certificate")
+					cancel()
+					return
+				}
+				tlsConfig.ClientCAs = caCertPool
+				tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+				logger.Info("mTLS enabled", "ca_file", cfg.Server.TLSCAFile)
+			}
+
+			server.TLSConfig = tlsConfig
+			logger.Info("starting HTTPS server", "addr", cfg.Server.Addr(), "mtls", cfg.Server.MTLSEnabled)
+			if err := server.ListenAndServeTLS(cfg.Server.TLSCertFile, cfg.Server.TLSKeyFile); err != nil && err != http.ErrServerClosed {
+				logger.Error("server error", "error", err)
+				cancel()
+			}
+		} else {
+			logger.Info("starting HTTP server", "addr", cfg.Server.Addr())
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("server error", "error", err)
+				cancel()
+			}
 		}
 	}()
 

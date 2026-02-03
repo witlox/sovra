@@ -480,7 +480,9 @@ func TestEnableMFA(t *testing.T) {
 		secret, err := mgr.EnableMFA(ctx, admin.ID)
 		require.NoError(t, err)
 		assert.NotEmpty(t, secret)
-		assert.Len(t, secret, 40) // 20 bytes hex encoded
+		// EnableMFA returns a TOTP provisioning URL (otpauth://...)
+		assert.Contains(t, secret, "otpauth://totp/")
+		assert.Contains(t, secret, "Sovra")
 	})
 
 	t.Run("fails for non-existent admin", func(t *testing.T) {

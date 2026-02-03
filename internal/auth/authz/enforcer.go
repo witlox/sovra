@@ -163,10 +163,10 @@ allow if {
     workspace_participant(input.subject.org, input.resource.id)
 }
 
-# Key operations require specific permissions
+# Key operations require specific permissions (encrypt, decrypt, sign, verify)
 allow if {
     input.resource.type == "key"
-    input.action in ["encrypt", "decrypt"]
+    input.action in ["encrypt", "decrypt", "sign", "verify"]
     input.resource.org == input.subject.org
     "key_user" in input.subject.roles
 }
@@ -176,6 +176,22 @@ allow if {
     input.action in ["create", "rotate", "revoke"]
     input.resource.org == input.subject.org
     "key_admin" in input.subject.roles
+}
+
+# Auditor role: read-only access to audit logs
+allow if {
+    input.resource.type == "audit_log"
+    input.action == "read"
+    input.resource.org == input.subject.org
+    "auditor" in input.subject.roles
+}
+
+# Federation admin role: manage federation relationships
+allow if {
+    input.resource.type == "federation"
+    input.action in ["create", "read", "update", "delete", "manage"]
+    input.resource.org == input.subject.org
+    "federation_admin" in input.subject.roles
 }
 
 # Helper functions

@@ -4,8 +4,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -399,46 +401,79 @@ func (r *InMemoryRateLimiter) GetRemaining(ctx context.Context, key string) (int
 	return r.limit - b.count, nil
 }
 
-// DefaultMTLSVerifier is a basic mTLS verifier.
-type DefaultMTLSVerifier struct{}
+// DefaultMTLSVerifier is a stub mTLS verifier that denies all requests.
+// Only use this for development with SOVRA_DEV_MODE=true.
+type DefaultMTLSVerifier struct {
+	devMode bool
+}
 
 // NewDefaultMTLSVerifier creates a new default mTLS verifier.
+// It checks SOVRA_DEV_MODE to determine behavior.
 func NewDefaultMTLSVerifier() *DefaultMTLSVerifier {
-	return &DefaultMTLSVerifier{}
+	devMode := os.Getenv("SOVRA_DEV_MODE") == "true"
+	if devMode {
+		slog.WarnContext(context.Background(), "SECURITY WARNING: Using development mTLS verifier that allows all requests")
+	}
+	return &DefaultMTLSVerifier{devMode: devMode}
 }
 
 func (v *DefaultMTLSVerifier) VerifyCertificate(ctx context.Context, cert []byte) (*CertificateInfo, error) {
-	// In production, this would parse and verify the certificate
-	return &CertificateInfo{
-		CommonName:   "client",
-		Organization: "org",
-	}, nil
+	if v.devMode {
+		return &CertificateInfo{
+			CommonName:   "dev-client",
+			Organization: "dev-org",
+		}, nil
+	}
+	return nil, errors.New("no mTLS verifier configured - set up proper authentication")
 }
 
 func (v *DefaultMTLSVerifier) GetOrganization(ctx context.Context, cert []byte) (string, error) {
-	return "org", nil
+	if v.devMode {
+		return "dev-org", nil
+	}
+	return "", errors.New("no mTLS verifier configured")
 }
 
 func (v *DefaultMTLSVerifier) IsTrusted(ctx context.Context, cert []byte) (bool, error) {
-	return true, nil
+	if v.devMode {
+		return true, nil
+	}
+	return false, errors.New("no mTLS verifier configured")
 }
 
-// DefaultAuthenticator is a basic authenticator.
-type DefaultAuthenticator struct{}
+// DefaultAuthenticator is a stub authenticator that denies all requests.
+// Only use this for development with SOVRA_DEV_MODE=true.
+type DefaultAuthenticator struct {
+	devMode bool
+}
 
 // NewDefaultAuthenticator creates a new default authenticator.
+// It checks SOVRA_DEV_MODE to determine behavior.
 func NewDefaultAuthenticator() *DefaultAuthenticator {
-	return &DefaultAuthenticator{}
+	devMode := os.Getenv("SOVRA_DEV_MODE") == "true"
+	if devMode {
+		slog.WarnContext(context.Background(), "SECURITY WARNING: Using development authenticator that allows all requests")
+	}
+	return &DefaultAuthenticator{devMode: devMode}
 }
 
 func (a *DefaultAuthenticator) AuthenticateRequest(ctx context.Context, r *http.Request) (*AuthResult, error) {
-	return &AuthResult{Authenticated: true}, nil
+	if a.devMode {
+		return &AuthResult{Authenticated: true, UserID: "dev-user", OrgID: "dev-org"}, nil
+	}
+	return nil, errors.New("no authenticator configured - set up proper authentication")
 }
 
 func (a *DefaultAuthenticator) AuthenticateCertificate(ctx context.Context, cert []byte) (*AuthResult, error) {
-	return &AuthResult{Authenticated: true}, nil
+	if a.devMode {
+		return &AuthResult{Authenticated: true, UserID: "dev-user", OrgID: "dev-org"}, nil
+	}
+	return nil, errors.New("no authenticator configured")
 }
 
 func (a *DefaultAuthenticator) AuthenticateToken(ctx context.Context, token string) (*AuthResult, error) {
-	return &AuthResult{Authenticated: true, UserID: "user", OrgID: "org"}, nil
+	if a.devMode {
+		return &AuthResult{Authenticated: true, UserID: "dev-user", OrgID: "dev-org"}, nil
+	}
+	return nil, errors.New("no authenticator configured")
 }

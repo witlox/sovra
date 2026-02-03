@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/witlox/sovra/internal/workspace"
@@ -289,4 +290,79 @@ func (s *WorkspaceService) Encrypt(ctx context.Context, workspaceID string, plai
 
 func (s *WorkspaceService) Decrypt(ctx context.Context, workspaceID string, ciphertext []byte) ([]byte, error) {
 	return s.crypto.Decrypt(ctx, workspaceID, ciphertext)
+}
+
+func (s *WorkspaceService) RotateDEK(ctx context.Context, workspaceID string, signature []byte) error {
+	_, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	// Simulated DEK rotation - in real impl, would regenerate and re-wrap keys
+	return nil
+}
+
+func (s *WorkspaceService) ExportWorkspace(ctx context.Context, workspaceID string) (*workspace.WorkspaceBundle, error) {
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return &workspace.WorkspaceBundle{
+		Workspace:  ws,
+		ExportedAt: time.Now(),
+		ExportedBy: "test-exporter",
+		Checksum:   "sha256:testchecksum",
+	}, nil
+}
+
+func (s *WorkspaceService) ImportWorkspace(ctx context.Context, bundle *workspace.WorkspaceBundle) (*models.Workspace, error) {
+	if bundle.Workspace.ID == "" {
+		bundle.Workspace.ID = uuid.New().String()
+	}
+	if err := s.repo.Create(ctx, bundle.Workspace); err != nil {
+		return nil, err
+	}
+	return bundle.Workspace, nil
+}
+
+func (s *WorkspaceService) ExtendExpiration(ctx context.Context, workspaceID string, newExpiry time.Time, signature []byte) error {
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	ws.ExpiresAt = newExpiry
+	return s.repo.Update(ctx, ws)
+}
+
+func (s *WorkspaceService) InviteParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) (*workspace.WorkspaceInvitation, error) {
+	// Verify workspace exists
+	_, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return &workspace.WorkspaceInvitation{
+		ID:          uuid.New().String(),
+		WorkspaceID: workspaceID,
+		OrgID:       orgID,
+		Status:      "pending",
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(7 * 24 * time.Hour),
+	}, nil
+}
+
+func (s *WorkspaceService) AcceptInvitation(ctx context.Context, workspaceID, orgID string, signature []byte) error {
+	ws, err := s.repo.Get(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	// Add participant to workspace
+	ws.Participants = append(ws.Participants, models.WorkspaceParticipant{
+		OrgID:    orgID,
+		Role:     "participant",
+		JoinedAt: time.Now(),
+	})
+	return s.repo.Update(ctx, ws)
+}
+
+func (s *WorkspaceService) DeclineInvitation(ctx context.Context, workspaceID, orgID string) error {
+	return nil
 }

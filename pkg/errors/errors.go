@@ -100,3 +100,32 @@ func (e *PolicyError) Error() string {
 func NewPolicyError(policyID, input, reason string) *PolicyError {
 	return &PolicyError{PolicyID: policyID, Input: input, Reason: reason}
 }
+
+// AuthorizationError represents an authorization failure.
+type AuthorizationError struct {
+	Message string
+}
+
+func (e *AuthorizationError) Error() string {
+	return fmt.Sprintf("authorization error: %s", e.Message)
+}
+
+// NewAuthorizationError creates a new authorization error.
+func NewAuthorizationError(message string) *AuthorizationError {
+	return &AuthorizationError{Message: message}
+}
+
+// NotFoundError represents a resource not found error.
+type NotFoundError struct {
+	Resource string
+	Message  string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("%s not found: %s", e.Resource, e.Message)
+}
+
+// NewNotFoundError creates a new not found error.
+func NewNotFoundError(resource, message string) *NotFoundError {
+	return &NotFoundError{Resource: resource, Message: message}
+}

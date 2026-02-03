@@ -111,7 +111,12 @@ func (h *Handler) Middleware() func(http.Handler) http.Handler {
 			}
 		}
 
-		// Apply JWT/OIDC middleware (optional - mTLS may be sufficient)
+		// Apply OIDC middleware if enabled (validates tokens from OIDC providers)
+		if h.oidcProvider != nil {
+			handler = oidc.OptionalMiddleware(h.oidcProvider)(handler)
+		}
+
+		// Apply JWT middleware (optional - mTLS or OIDC may be sufficient)
 		if h.jwtValidator != nil {
 			handler = jwt.OptionalMiddleware(h.jwtValidator)(handler)
 		}

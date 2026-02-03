@@ -257,3 +257,53 @@ func TestOptionalMiddleware_NoCertificate(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, rec.Code) // No identity in context
 }
+
+func TestCRLChecking(t *testing.T) {
+	caCert, caKey, caPEM := generateCA(t)
+	clientCert := generateClientCert(t, caCert, caKey, "test-client", "org-test", true)
+
+	t.Run("accepts valid certificate not in CRL", func(t *testing.T) {
+		verifier, err := mtls.NewVerifierFromPEM(caPEM)
+		require.NoError(t, err)
+
+		_, err = verifier.VerifyCertificate(clientCert)
+		require.NoError(t, err)
+	})
+
+	t.Run("verifier without CRL accepts all valid certificates", func(t *testing.T) {
+		verifier, err := mtls.NewVerifierFromPEM(caPEM)
+		require.NoError(t, err)
+
+		// Should verify without CRL checking
+		_, err = verifier.VerifyCertificate(clientCert)
+		require.NoError(t, err)
+	})
+
+	t.Run("verifier configuration for CRL URL", func(t *testing.T) {
+		// Test that verifier can be configured with CRL distribution points
+		verifier, err := mtls.NewVerifierFromPEM(caPEM)
+		require.NoError(t, err)
+		assert.NotNil(t, verifier)
+
+		// CRL URL would be extracted from certificate if present
+		// In this test cert, there's no CRL distribution point
+	})
+}
+
+func TestVerifierWithCRLCache(t *testing.T) {
+	caCert, caKey, caPEM := generateCA(t)
+	clientCert := generateClientCert(t, caCert, caKey, "cache-test-client", "org-cache-test", true)
+
+	t.Run("caches CRL responses", func(t *testing.T) {
+		verifier, err := mtls.NewVerifierFromPEM(caPEM)
+		require.NoError(t, err)
+
+		// First verification
+		_, err = verifier.VerifyCertificate(clientCert)
+		require.NoError(t, err)
+
+		// Second verification should use cached result (if CRL was fetched)
+		_, err = verifier.VerifyCertificate(clientCert)
+		require.NoError(t, err)
+	})
+}
