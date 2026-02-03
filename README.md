@@ -87,7 +87,7 @@ sudo mv sovra /usr/local/bin/sovra-cli
 ```bash
 git clone https://github.com/witlox/sovra.git
 cd sovra
-go build -o bin/ ./cmd/...
+make
 ```
 
 ---
