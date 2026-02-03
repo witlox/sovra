@@ -67,7 +67,7 @@ jobs:
           gocovmerge unit.out integration.out acceptance.out > coverage.txt
 
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage
           path: coverage.txt
