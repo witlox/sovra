@@ -50,7 +50,7 @@ kubectl get svc -n sovra sovra-api-gateway
 
 # Test from within cluster
 kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- \
-  curl -k https://sovra-api-gateway.sovra.svc:443/healthz
+  curl -k https://sovra-api-gateway.sovra.svc:443/health
 ```
 
 3. **Certificate issues:**
@@ -191,7 +191,7 @@ kubectl logs -n sovra-edge -l app=edge-agent
 
 # Check connectivity
 kubectl exec -n sovra-edge edge-agent-xxx -- \
-  curl -k https://sovra.example.org/healthz
+  curl -k https://sovra.example.org/health
 
 # Check certificates
 kubectl get secret edge-node-tls -n sovra-edge -o yaml
@@ -263,7 +263,7 @@ kubectl exec -n sovra-edge vault-2 -- \
 **Diagnosis:**
 ```bash
 # Check partner connectivity
-curl -k https://partner-sovra.example.org/healthz
+curl -k https://partner-sovra.example.org/health
 
 # Check certificates
 sovra-cli federation cert-verify org-b
@@ -278,7 +278,7 @@ kubectl logs -n sovra -l app=sovra-federation-manager
 ```bash
 # Test from control plane pod
 kubectl exec -n sovra sovra-api-gateway-xxx -- \
-  curl -k https://partner-sovra.example.org/healthz
+  curl -k https://partner-sovra.example.org/health
 
 # Check firewall rules
 # Ensure port 8443 is open for federation

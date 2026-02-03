@@ -64,13 +64,13 @@ ansible-playbook -i inventory/production.ini playbooks/deploy-control-plane.yml
 ### Method 3: Build from Source
 
 ```bash
-# Install dependencies
-make install
-
-# Build all services
+# Build all packages
 make build
 
-# Build Docker images
+# Build binaries to bin/
+make build-bin
+
+# Build Docker image
 make docker-build
 
 # Deploy
@@ -162,35 +162,32 @@ kubectl create secret generic sovra-ca \
 
 ```yaml
 # config/production.yaml
-organization:
-  id: org-a
-  name: "Organization A"
+org_id: org-a
+log_level: info
 
-api:
-  listen_addr: "0.0.0.0:8443"
-  tls:
-    cert: /etc/sovra/tls/server.crt
-    key: /etc/sovra/tls/server.key
-    ca: /etc/sovra/tls/ca.crt
+server:
+  host: 0.0.0.0
+  port: 8080
+  tls_enabled: true
+  tls_cert_file: /etc/sovra/tls/server.crt
+  tls_key_file: /etc/sovra/tls/server.key
+  mtls_enabled: true
+  tls_ca_file: /etc/sovra/tls/ca.crt
 
 database:
   host: postgres.sovra.svc.cluster.local
   port: 5432
-  name: sovra
-  user: sovra
-  password_secret: sovra-postgres-password
+  database: sovra
+  username: sovra
+  password: ${SOVRA_DATABASE_PASSWORD}
   ssl_mode: require
 
 vault:
   address: https://vault.example.org:8200
-  token_secret: sovra-vault-token
+  token: ${SOVRA_VAULT_TOKEN}
 
 opa:
-  bundle_url: file:///etc/sovra/policies
-
-audit:
-  retention_days: 90
-  partition_interval: month
+  address: http://opa.sovra.svc:8181
 ```
 
 ### Deploy Configuration
@@ -228,21 +225,14 @@ kubectl get pods -n sovra
 kubectl get svc -n sovra
 
 # Test API
-curl -k https://sovra.example.org/healthz
+curl -k https://sovra.example.org/health
 ```
 
 Expected response:
 ```json
 {
   "status": "healthy",
-  "version": "0.5.0",
-  "components": {
-    "api_gateway": "healthy",
-    "policy_engine": "healthy",
-    "key_lifecycle": "healthy",
-    "audit_service": "healthy",
-    "database": "healthy"
-  }
+  "version": "1.0.0"
 }
 ```
 

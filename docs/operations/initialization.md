@@ -175,12 +175,12 @@ The migrations create these core tables:
 
 | Table | Purpose |
 |-------|---------|
-| `customers` | Organization records |
+| `organizations` | Organization records |
 | `edge_nodes` | Registered edge nodes |
 | `identities` | User/service identities |
 | `workspaces` | Key workspaces |
-| `audit_log` | Immutable audit trail |
-| `federation_peers` | Federation relationships |
+| `audit_events` | Immutable audit trail |
+| `federations` | Federation relationships |
 | `policies` | Access control policies |
 
 ## Troubleshooting
@@ -259,7 +259,7 @@ After successful initialization:
    curl https://sovra.example.com/health
    
    # Login as admin
-   sovra login --email admin@example.com
+   sovra-cli login --email admin@example.com
    ```
 
 ## Security Considerations

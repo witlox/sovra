@@ -186,7 +186,7 @@ audit:
 **2. Immutable audit logs:**
 ```sql
 -- PostgreSQL audit table
-CREATE TABLE audit_logs (
+CREATE TABLE audit_events (
   id UUID PRIMARY KEY,
   timestamp TIMESTAMP NOT NULL,
   event_type TEXT NOT NULL,
@@ -197,7 +197,7 @@ CREATE TABLE audit_logs (
 ) WITH (autovacuum_enabled = false);
 
 -- Prevent modifications
-REVOKE UPDATE, DELETE ON audit_logs FROM sovra;
+REVOKE UPDATE, DELETE ON audit_events FROM sovra;
 ```
 
 **3. Forward to SIEM:**
@@ -288,7 +288,7 @@ func sanitizeLog(msg string) string {
 **Database user permissions:**
 ```sql
 -- Application user (no DDL)
-GRANT SELECT, INSERT, UPDATE ON audit_logs TO sovra;
+GRANT SELECT, INSERT ON audit_events TO sovra;
 GRANT SELECT, INSERT, UPDATE, DELETE ON workspaces TO sovra;
 REVOKE CREATE, DROP, ALTER ON DATABASE sovra FROM sovra;
 ```

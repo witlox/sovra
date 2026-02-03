@@ -13,12 +13,13 @@ Deploy Sovra control plane on Kubernetes cluster (any cloud or on-premises).
 ```
 Kubernetes Cluster (3+ nodes)
 ├── sovra-api-gateway (3 replicas)
-├── sovra-policy-engine (3 replicas)
-├── sovra-key-lifecycle (3 replicas)
-├── sovra-audit-service (3 replicas)
-├── sovra-federation-manager (3 replicas)
+│   └── Unified service: workspace, federation, policy, audit, edge, CRK
 └── PostgreSQL (HA via operator)
 ```
+
+> **Note:** The api-gateway is a unified service that handles all control plane
+> functionality (workspaces, federation, policy, audit, edge nodes, CRK management)
+> in a single process.
 
 ## Prerequisites
 
@@ -118,7 +119,7 @@ kubectl get svc -n sovra
 
 # Test API
 kubectl port-forward svc/sovra-api-gateway 8443:443 -n sovra
-curl -k https://localhost:8443/healthz
+curl -k https://localhost:8443/health
 ```
 
 ## Configuration
@@ -127,54 +128,55 @@ curl -k https://localhost:8443/healthz
 
 ```yaml
 # config/minimal.yaml
-organization:
-  id: org-a
-  name: "Organization A"
+org_id: org-a
 
 database:
   host: postgres.sovra.svc
   port: 5432
 
-api:
-  listen: "0.0.0.0:8443"
+server:
+  host: 0.0.0.0
+  port: 8080
 ```
 
 ### Production Configuration
 
 ```yaml
 # config/production.yaml
-organization:
-  id: org-a
-  name: "Organization A"
+org_id: org-a
+log_level: info
 
-api:
-  listen_addr: "0.0.0.0:8443"
-  request_timeout: 30s
-  max_connections: 1000
-  rate_limit:
-    enabled: true
-    requests_per_minute: 100
+server:
+  host: 0.0.0.0
+  port: 8080
+  read_timeout: 10s
+  write_timeout: 10s
+  tls_enabled: true
+  tls_cert_file: /etc/sovra/tls/server.crt
+  tls_key_file: /etc/sovra/tls/server.key
+  mtls_enabled: true
+  tls_ca_file: /etc/sovra/tls/ca.crt
 
 database:
   host: postgres-ha.sovra.svc
   port: 5432
-  name: sovra
-  max_connections: 50
-  connection_timeout: 10s
+  database: sovra
+  username: sovra
+  ssl_mode: verify-full
+  max_open_conns: 50
 
 vault:
   address: https://vault.example.org:8200
-  max_retries: 3
-  timeout: 30s
 
-audit:
-  retention_days: 90
-  batch_size: 100
-  flush_interval: 60s
+opa:
+  address: http://opa.sovra.svc:8181
 
-monitoring:
-  prometheus_enabled: true
-  metrics_port: 9090
+federation:
+  enabled: true
+
+telemetry:
+  enabled: true
+  sample_rate: 0.01
 ```
 
 ## Scaling
@@ -182,9 +184,8 @@ monitoring:
 ### Horizontal Scaling
 
 ```bash
-# Scale services
+# Scale the api-gateway
 kubectl scale deployment sovra-api-gateway --replicas=5 -n sovra
-kubectl scale deployment sovra-policy-engine --replicas=5 -n sovra
 
 # Autoscaling
 kubectl autoscale deployment sovra-api-gateway \

@@ -77,11 +77,9 @@ Expected output:
 ```
 NAME                              READY   STATUS
 sovra-api-gateway-0               1/1     Running
-sovra-policy-engine-0             1/1     Running
-sovra-key-lifecycle-0             1/1     Running
-sovra-audit-service-0             1/1     Running
-sovra-federation-manager-0        1/1     Running
 ```
+
+The api-gateway is a single service that handles all control plane functionality including policy evaluation, key lifecycle, audit, and federation.
 
 ### Initialize Control Plane
 
@@ -317,7 +315,7 @@ kubectl logs -n sovra -l app=sovra-api-gateway
 
 ```bash
 # Test connectivity
-curl -k https://sovra.example.org/healthz
+curl -k https://sovra.example.org/health
 
 # Check edge node logs
 kubectl logs -n sovra-edge -l app=edge-agent
@@ -330,7 +328,7 @@ sovra-cli edge-node cert verify edge-1
 
 ```bash
 # Check partner connectivity
-curl -k https://sovra-partner.example.org/healthz
+curl -k https://sovra-partner.example.org/health
 
 # Verify certificates
 sovra-cli federation cert verify org-b

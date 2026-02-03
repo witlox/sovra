@@ -86,7 +86,7 @@ allow if {
 # Auditors can read audit logs
 allow if {
     input.action == "read"
-    input.resource.type == "audit_log"
+    input.resource.type == "audit_event"
     "auditor" in input.user.roles
     input.resource.org == input.user.org
 }

@@ -14,12 +14,9 @@ Monitor Sovra with Prometheus and Grafana for comprehensive observability.
 
 ```
 ┌─────────────────────────────────────────┐
-│ Sovra Services                          │
-│ ├─ API Gateway (:9090/metrics)          │
-│ ├─ Policy Engine (:9091/metrics)        │
-│ ├─ Key Lifecycle (:9092/metrics)        │
-│ ├─ Audit Service (:9093/metrics)        │
-│ └─ Federation Manager (:9094/metrics)   │
+│ Sovra API Gateway (/metrics)            │
+│   Unified service: workspace,           │
+│   federation, policy, audit, edge, CRK  │
 └──────────────┬──────────────────────────┘
                │ scrape
 ┌──────────────▼──────────────────────────┐
@@ -105,32 +102,36 @@ scrape_configs:
 ### Control Plane Metrics
 
 ```
-# API Gateway
-sovra_api_requests_total{method,path,status}
-sovra_api_request_duration_seconds{method,path}
-sovra_api_active_connections
-sovra_api_errors_total{type}
+# API Gateway (subsystem = serviceName, e.g. "api_gateway")
+sovra_api_gateway_http_requests_total{method,path,status}
+sovra_api_gateway_http_request_duration_seconds{method,path}
+sovra_api_gateway_http_active_requests
+sovra_api_gateway_errors_total{type}
+sovra_api_gateway_auth_attempts_total{method,result}
 
 # Policy Engine
-sovra_policy_evaluations_total{workspace,result}
+sovra_policy_evaluations_total{result}
 sovra_policy_evaluation_duration_seconds
 sovra_policy_cache_hits_total
 sovra_policy_cache_misses_total
 
 # Key Lifecycle
-sovra_keys_total{workspace,type}
-sovra_key_operations_total{operation,result}
-sovra_key_rotation_age_seconds
+sovra_keys_operations_total{operation,result}
+sovra_keys_operation_duration_seconds{operation}
+sovra_keys_active_total{type}
+sovra_keys_rotation_age_seconds{workspace_hash}
 
 # Audit Service
-sovra_audit_events_total{type,org}
+sovra_audit_events_total{event_type}
 sovra_audit_write_duration_seconds
-sovra_audit_lag_seconds
+sovra_audit_sync_lag_seconds
+sovra_audit_queue_depth
 
 # Federation
-sovra_federation_connections{partner,status}
-sovra_federation_requests_total{partner,operation}
-sovra_federation_errors_total{partner,type}
+sovra_federation_connections_active{status}
+sovra_federation_requests_total{operation,result}
+sovra_federation_sync_duration_seconds
+sovra_federation_errors_total{type}
 ```
 
 ### Edge Node Metrics
@@ -144,9 +145,11 @@ vault_core_leadership_setup_failed
 vault_core_leadership_lost
 
 # Edge Agent
-sovra_edge_heartbeat_seconds
-sovra_edge_cert_expiry_seconds
-sovra_edge_sync_duration_seconds
+sovra_edge_heartbeat_age_seconds{node_id}
+sovra_edge_cert_expiry_seconds{node_id}
+sovra_edge_sync_duration_seconds{sync_type}
+sovra_edge_nodes_total{status}
+sovra_edge_operations_total{operation,result}
 ```
 
 ## Grafana Dashboards

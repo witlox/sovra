@@ -410,7 +410,7 @@ sovra-cli workspace remove-participant \
 sovra-cli federation status partner-org
 
 # Test connectivity
-curl -k https://sovra-partner.example.org/healthz
+curl -k https://sovra-partner.example.org/health
 
 # Re-request keys
 sovra-cli workspace refresh-keys \

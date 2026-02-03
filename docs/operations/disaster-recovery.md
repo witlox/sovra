@@ -152,7 +152,7 @@ sovra-cli edge-node status edge-1
 
 ```bash
 # 1. Check connectivity
-curl -k https://partner-sovra.example.org/healthz
+curl -k https://partner-sovra.example.org/health
 
 # 2. Regenerate federation certificate
 sovra-cli federation cert-renew --partner org-b

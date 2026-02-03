@@ -25,15 +25,19 @@ Organization A              Organization B              Organization C
 
 ## Components
 
-### Control Plane Services (Go)
+### Control Plane (Single Binary)
 
-| Service | Responsibility |
-|---------|---------------|
+The control plane runs as a single `sovra-api-gateway` binary that integrates all services:
+
+| Component | Responsibility |
+|-----------|---------------|
 | **API Gateway** | mTLS termination, routing, auth |
 | **Policy Engine** | OPA-based access control |
 | **Key Lifecycle** | Key creation, rotation, expiry |
 | **Audit Service** | Immutable audit logs |
 | **Federation Manager** | Cross-org communication |
+
+> **Note:** While the documentation may reference separate services (e.g., `sovra-policy-engine`, `sovra-audit-service`), the actual implementation packages all components into a single deployable binary for simplified operations.
 
 ### Edge Nodes (Vault)
 

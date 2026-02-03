@@ -277,7 +277,7 @@ vault audit log
 
 ```bash
 # Check network connectivity
-curl -k https://sovra.example.org/healthz
+curl -k https://sovra.example.org/health
 
 # Check certificates
 openssl s_client -connect sovra.example.org:443 -cert /etc/sovra/tls/client.crt -key /etc/sovra/tls/client.key
