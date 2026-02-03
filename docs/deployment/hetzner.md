@@ -19,33 +19,33 @@ Hetzner Cloud offers:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Hetzner Cloud (nbg1)                     │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │               Load Balancer (lb11)                   │   │
-│  │            :6443 (K8s) :443 (HTTPS)                  │   │
-│  └───────────────────┬─────────────────────────────────┘   │
-│                      │                                      │
-│  ┌───────────────────┼───────────────────────────────┐     │
-│  │                   ▼                               │     │
+┌───────────────────────────────────────────────────────────┐
+│                    Hetzner Cloud (nbg1)                   │
+│                                                           │
+│  ┌────────────────────────────────────────────────────┐   │
+│  │               Load Balancer (lb11)                 │   │
+│  │            :6443 (K8s) :443 (HTTPS)                │   │
+│  └───────────────────┬────────────────────────────────┘   │
+│                      │                                    │
+│  ┌───────────────────┼──────────────────────────────┐     │
+│  │                   ▼                              │     │
 │  │  ┌─────────┐ ┌─────────┐ ┌─────────┐             │     │
 │  │  │Control-0│ │Control-1│ │Control-2│             │     │
 │  │  │  cx31   │ │  cx31   │ │  cx31   │             │     │
 │  │  └─────────┘ └─────────┘ └─────────┘             │     │
-│  │           K3s Control Plane (HA)                  │     │
-│  └───────────────────────────────────────────────────┘     │
-│                                                             │
-│  ┌───────────────────────────────────────────────────┐     │
+│  │           K3s Control Plane (HA)                 │     │
+│  └──────────────────────────────────────────────────┘     │
+│                                                           │
+│  ┌──────────────────────────────────────────────────┐     │
 │  │  ┌─────────┐ ┌─────────┐ ┌─────────┐             │     │
 │  │  │Worker-0 │ │Worker-1 │ │Worker-2 │             │     │
 │  │  │  cx41   │ │  cx41   │ │  cx41   │             │     │
 │  │  └─────────┘ └─────────┘ └─────────┘             │     │
-│  │              K3s Worker Nodes                     │     │
-│  └───────────────────────────────────────────────────┘     │
-│                                                             │
-│  Private Network: 10.0.0.0/8                               │
-└─────────────────────────────────────────────────────────────┘
+│  │              K3s Worker Nodes                    │     │
+│  └──────────────────────────────────────────────────┘     │
+│                                                           │
+│  Private Network: 10.0.0.0/8                              │
+└───────────────────────────────────────────────────────────┘
 ```
 
 ## Prerequisites
@@ -284,18 +284,6 @@ kubectl exec -it deploy/postgresql -- pg_dump -U sovra sovra > backup.sql
 kubectl apply -f infrastructure/kubernetes/backup/postgresql-backup.yaml
 ```
 
-## Cost Estimate
-
-| Component | Type | Monthly Cost |
-|-----------|------|--------------|
-| 3x Control Plane | cx31 | €26.94 |
-| 3x Workers | cx41 | €50.70 |
-| Load Balancer | lb11 | €5.39 |
-| Private Network | | €0 (included) |
-| **Total** | | **~€83/month** |
-
-Add volumes and snapshots as needed (~€0.0524/GB/month for volumes).
-
 ## Troubleshooting
 
 ### Nodes Not Joining
@@ -337,9 +325,3 @@ terraform destroy
 
 **Warning:** This deletes all servers, volumes, and data!
 
-## Next Steps
-
-- [Deploy edge nodes](edge-node)
-- [Configure TLS certificates](../security/authentication#mtls)
-- [Set up monitoring](../operations/monitoring)
-- [Configure federation](../federation/)

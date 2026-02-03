@@ -40,8 +40,8 @@ Emergency access procedures allow authorized personnel to gain access to critica
     │              │
     ▼              │
 ┌─────────────────┐│
-│ 2+ admins      ││
-│ approve        ││
+│ 2+ admins       ││
+│ approve         ││
 └───────┬─────────┘│
         │          │
         └────┬─────┘
@@ -181,10 +181,10 @@ Account recovery uses CRK reconstruction to regain access when credentials are l
          │
     ┌────┴────┐
     ▼         ▼
-┌────────┐ ┌────────┐
-│Share 1 │ │Share 2 │ ...
+┌─────────┐ ┌─────────┐
+│Share 1  │ │Share 2  │ ...
 │collected│ │collected│
-└────────┘ └────────┘
+└─────────┘ └─────────┘
          │
          ▼
 ┌─────────────────┐
@@ -193,10 +193,10 @@ Account recovery uses CRK reconstruction to regain access when credentials are l
 └────────┬────────┘
          │
          ▼
-┌─────────────────┐
+┌──────────────────┐
 │ CRK reconstructed│
 │ Credentials reset│
-└────────┬────────┘
+└────────┬─────────┘
          │
          ▼
 ┌─────────────────┐
@@ -330,8 +330,3 @@ All emergency access and recovery operations are logged:
 
 6. **Immediate Revocation**: Always complete emergency access when work is done.
 
-## Related Documentation
-
-- [CRK Management](crk-management) - CRK generation and reconstruction
-- [Identity Management](identity-management) - Identity types and RBAC
-- [Security Overview](../security/) - Overall security architecture

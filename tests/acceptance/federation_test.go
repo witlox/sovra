@@ -12,7 +12,7 @@ import (
 	"github.com/witlox/sovra/tests/testutil"
 )
 
-// TestFederationEstablishment tests federation as described in docs/concepts.md.
+// TestFederationEstablishment tests federation as described in docs/index.md.
 // "Federation is a bilateral trust relationship between organizations using mTLS."
 func TestFederationEstablishment(t *testing.T) {
 	ctx := testutil.TestContext(t)

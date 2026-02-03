@@ -269,8 +269,3 @@ After successful initialization:
 3. **Key Rotation**: Plan for annual CRK rotation
 4. **Backup**: Create encrypted backups before initialization
 
-## Next Steps
-
-- [Deploy edge nodes](../deployment/edge-node)
-- [Configure federation](../federation/)
-- [Set up monitoring](monitoring)

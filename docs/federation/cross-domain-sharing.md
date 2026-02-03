@@ -442,5 +442,3 @@ sovra-cli audit query \
 5. **Revocation**: Instant across all participants
 
 ---
-
-**Next:** [Federation Overview](./) <!-- Protocol and trust model guides coming soon -->

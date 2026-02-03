@@ -41,24 +41,24 @@ Sovra is designed with security as a first principle. This guide covers authenti
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                 Security Layers                  │
+│                 Security Layers                 │
 ├─────────────────────────────────────────────────┤
-│                                                  │
-│  Layer 1: Network Security                       │
-│  └── mTLS for all connections                    │
-│                                                  │
-│  Layer 2: Authentication                         │
-│  └── Certificate + Token verification            │
-│                                                  │
-│  Layer 3: Authorization                          │
-│  └── OPA policy evaluation                       │
-│                                                  │
-│  Layer 4: Audit                                  │
-│  └── Immutable audit log                         │
-│                                                  │
-│  Layer 5: Encryption                             │
-│  └── Data encrypted at rest and in transit       │
-│                                                  │
+│                                                 │
+│  Layer 1: Network Security                      │
+│  └── mTLS for all connections                   │
+│                                                 │
+│  Layer 2: Authentication                        │
+│  └── Certificate + Token verification           │
+│                                                 │
+│  Layer 3: Authorization                         │
+│  └── OPA policy evaluation                      │
+│                                                 │
+│  Layer 4: Audit                                 │
+│  └── Immutable audit log                        │
+│                                                 │
+│  Layer 5: Encryption                            │
+│  └── Data encrypted at rest and in transit      │
+│                                                 │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -66,4 +66,4 @@ Sovra is designed with security as a first principle. This guide covers authenti
 
 Please report security vulnerabilities through GitHub Security Advisories or by emailing security@witlox.org.
 
-See [SECURITY.md](../SECURITY) for our security policy.
+See [SECURITY.md](https://github.com/witlox/sovra/blob/main/SECURITY.md) for more details.

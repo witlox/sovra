@@ -306,9 +306,3 @@ sovra-cli config test-vault
 # Test OPA connection
 sovra-cli config test-opa
 ```
-
-## Next Steps
-
-- [Quick Start](quickstart) - Deploy Sovra
-- [Operations Guide](../operations/) - Production operations
-- [Security Best Practices](../security/best-practices) - Secure configuration

@@ -331,8 +331,3 @@ pg_dump -U sovra sovra > /backup/sovra-$(date +%Y%m%d).sql
 kubectl get all --all-namespaces -o yaml > /backup/k8s-$(date +%Y%m%d).yaml
 ```
 
-## Next Steps
-
-- [Air-Gap Deployment](air-gap) (if needed)
-- [Configure Federation](../federation/)
-- [Set up Monitoring](../operations/monitoring)

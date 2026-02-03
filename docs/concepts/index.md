@@ -9,6 +9,11 @@ title: Core Concepts
 
 Sovra uses several key concepts to enable federated sovereign key management.
 
+- [CRK Management Guide](crk-management)
+- [Identity Management Guide](identity-management)
+- [Emergency Access Procedures](emergency-access)
+- [Telemetry and Monitoring](telemetry)
+
 ---
 
 ## Organization
@@ -158,7 +163,7 @@ A **workspace** is a shared cryptographic domain for multi-organization data sha
 **Example:**
 ```bash
 Workspace: cancer-research
-├── Participants: [eth-zurich, epfl, chuv]
+├── Participants: [eth-zurich, epfl, ...]
 ├── DEK: Wrapped for each participant
 ├── Classification: CONFIDENTIAL
 └── Purpose: "Oncology research collaboration"
@@ -375,13 +380,3 @@ Layer 6: Monitoring (anomaly detection)
 ```
 
 ---
-
-## Next Steps
-
-- [Quick Start Guide](quickstart)
-- [Installation Guide](installation)
-- [Deployment Guide](../deployment/)
-
----
-
-**Questions?** See [GitHub Discussions](https://github.com/witlox/sovra/discussions) <!-- FAQ coming soon -->

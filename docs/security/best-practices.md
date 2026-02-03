@@ -417,9 +417,3 @@ kubectl get pods -n sovra -o json | jq '.items[].spec.containers[].image'
 - [ ] GDPR processes documented
 - [ ] ISO 27001 controls mapped
 - [ ] Regular compliance audits
-
-## Next Steps
-
-- [CRK Management Guide](../crk-management)
-- [Disaster Recovery](../operations/disaster-recovery)
-<!-- Dedicated compliance, incident response, and penetration testing guides coming soon -->

@@ -11,29 +11,29 @@ Sovra supports multiple authentication mechanisms to integrate with your organiz
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Authentication Flow                       │
+│                    Authentication Flow                      │
 ├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  Client Request                                              │
-│       │                                                      │
-│       ▼                                                      │
+│                                                             │
+│  Client Request                                             │
+│       │                                                     │
+│       ▼                                                     │
 │  ┌─────────────┐                                            │
 │  │   mTLS      │◄── Primary: Certificate-based auth         │
 │  └──────┬──────┘                                            │
-│         │                                                    │
-│         ▼                                                    │
+│         │                                                   │
+│         ▼                                                   │
 │  ┌─────────────┐                                            │
 │  │  JWT/OIDC   │◄── Secondary: Token-based auth             │
 │  └──────┬──────┘    (Azure AD, Okta, Keycloak, etc.)        │
-│         │                                                    │
-│         ▼                                                    │
+│         │                                                   │
+│         ▼                                                   │
 │  ┌─────────────┐                                            │
 │  │   OPA       │◄── Authorization policy check              │
 │  └──────┬──────┘                                            │
-│         │                                                    │
-│         ▼                                                    │
-│     Handler                                                  │
-│                                                              │
+│         │                                                   │
+│         ▼                                                   │
+│     Handler                                                 │
+│                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -244,9 +244,3 @@ sovra-cli auth check
 3. **Prefer mTLS** - For service-to-service communication
 4. **Use OIDC** - For user authentication from web/mobile apps
 5. **Audit authentication** - Monitor auth failures
-
-## Next Steps
-
-- [Authorization Guide](authorization)
-- [Security Best Practices](best-practices)
-- [Federation Guide](../federation/)

@@ -11,30 +11,30 @@ Sovra uses [Open Policy Agent (OPA)](https://www.openpolicyagent.org/) for fine-
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   Authorization Flow                         │
+│                   Authorization Flow                        │
 ├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  Authenticated Request                                       │
-│       │                                                      │
-│       ▼                                                      │
+│                                                             │
+│  Authenticated Request                                      │
+│       │                                                     │
+│       ▼                                                     │
 │  ┌─────────────────┐                                        │
 │  │ Extract Context │                                        │
 │  │ - User identity │                                        │
 │  │ - Action        │                                        │
 │  │ - Resource      │                                        │
 │  └────────┬────────┘                                        │
-│           │                                                  │
-│           ▼                                                  │
+│           │                                                 │
+│           ▼                                                 │
 │  ┌─────────────────┐                                        │
 │  │   OPA Policy    │◄── Rego policies                       │
 │  │   Evaluation    │                                        │
 │  └────────┬────────┘                                        │
-│           │                                                  │
+│           │                                                 │
 │      ┌────┴────┐                                            │
-│      │         │                                             │
-│      ▼         ▼                                             │
-│   Allow      Deny                                            │
-│                                                              │
+│      │         │                                            │
+│      ▼         ▼                                            │
+│   Allow      Deny                                           │
+│                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -305,8 +305,3 @@ See [Policy Engine Architecture](../control-plane#policy-engine) for details.
 5. **Use attributes** - For fine-grained control
 6. **Cache decisions** - For repeated identical requests
 
-## Next Steps
-
-- [Authentication Guide](authentication)
-- [Security Best Practices](best-practices)
-- [Monitoring Guide](../operations/monitoring)

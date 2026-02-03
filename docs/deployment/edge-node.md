@@ -299,8 +299,3 @@ kubectl logs -n sovra-edge vault-0
 vault operator raft join https://vault-0:8200
 ```
 
-## Next Steps
-
-- [Configure workspaces](../federation/cross-domain-sharing)
-- [Set up monitoring](../operations/monitoring)
-- [Review security](../security/best-practices)

@@ -26,28 +26,28 @@ Exoscale offers:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│              Exoscale Zone              │
-│                                         │
-│  ┌──────────────────────────────────┐   │
-│  │      Network Load Balancer       │   │
-│  │         (vault-nlb)              │   │
-│  └──────────────┬───────────────────┘   │
-│                 │ :8200                 │
-│  ┌──────────────┼───────────────────┐   │
-│  │              ▼                   │   │
+┌────────────────────────────────────────┐
+│              Exoscale Zone             │
+│                                        │
+│  ┌─────────────────────────────────┐   │
+│  │      Network Load Balancer      │   │
+│  │         (vault-nlb)             │   │
+│  └──────────────┬──────────────────┘   │
+│                 │ :8200                │
+│  ┌──────────────┼──────────────────┐   │
+│  │              ▼                  │   │
 │  │  ┌─────┐  ┌─────┐  ┌─────┐      │   │
 │  │  │Vault│  │Vault│  │Vault│      │   │
 │  │  │  0  │──│  1  │──│  2  │      │   │
 │  │  └─────┘  └─────┘  └─────┘      │   │
-│  │         Raft Cluster             │   │
-│  └──────────────────────────────────┘   │
-│                                         │
+│  │         Raft Cluster            │   │
+│  └─────────────────────────────────┘   │
+│                                        │
 │  Security Group: vault-sg              │
 │  - 8200/tcp (API)                      │
 │  - 8201/tcp (cluster - internal)       │
 │  - 22/tcp (SSH)                        │
-└─────────────────────────────────────────┘
+└────────────────────────────────────────┘
 ```
 
 ## Deployment Steps
@@ -281,21 +281,3 @@ terraform destroy
 ```
 
 **Warning:** This deletes all data. Ensure you have backups!
-
-## Cost Estimation
-
-| Component | Type | Monthly Cost (approx) |
-|-----------|------|----------------------|
-| 3x Compute | standard.medium | ~$90 |
-| NLB | Standard | ~$15 |
-| Storage | 50GB x 3 | ~$15 |
-| **Total** | | **~$120/month** |
-
-Prices vary by zone. Check [Exoscale pricing](https://www.exoscale.com/pricing/) for current rates.
-
-## Next Steps
-
-1. [Configure TLS certificates](../security/authentication#mtls)
-2. [Set up monitoring](../operations/monitoring)
-3. [Initialize control plane](../operations/initialization)
-4. [Deploy edge nodes](edge-node)

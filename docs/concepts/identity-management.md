@@ -312,9 +312,3 @@ manager.RevokeDevice(ctx, device.ID)
 
 6. **Audit Logging**: All identity operations are logged for compliance and security monitoring.
 
-## Related Documentation
-
-- [CRK Management](crk-management) - Customer Root Key lifecycle
-- [Emergency Access](emergency-access) - Break-glass procedures
-- [Authentication](../security/authentication) - Auth backend configuration
-- [Authorization](../security/authorization) - OPA policy setup

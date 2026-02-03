@@ -678,14 +678,6 @@ sovra-cli crk regenerate-shares --shares 5 --threshold 3
 
 ---
 
-## Next Steps
-
-- [Installation Guide](installation)
-- [Security Best Practices](../security/best-practices)
-- [Federation Guide](../federation/)
-
----
-
 **CRITICAL REMINDER:** 
 
 ⚠️ **If you lose too many shares (below threshold), your CRK is PERMANENTLY LOST**

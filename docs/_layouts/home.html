@@ -254,12 +254,12 @@
         <ul>
             <li><a href="{{ '/' | relative_url }}">Home</a></li>
             <li><a href="{{ '/quickstart' | relative_url }}">Quick Start</a></li>
+            <li><a href="{{ '/guides' | relative_url }}">Guides</a></li>
             <li><a href="{{ '/concepts' | relative_url }}">Concepts</a></li>
-            <li><a href="{{ '/crk-management' | relative_url }}">CRK</a></li>
-            <li><a href="{{ '/federation/' | relative_url }}">Federation</a></li>
-            <li><a href="{{ '/security/' | relative_url }}">Security</a></li>
-            <li><a href="{{ '/operations/' | relative_url }}">Operations</a></li>
             <li><a href="{{ '/deployment/' | relative_url }}">Deployment</a></li>
+            <li><a href="{{ '/federation/' | relative_url }}">Federation</a></li>
+            <li><a href="{{ '/operations/' | relative_url }}">Operations</a></li>
+            <li><a href="{{ '/security/' | relative_url }}">Security</a></li>
             <li><a href="https://github.com/witlox/sovra">GitHub</a></li>
         </ul>
     </nav>
@@ -277,20 +277,25 @@
                 <h3>Installation</h3>
                 <p>Docker, binaries, or build from source.</p>
             </a>
-            <a href="{{ '/concepts' | relative_url }}" class="card">
-                <div class="card-icon">💡</div>
-                <h3>Core Concepts</h3>
-                <p>Workspaces, CRKs, federation, and architecture.</p>
-            </a>
             <a href="{{ '/control-plane' | relative_url }}" class="card">
                 <div class="card-icon">🎛️</div>
                 <h3>Control Plane</h3>
                 <p>Configure and manage your deployment.</p>
             </a>
-            <a href="{{ '/crk-management' | relative_url }}" class="card">
+            <a href="{{ '/concepts' | relative_url }}" class="card">
+                <div class="card-icon">💡</div>
+                <h3>Core Concepts</h3>
+                <p>Workspaces, CRKs, federation, and architecture.</p>
+            </a>
+             <a href="{{ '/guides/' | relative_url }}" class="card">
                 <div class="card-icon">🔐</div>
-                <h3>CRK Management</h3>
-                <p>Key lifecycle, rotation, and policies.</p>
+                <h3>User and Admin guide</h3>
+                <p>Guides to most common operations.</p>
+            </a>
+            <a href="{{ '/deployment/' | relative_url }}" class="card">
+                <div class="card-icon">☁️</div>
+                <h3>Deployment</h3>
+                <p>AWS, Azure, GCP, and on-premises guides.</p>
             </a>
             <a href="{{ '/federation/' | relative_url }}" class="card">
                 <div class="card-icon">🌐</div>
@@ -306,11 +311,6 @@
                 <div class="card-icon">⚙️</div>
                 <h3>Operations</h3>
                 <p>Monitoring, backup, and troubleshooting.</p>
-            </a>
-            <a href="{{ '/deployment/' | relative_url }}" class="card">
-                <div class="card-icon">☁️</div>
-                <h3>Deployment</h3>
-                <p>AWS, Azure, GCP, and on-premises guides.</p>
             </a>
         </div>
         

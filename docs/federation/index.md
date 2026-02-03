@@ -52,4 +52,3 @@ sovra-cli workspace create \
 ## Documentation
 
 - [Cross-Domain Sharing](cross-domain-sharing)
-<!-- Trust model and protocol specification guides coming soon -->

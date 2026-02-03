@@ -20,28 +20,28 @@ OVHcloud offers:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   OVHcloud (GRA9 - Gravelines)              │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │            Managed Kubernetes Cluster               │   │
-│  │                                                     │   │
+┌───────────────────────────────────────────────────────────┐
+│                   OVHcloud (GRA9 - Gravelines)            │
+│                                                           │
+│  ┌────────────────────────────────────────────────────┐   │
+│  │            Managed Kubernetes Cluster              │   │
+│  │                                                    │   │
 │  │  ┌─────────┐ ┌─────────┐ ┌─────────┐               │   │
 │  │  │ Node 1  │ │ Node 2  │ │ Node 3  │               │   │
 │  │  │  b2-15  │ │  b2-15  │ │  b2-15  │               │   │
 │  │  └─────────┘ └─────────┘ └─────────┘               │   │
-│  │          Worker Node Pool (autoscaling)             │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                          │                                  │
-│                    Private Network                          │
-│                     (vRack VLAN)                           │
-│                          │                                  │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │            Managed PostgreSQL (Business)            │   │
-│  │         3-node HA cluster with auto-failover        │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+│  │          Worker Node Pool (autoscaling)            │   │
+│  └────────────────────────────────────────────────────┘   │
+│                          │                                │
+│                    Private Network                        │
+│                     (vRack VLAN)                          │
+│                          │                                │
+│  ┌────────────────────────────────────────────────────┐   │
+│  │            Managed PostgreSQL (Business)           │   │
+│  │         3-node HA cluster with auto-failover       │   │
+│  └────────────────────────────────────────────────────┘   │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
 ```
 
 ## Prerequisites
@@ -327,17 +327,6 @@ autoscale     = true
 ovhcloud kube node-pool update workers --desired-nodes 5
 ```
 
-## Cost Estimate
-
-| Component | Type | Monthly Cost |
-|-----------|------|--------------|
-| 3x Nodes | b2-15 | €120 |
-| Load Balancer | | Included |
-| PostgreSQL | db1-7 (3 nodes) | €150 |
-| Private Network | vRack | Included |
-| Block Storage | 100GB | €5 |
-| **Total** | | **~€275/month** |
-
 ## Security
 
 ### Network Policies
@@ -408,10 +397,3 @@ terraform destroy
 ```
 
 **Warning:** This deletes the Kubernetes cluster and database!
-
-## Next Steps
-
-- [Deploy edge nodes](edge-node)
-- [Configure TLS certificates](../security/authentication#mtls)
-- [Set up monitoring](../operations/monitoring)
-- [Configure federation](../federation/)

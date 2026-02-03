@@ -98,18 +98,6 @@ aws route53 change-resource-record-sets \
   --change-batch file://dns-record.json
 ```
 
-## Cost Estimate
-
-```
-Monthly costs (eu-central-1):
-├── EKS cluster: $73
-├── EC2 nodes (3x t3.large): $150
-├── RDS Multi-AZ (db.t3.large): $145
-├── ALB: $23
-├── Data transfer: ~$50
-└── Total: ~$441/month
-```
-
 ## Terraform Resources
 
 Complete configuration:
@@ -189,9 +177,3 @@ aws eks update-cluster-config \
   --name sovra-production \
   --logging '{"clusterLogging":[{"types":["api","audit","authenticator"],"enabled":true}]}'
 ```
-
-## Next Steps
-
-- [Configure Federation](../federation/)
-- [Deploy Edge Nodes](edge-node)
-- [Set up Monitoring](../operations/monitoring)

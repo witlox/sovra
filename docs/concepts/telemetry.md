@@ -480,9 +480,3 @@ jaeger:
     es:
       max-span-age: 7d
 ```
-
-## Next Steps
-
-- [Monitoring Guide](../operations/monitoring) - Full monitoring setup
-- [Configuration Guide](configuration) - Configuration reference
-- [Operations Guide](../operations/) - Day-to-day operations

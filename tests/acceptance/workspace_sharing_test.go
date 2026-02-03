@@ -13,7 +13,7 @@ import (
 	"github.com/witlox/sovra/tests/testutil"
 )
 
-// TestWorkspaceCreation tests workspace creation as described in docs/concepts.md.
+// TestWorkspaceCreation tests workspace creation as described in docs/index.md.
 // "A Workspace is a cryptographic domain where organizations collaborate."
 func TestWorkspaceCreation(t *testing.T) {
 	ctx := testutil.TestContext(t)
@@ -53,7 +53,7 @@ func TestWorkspaceCreation(t *testing.T) {
 	})
 }
 
-// TestCrossOrgDataSharing tests cross-org data sharing as described in docs/concepts.md.
+// TestCrossOrgDataSharing tests cross-org data sharing as described in docs/index.md.
 // "Workspaces enable secure data sharing between federated organizations."
 func TestCrossOrgDataSharing(t *testing.T) {
 	ctx := testutil.TestContext(t)
@@ -157,7 +157,7 @@ func TestCrossOrgDataSharing(t *testing.T) {
 	})
 }
 
-// TestWorkspaceArchival tests workspace archival as described in docs/concepts.md.
+// TestWorkspaceArchival tests workspace archival as described in docs/index.md.
 func TestWorkspaceArchival(t *testing.T) {
 	ctx := testutil.TestContext(t)
 
@@ -224,7 +224,7 @@ func TestWorkspaceExpiration(t *testing.T) {
 	})
 }
 
-// TestDEKManagement tests DEK (Data Encryption Key) management as described in docs/concepts.md.
+// TestDEKManagement tests DEK (Data Encryption Key) management as described in docs/index.md.
 // "Each workspace has a DEK that is wrapped with each participant's public key."
 func TestDEKManagement(t *testing.T) {
 	ctx := testutil.TestContext(t)

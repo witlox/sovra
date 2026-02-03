@@ -13,7 +13,7 @@ import (
 	"github.com/witlox/sovra/tests/testutil"
 )
 
-// TestPolicyEnforcement tests policy enforcement as described in docs/concepts.md.
+// TestPolicyEnforcement tests policy enforcement as described in docs/index.md.
 // "All operations are evaluated against OPA policies before execution."
 func TestPolicyEnforcement(t *testing.T) {
 	ctx := testutil.TestContext(t)
@@ -76,7 +76,7 @@ func TestPolicyEnforcement(t *testing.T) {
 	})
 }
 
-// TestTimeBasedPolicies tests time-based policies as described in docs/concepts.md.
+// TestTimeBasedPolicies tests time-based policies as described in docs/index.md.
 // "Policies can restrict access based on time windows."
 func TestTimeBasedPolicies(t *testing.T) {
 	ctx := testutil.TestContext(t)

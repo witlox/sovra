@@ -14,34 +14,23 @@ This guide covers operational aspects of running Sovra in production.
 ### Setup & Initialization
 
 - **[Initialization](initialization)** - Bootstrap control plane
-- **Configuration** - Service configuration <!-- Coming soon -->
+- **[Configuration](../configuration)** - Service configuration
 
 ### Monitoring & Observability
 
 - **[Monitoring](monitoring)** - Prometheus + Grafana setup
-- **[Logging](monitoring#log-aggregation)** - Centralized log aggregation <!-- Dedicated logging guide coming soon -->
-- **[Alerting](monitoring#alerts)** - Alert configuration <!-- Dedicated alerting guide coming soon -->
+- **[Logging](monitoring#log-aggregation)** - Centralized log aggregation
+- **[Alerting](monitoring#alerts)** - Alert configuration
 - **Tracing** - Distributed tracing <!-- Coming soon -->
 
 ### Maintenance
 
-- **[Backup & Restore](disaster-recovery#backup-strategy)** - Data protection <!-- Dedicated backup guide coming soon -->
+- **[Backup & Restore](disaster-recovery#backup-strategy)** - Data protection
 - **[Disaster Recovery](disaster-recovery)** - DR procedures
-- **Upgrades** - Version upgrades <!-- Coming soon -->
-- **Certificate Rotation** - TLS cert management <!-- Coming soon -->
 
 ### Troubleshooting
 
 - **[Troubleshooting Guide](troubleshooting)** - Common issues
-- **Debugging** - Debugging techniques <!-- Coming soon -->
-- **Performance** - Performance tuning <!-- Coming soon -->
-
-### Runbooks
-
-- **Incident Response** - <!-- Coming soon -->
-- **Certificate Expiry** - <!-- Coming soon -->
-- **Database Issues** - <!-- Coming soon -->
-- **Federation Problems** - <!-- Coming soon -->
 
 ## Monitoring Quick Start
 
@@ -207,9 +196,3 @@ Edge Nodes:
 # Health check
 */5 * * * * /usr/local/bin/sovra-health-check.sh
 ```
-
-## Next Steps
-
-- [Set up monitoring](monitoring)
-- [Configure disaster recovery](disaster-recovery)
-- [Review troubleshooting guide](troubleshooting)

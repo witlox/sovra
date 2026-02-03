@@ -127,18 +127,6 @@ resource "azurerm_postgresql_flexible_server" "sovra" {
 }
 ```
 
-## Cost Estimate
-
-```
-Monthly costs (West Europe):
-├── AKS: €70
-├── VMs (3x Standard_D4s_v3): $280
-├── PostgreSQL Flexible Server: €90
-├── Load Balancer: €18
-├── Data transfer: ~€40
-└── Total: ~€498/month
-```
-
 ## Deploy Sovra
 
 ```bash
@@ -173,8 +161,3 @@ az aks enable-addons \
   --addons monitoring
 ```
 
-## Next Steps
-
-- [Configure Federation](../federation/)
-- [Deploy Edge Nodes](edge-node)
-- [Set up Monitoring](../operations/monitoring)

@@ -539,24 +539,6 @@ output "db_password" {
 }
 ```
 
-## Cost Estimate
-
-```
-Monthly costs (europe-west1):
-├── GKE cluster: $73
-├── Compute (3x n2-standard-4): $300
-├── Cloud SQL (db-custom-2-7680, HA): $220
-├── Load Balancer: $18
-├── Persistent Disk (300GB): $45
-├── Network egress: ~$50
-└── Total: ~$706/month
-
-Sustained use discount: -$90
-Committed use discount (1-year): -$120
-
-Net monthly cost: ~$496/month
-```
-
 ## Workload Identity Setup
 
 ```bash
@@ -716,13 +698,6 @@ gcloud container clusters list
 gcloud sql instances list
 ```
 
-## Next Steps
-
-- [Configure Federation](../federation/)
-- [Deploy Edge Nodes](edge-node)
-- [Set up Monitoring](../operations/monitoring)
-- [Security Best Practices](../security/best-practices) <!-- GCP-specific hardening guide coming soon -->
-
 ## Troubleshooting
 
 ### Cloud SQL Connection Issues
@@ -761,10 +736,3 @@ kubectl run -it --rm debug \
   --namespace=sovra \
   -- gcloud auth list
 ```
-
-## References
-
-- [GKE Documentation](https://cloud.google.com/kubernetes-engine/docs)
-- [Cloud SQL for PostgreSQL](https://cloud.google.com/sql/docs/postgres)
-- [Workload Identity](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity)
-- [Binary Authorization](https://cloud.google.com/binary-authorization/docs)

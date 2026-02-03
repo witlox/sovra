@@ -522,9 +522,3 @@ sovra-cli federation cert-verify partner-university
 sovra-cli audit query --event-type federation.* --since "1 hour ago"
 ```
 
-## Next Steps
-
-- [User Guide](user-guide) - End-user operations
-- [CRK Management](crk-management) - Customer Root Key procedures
-- [Operations Guide](../operations/) - Day-to-day operations
-- [Security Best Practices](../security/best-practices) - Hardening guide

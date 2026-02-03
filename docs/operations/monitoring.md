@@ -15,16 +15,16 @@ Monitor Sovra with Prometheus and Grafana for comprehensive observability.
 ```
 ┌─────────────────────────────────────────┐
 │ Sovra Services                          │
-│ ├─ API Gateway (:9090/metrics)         │
-│ ├─ Policy Engine (:9091/metrics)       │
-│ ├─ Key Lifecycle (:9092/metrics)       │
-│ ├─ Audit Service (:9093/metrics)       │
-│ └─ Federation Manager (:9094/metrics)  │
+│ ├─ API Gateway (:9090/metrics)          │
+│ ├─ Policy Engine (:9091/metrics)        │
+│ ├─ Key Lifecycle (:9092/metrics)        │
+│ ├─ Audit Service (:9093/metrics)        │
+│ └─ Federation Manager (:9094/metrics)   │
 └──────────────┬──────────────────────────┘
                │ scrape
 ┌──────────────▼──────────────────────────┐
 │ Prometheus                              │
-│ ├─ Storage (15d retention)             │
+│ ├─ Storage (15d retention)              │
 │ └─ Alertmanager                         │
 └──────────────┬──────────────────────────┘
                │ query
@@ -405,8 +405,3 @@ kubectl get servicemonitors -n monitoring
 kubectl get pod -n sovra -o yaml | grep prometheus
 ```
 
-## Next Steps
-
-- [Disaster Recovery](disaster-recovery)
-- [Troubleshooting](troubleshooting)
-<!-- Dedicated alerting and logging guides coming soon -->

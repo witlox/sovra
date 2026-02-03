@@ -229,7 +229,3 @@ echo "All backups verified successfully"
     summary: "Backup is older than 24 hours"
 ```
 
-## Next Steps
-
-- [Set up monitoring](monitoring)
-<!-- Runbooks coming soon -->

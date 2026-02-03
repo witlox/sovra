@@ -12,21 +12,25 @@ Welcome to Sovra! This guide will help you get started with deploying and using 
 - **[Quick Start](quickstart)** - Get running in 15 minutes
 - **[Installation](installation)** - Complete installation guide
 - **[Configuration](configuration)** - All configuration options
-- **[Core Concepts](concepts)** - Understand the architecture
+- **[Control Plane](control-plane)** - Reference for Sovra control plane
 
-### For Users
-- **[User Guide](user-guide)** - Encrypt and decrypt data
-- **[Identity Management](identity-management)** - Users, services, and RBAC
+### Core Concepts
+- **[Core Concepts](concepts)** - Understand Sovra's architecture and components
 
-### For Administrators
-- **[Administrator Guide](admin-guide)** - Platform administration
-- **[CRK Management](crk-management)** - Customer Root Key lifecycle
-- **[Emergency Access](emergency-access)** - Break-glass procedures
-- **[Operations](../operations/)** - Day-to-day operations
-- **[Telemetry](telemetry)** - Tracing, metrics, and logging
+### Deployment
+- **[Deployment Guides](deployment/)** - Deploy on AWS, Azure, on-premises
+
+### Operations
+- **[Operations Overview](operations/)** - Managing and maintaining Sovra
+
+### Federation
+- **[Federation Overview](federation/)** - Share data securely across organizations
+
+### For Users and Admins
+- **[Guides](guides/)** - User and administrator workflows
 
 ### Security
-- **[Security Overview](../security/)** - Authentication, authorization, and best practices
+- **[Security Overview](security/)** - Authentication, authorization, and best practices
 
 ## What is Sovra?
 
@@ -68,7 +72,7 @@ Follow [Quick Start](quickstart) to:
 
 ### 4. Federate with Partner (30 minutes)
 
-Learn how to:
+Follow [Federation](federation/) to:
 - Generate federation certificates
 - Exchange with partner organization
 - Establish federation
@@ -78,10 +82,9 @@ Learn how to:
 
 ### Where should I deploy Sovra?
 
-- **AWS**: Use [AWS deployment guide](../deployment/aws)
-- **Azure**: Use [Azure deployment guide](../deployment/azure)
-- **On-premises**: Use [on-premises guide](../deployment/on-premises)
-- **Air-gap**: Use [air-gap guide](../deployment/air-gap)
+- **On-premises**: Use [on-premises deployment guide](deployment/on-premises)
+- **Air-gap**: Use [air-gap deployment guide](deployment/air-gap)
+- **Cloud**: Use [cloud deployment guides](deployment/)
 
 ### How secure is Sovra?
 
@@ -89,14 +92,13 @@ Learn how to:
 - mTLS for all communications
 - Customer-controlled root keys (Shamir 5-of-3)
 - Immutable audit logs
-- See [Security](../security/) for details
+- See [Security](security/) for details
 
 ### Can I use Sovra for classified data?
 
 Yes. Sovra supports:
 - **CONFIDENTIAL**: Connected mode
 - **SECRET**: Air-gap mode
-- See [Air-Gap Deployment](../deployment/air-gap)
 
 ### What clouds does Sovra support?
 
@@ -109,15 +111,6 @@ All major clouds plus on-premises:
 - Exoscale
 - On-premises Kubernetes
 
-## Next Steps
-
-After getting started:
-
-1. **[Deploy edge nodes](../deployment/edge-node)** in your infrastructure
-2. **[Configure federation](../federation/)** with partner organizations
-3. **[Set up monitoring](../operations/monitoring)** for production
-4. **[Create workspaces](../federation/cross-domain-sharing)** for data sharing
-
 ## Getting Help
 
 - **Documentation**: You're reading it!
@@ -128,4 +121,4 @@ After getting started:
 
 ## Contributing
 
-Want to contribute? See [Contributing Guide](../CONTRIBUTING)
+Want to contribute? See [Contributing Guide](https://github.com/witlox/sovra/blob/main/CONTRIBUTING.md) for details on how to get involved.

@@ -444,9 +444,3 @@ sovra-cli encrypt \
   --output data.enc \
   --verbose
 ```
-
-## Next Steps
-
-- [Administrator Guide](admin-guide) - For workspace administrators
-- [CRK Management](crk-management) - Understanding cryptographic keys
-- [Federation Guide](../federation/) - Cross-organization sharing

@@ -60,3 +60,6 @@ Temporary Items
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
+
+# JetBrains
+.idea/

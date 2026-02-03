@@ -381,8 +381,3 @@ kubectl set env deployment/sovra-api-gateway \
   -n sovra
 ```
 
-## Getting More Help
-
-- [Operations Guide](./)
-- [Monitoring](monitoring)
-- [GitHub Discussions](https://github.com/witlox/sovra/discussions)
