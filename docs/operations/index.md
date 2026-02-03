@@ -19,13 +19,13 @@ This guide covers operational aspects of running Sovra in production.
 ### Monitoring & Observability
 
 - **[Monitoring](monitoring)** - Prometheus + Grafana setup
-- **[Logging](monitoring.md#log-aggregation)** - Centralized log aggregation <!-- Dedicated logging guide coming soon -->
-- **[Alerting](monitoring.md#alerts)** - Alert configuration <!-- Dedicated alerting guide coming soon -->
+- **[Logging](monitoring#log-aggregation)** - Centralized log aggregation <!-- Dedicated logging guide coming soon -->
+- **[Alerting](monitoring#alerts)** - Alert configuration <!-- Dedicated alerting guide coming soon -->
 - **Tracing** - Distributed tracing <!-- Coming soon -->
 
 ### Maintenance
 
-- **[Backup & Restore](disaster-recovery.md#backup-strategy)** - Data protection <!-- Dedicated backup guide coming soon -->
+- **[Backup & Restore](disaster-recovery#backup-strategy)** - Data protection <!-- Dedicated backup guide coming soon -->
 - **[Disaster Recovery](disaster-recovery)** - DR procedures
 - **Upgrades** - Version upgrades <!-- Coming soon -->
 - **Certificate Rotation** - TLS cert management <!-- Coming soon -->

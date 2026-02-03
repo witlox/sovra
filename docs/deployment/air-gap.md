@@ -433,4 +433,4 @@ See [Disaster Recovery Guide](../operations/disaster-recovery) <!-- Air-gap spec
 
 - [Operations Guide](../operations/)
 - [Security Best Practices](../security/best-practices)
-- [Compliance Guide](../security/best-practices.md#compliance) <!-- Dedicated compliance guide coming soon -->
+- [Compliance Guide](../security/best-practices#compliance) <!-- Dedicated compliance guide coming soon -->

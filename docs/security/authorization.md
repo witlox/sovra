@@ -294,7 +294,7 @@ Sovra's Policy Engine service extends OPA with:
 3. **Hot reload** - Update policies without restart
 4. **Audit logging** - Record all policy decisions
 
-See [Policy Engine Architecture](../control-plane.md#policy-engine) for details.
+See [Policy Engine Architecture](../control-plane#policy-engine) for details.
 
 ## Best Practices
 

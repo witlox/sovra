@@ -295,7 +295,7 @@ Prices vary by zone. Check [Exoscale pricing](https://www.exoscale.com/pricing/)
 
 ## Next Steps
 
-1. [Configure TLS certificates](../security/authentication.md#mtls)
+1. [Configure TLS certificates](../security/authentication#mtls)
 2. [Set up monitoring](../operations/monitoring)
 3. [Initialize control plane](../operations/initialization)
 4. [Deploy edge nodes](edge-node)
