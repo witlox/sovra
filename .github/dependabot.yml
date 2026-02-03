@@ -10,6 +10,10 @@ updates:
     labels:
       - "dependencies"
       - "go"
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -21,6 +25,10 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
   - package-ecosystem: "docker"
     directory: "/"
@@ -32,3 +40,7 @@ updates:
     labels:
       - "dependencies"
       - "docker"
+    groups:
+      docker-dependencies:
+        patterns:
+          - "*"

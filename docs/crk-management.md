@@ -161,13 +161,53 @@ sovra-cli crk split-shares \
 
 ### When is CRK Required?
 
-CRK signatures are required for **high-risk operations:**
+CRK signatures are required for **high-risk operations** that affect organizational trust:
 
-1. **Federation establishment** - Connecting with partner organizations
-2. **Workspace creation** - Creating shared cryptographic domains
-3. **Key rotation** - Rotating workspace encryption keys
-4. **Organization configuration changes** - Critical settings
-5. **Emergency recovery** - Disaster recovery scenarios
+| Operation | CRK Required | Reason |
+|-----------|--------------|--------|
+| **Federation establishment** | ✅ Yes | Connecting with external partners |
+| **Workspace creation** | ✅ Yes | Creating shared cryptographic domains |
+| **Workspace key rotation** | ✅ Yes | Rotating encryption keys |
+| **CRK share regeneration** | ✅ Yes | Changing key custodians |
+| **Emergency access approval** | ✅ Yes | Break-glass procedures |
+| **Backup restore** | ✅ Yes | Disaster recovery |
+| **Organization config changes** | ✅ Yes | Critical settings |
+
+### When is CRK NOT Required?
+
+Regular operations do not require CRK:
+
+| Operation | CRK Required | Reason |
+|-----------|--------------|--------|
+| **Encrypt/decrypt data** | ❌ No | Uses workspace DEK, not CRK |
+| **User login** | ❌ No | Authentication is separate |
+| **Add user to workspace** | ❌ No | Policy-controlled by admins |
+| **Query audit logs** | ❌ No | Read-only operation |
+| **View workspace list** | ❌ No | Read-only operation |
+| **Health checks** | ❌ No | Monitoring operations |
+| **Certificate renewal** | ❌ No | Automated by system |
+
+### Understanding the Difference
+
+**CRK (Customer Root Key)**
+- Root of trust for the organization
+- Used for signing high-risk operations
+- Requires multi-party reconstruction (e.g., 3 of 5 custodians)
+- Should be reconstructed rarely (monthly at most)
+
+**DEK (Data Encryption Key)**
+- Per-workspace encryption key
+- Used for actual encrypt/decrypt operations
+- Managed automatically by edge nodes (Vault)
+- Used for every data operation
+
+```
+Hierarchy:
+CRK (Organization Root of Trust)
+└── Signs creation of...
+    └── Workspace Keys (DEK)
+        └── Encrypt/Decrypt user data
+```
 
 ### Reconstructing CRK for Use
 

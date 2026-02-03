@@ -1,3 +1,9 @@
+---
+layout: default
+title: GCP Deployment
+parent: Deployment Guide
+---
+
 # GCP Deployment Guide
 
 ## Overview
@@ -712,7 +718,7 @@ gcloud sql instances list
 
 ## Next Steps
 
-- [Configure Federation](../federation/README.md)
+- [Configure Federation](federation/)
 - [Deploy Edge Nodes](edge-node.md)
 - [Set up Monitoring](../operations/monitoring.md)
 - [Security Best Practices](../security/best-practices.md) <!-- GCP-specific hardening guide coming soon -->

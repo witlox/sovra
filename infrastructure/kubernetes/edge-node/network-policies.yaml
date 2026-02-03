@@ -1,0 +1,115 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vault-network-policy
+  labels:
+    app.kubernetes.io/name: vault
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow Vault cluster communication
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+      ports:
+        - protocol: TCP
+          port: 8200
+        - protocol: TCP
+          port: 8201
+    # Allow Sovra control plane access
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: sovra
+      ports:
+        - protocol: TCP
+          port: 8200
+    # Allow Prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8200
+  egress:
+    # Allow Vault cluster communication
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+      ports:
+        - protocol: TCP
+          port: 8200
+        - protocol: TCP
+          port: 8201
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow Kubernetes API (for service registration)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opa-network-policy
+  labels:
+    app.kubernetes.io/name: opa
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opa
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow Sovra services
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: sovra
+      ports:
+        - protocol: TCP
+          port: 8181
+        - protocol: TCP
+          port: 9191
+    # Allow Prometheus
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8181
+  egress:
+    # Allow DNS only
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53

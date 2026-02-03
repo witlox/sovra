@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"regexp"
 	"runtime"
 	"sync"
 
@@ -18,6 +19,7 @@ import (
 var (
 	registry     *prometheus.Registry
 	registryOnce sync.Once
+	registryMu   sync.Mutex
 )
 
 // GetRegistry returns the Sovra metrics registry.
@@ -28,6 +30,17 @@ func GetRegistry() *prometheus.Registry {
 		registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	})
 	return registry
+}
+
+// ResetRegistry resets the registry for testing purposes.
+// This should only be used in tests.
+func ResetRegistry() {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	registry = prometheus.NewRegistry()
+	registry.MustRegister(collectors.NewGoCollector())
+	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	registryOnce = sync.Once{}
 }
 
 // ServiceMetrics contains metrics for a Sovra service.
@@ -160,6 +173,8 @@ func SanitizePath(path string) string {
 		"orgs":        "{org_id}",
 		"policies":    "{policy_id}",
 		"federations": "{federation_id}",
+		"tokens":      "{token_id}",
+		"edge-nodes":  "{edge_node_id}",
 	}
 
 	result := path
@@ -173,6 +188,10 @@ func SanitizePath(path string) string {
 			}
 		}
 	}
+
+	// Sanitize JWT tokens anywhere in the path (base64 encoded strings starting with eyJ)
+	jwtPattern := regexp.MustCompile(`eyJ[A-Za-z0-9_-]+`)
+	result = jwtPattern.ReplaceAllString(result, "{jwt_token}")
 
 	return result
 }

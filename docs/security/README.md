@@ -66,4 +66,4 @@ Sovra is designed with security as a first principle. This guide covers authenti
 
 Please report security vulnerabilities through GitHub Security Advisories or by emailing security@witlox.org.
 
-See [SECURITY.md](https://github.com/witlox/sovra/blob/main/SECURITY.md) for our security policy.
+See [SECURITY.md](../SECURITY.md) for our security policy.

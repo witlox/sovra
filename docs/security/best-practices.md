@@ -1,3 +1,8 @@
+---
+layout: default
+title: Security Best Practices
+parent: Security
+---
 
 # Security Best Practices
 

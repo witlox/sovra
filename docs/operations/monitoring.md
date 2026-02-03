@@ -1,3 +1,8 @@
+---
+layout: default
+title: Monitoring
+parent: Operations
+---
 
 # Monitoring Guide
 

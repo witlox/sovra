@@ -1,0 +1,81 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - unzip
+  - jq
+
+write_files:
+  - path: /etc/vault.d/vault.hcl
+    content: |
+      ui = true
+      disable_mlock = true
+
+      storage "raft" {
+        path = "/opt/vault/data"
+        node_id = "vault-${node_index}"
+        
+        %{ for i in range(node_count) }
+        retry_join {
+          leader_api_addr = "http://${cluster_name}-vault-${i}:8200"
+        }
+        %{ endfor }
+      }
+
+      listener "tcp" {
+        address     = "0.0.0.0:8200"
+        cluster_address = "0.0.0.0:8201"
+        tls_disable = true
+      }
+
+      api_addr = "http://$(hostname -I | awk '{print $1}'):8200"
+      cluster_addr = "https://$(hostname -I | awk '{print $1}'):8201"
+
+      telemetry {
+        prometheus_retention_time = "30s"
+        disable_hostname = true
+      }
+
+runcmd:
+  # Install Vault
+  - curl -fsSL https://releases.hashicorp.com/vault/${vault_version}/vault_${vault_version}_linux_amd64.zip -o /tmp/vault.zip
+  - unzip /tmp/vault.zip -d /usr/local/bin/
+  - chmod +x /usr/local/bin/vault
+  
+  # Create vault user and directories
+  - useradd --system --home /opt/vault --shell /bin/false vault
+  - mkdir -p /opt/vault/data /etc/vault.d
+  - chown -R vault:vault /opt/vault /etc/vault.d
+  - chmod 750 /opt/vault/data
+  
+  # Create systemd service
+  - |
+    cat > /etc/systemd/system/vault.service <<EOF
+    [Unit]
+    Description=HashiCorp Vault
+    Documentation=https://www.vaultproject.io/docs/
+    Requires=network-online.target
+    After=network-online.target
+    
+    [Service]
+    User=vault
+    Group=vault
+    ExecStart=/usr/local/bin/vault server -config=/etc/vault.d/vault.hcl
+    ExecReload=/bin/kill --signal HUP \$MAINPID
+    KillMode=process
+    KillSignal=SIGINT
+    Restart=on-failure
+    RestartSec=5
+    LimitNOFILE=65536
+    LimitMEMLOCK=infinity
+    
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+  
+  # Start Vault
+  - systemctl daemon-reload
+  - systemctl enable vault
+  - systemctl start vault

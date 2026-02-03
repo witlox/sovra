@@ -1,3 +1,7 @@
+---
+layout: default
+title: Deployment Guide
+---
 
 # Deployment Guide
 
@@ -12,17 +16,18 @@ Sovra can be deployed on any Kubernetes cluster, in any cloud provider, or on-pr
 - **[AWS](aws.md)** - Deploy on Amazon EKS
 - **[Azure](azure.md)** - Deploy on Azure AKS
 - **[GCP](gcp.md)** - Deploy on Google GKE
-- **Hetzner** - Deploy on Hetzner Cloud <!-- Coming soon -->
-- **Exoscale** - Deploy on Exoscale SKS <!-- Coming soon -->
+- **[Hetzner](hetzner.md)** - Deploy on Hetzner Cloud with K3s
+- **[OVHcloud](ovhcloud.md)** - Deploy on OVHcloud Managed Kubernetes
+- **[Exoscale](exoscale.md)** - Deploy on Exoscale SKS
 
 ### Self-Hosted
 
-- **[On-Premises](on-premises.md)** - Deploy on your own infrastructure
+- **[On-Premises](on-premises.md)** - Deploy on your own Kubernetes cluster
 - **[Air-Gap](air-gap.md)** - Offline deployment for SECRET classification
 
 ### Components
 
-- **[Control Plane](control-plane.md)** - Core Sovra services
+- **[Control Plane](../control-plane.md)** - Core Sovra services
 - **[Edge Nodes](edge-node.md)** - Vault clusters for crypto operations
 - **PostgreSQL** - Database deployment <!-- Guide coming soon -->
 
@@ -87,7 +92,7 @@ All deployments require:
 - TLS certificates
 - kubectl configured
 
-See [Control Plane](control-plane.md) for details.
+See [Control Plane](../control-plane.md) for details.
 
 ## Next Steps
 

@@ -1,3 +1,8 @@
+---
+layout: default
+title: Air-Gap Deployment
+parent: Deployment Guide
+---
 
 # Air-Gap Deployment
 
@@ -426,6 +431,6 @@ See [Disaster Recovery Guide](../operations/disaster-recovery.md) <!-- Air-gap s
 
 ## Next Steps
 
-- [Operations Guide](../operations/README.md)
+- [Operations Guide](operations/)
 - [Security Best Practices](../security/best-practices.md)
 - [Compliance Guide](../security/best-practices.md#compliance) <!-- Dedicated compliance guide coming soon -->

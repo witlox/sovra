@@ -1,3 +1,8 @@
+---
+layout: default
+title: Troubleshooting
+parent: Operations
+---
 
 # Troubleshooting Guide
 

@@ -1,3 +1,8 @@
+---
+layout: default
+title: AWS Deployment
+parent: Deployment Guide
+---
 
 # AWS Deployment Guide
 
@@ -187,6 +192,6 @@ aws eks update-cluster-config \
 
 ## Next Steps
 
-- [Configure Federation](../federation/README.md)
+- [Configure Federation](federation/)
 - [Deploy Edge Nodes](edge-node.md)
 - [Set up Monitoring](../operations/monitoring.md)

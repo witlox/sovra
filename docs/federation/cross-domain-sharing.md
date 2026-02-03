@@ -1,3 +1,8 @@
+---
+layout: default
+title: Cross-Domain Sharing
+parent: Federation
+---
 
 # Cross-Domain Data Sharing
 

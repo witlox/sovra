@@ -1,3 +1,8 @@
+---
+layout: default
+title: Azure Deployment
+parent: Deployment Guide
+---
 
 # Azure Deployment
 

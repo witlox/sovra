@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-policies
+  labels:
+    app.kubernetes.io/name: opa
+data:
+  sovra.rego: |
+    package sovra.authz
+
+    import rego.v1
+
+    default allow := false
+
+    # System accounts have full access
+    allow if {
+        input.subject.type == "system"
+    }
+
+    # Admins can do anything within their org
+    allow if {
+        "admin" in input.subject.roles
+        input.resource.org == input.subject.org
+    }
+
+    # Users can read resources in their org
+    allow if {
+        input.action == "read"
+        input.resource.org == input.subject.org
+    }
+
+    # Key operations require specific roles
+    allow if {
+        input.action in ["encrypt", "decrypt", "sign", "verify"]
+        "key_user" in input.subject.roles
+        input.resource.org == input.subject.org
+    }
+
+    allow if {
+        input.action in ["rotate", "revoke", "create"]
+        "key_admin" in input.subject.roles
+        input.resource.org == input.subject.org
+    }
+
+    # Auditors can read audit logs
+    allow if {
+        input.action == "read"
+        input.resource.type == "audit_log"
+        "auditor" in input.subject.roles
+        input.resource.org == input.subject.org
+    }
+
+    # Federation admins can manage federations
+    allow if {
+        input.resource.type == "federation"
+        "federation_admin" in input.subject.roles
+        input.resource.org == input.subject.org
+    }
+
+    # Workspace participants can access workspace resources
+    allow if {
+        input.resource.type == "workspace"
+        input.action == "read"
+        input.subject.org in data.workspaces[input.resource.id].participants
+    }
+
+  workspace.rego: |
+    package sovra.workspace
+
+    import rego.v1
+
+    default allow_access := false
+
+    # Owner has full access
+    allow_access if {
+        input.org == data.workspaces[input.workspace_id].owner
+    }
+
+    # Participants have access based on their role
+    allow_access if {
+        participant := data.workspaces[input.workspace_id].participants[_]
+        participant.org == input.org
+        participant.role in ["owner", "admin", "contributor", "reader"]
+    }
+
+    # Check if user can perform action
+    can_perform[action] := true if {
+        allow_access
+        participant := data.workspaces[input.workspace_id].participants[_]
+        participant.org == input.org
+        action in role_permissions[participant.role]
+    }
+
+    role_permissions := {
+        "owner": ["read", "write", "delete", "admin", "encrypt", "decrypt"],
+        "admin": ["read", "write", "admin", "encrypt", "decrypt"],
+        "contributor": ["read", "write", "encrypt", "decrypt"],
+        "reader": ["read", "decrypt"]
+    }

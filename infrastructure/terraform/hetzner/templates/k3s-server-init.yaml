@@ -1,0 +1,53 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - apt-transport-https
+  - ca-certificates
+
+write_files:
+  - path: /etc/rancher/k3s/config.yaml
+    content: |
+      cluster-init: ${is_first}
+      disable:
+        - traefik
+        - servicelb
+      node-ip: ${node_ip}
+      advertise-address: ${node_ip}
+      tls-san:
+        - ${node_ip}
+        - 10.0.1.2
+      flannel-iface: ens10
+
+runcmd:
+  - |
+    %{ if is_first }
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" sh -s - server \
+      --cluster-init \
+      --token "${k3s_token}" \
+      --disable traefik \
+      --disable servicelb \
+      --node-ip ${node_ip} \
+      --advertise-address ${node_ip} \
+      --tls-san ${node_ip} \
+      --tls-san 10.0.1.2 \
+      --flannel-iface ens10
+    %{ else }
+    # Wait for first server
+    until curl -k -s ${server_url}/healthz > /dev/null 2>&1; do
+      echo "Waiting for first server..."
+      sleep 10
+    done
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" sh -s - server \
+      --server ${server_url} \
+      --token "${k3s_token}" \
+      --disable traefik \
+      --disable servicelb \
+      --node-ip ${node_ip} \
+      --advertise-address ${node_ip} \
+      --tls-san ${node_ip} \
+      --tls-san 10.0.1.2 \
+      --flannel-iface ens10
+    %{ endif }

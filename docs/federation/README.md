@@ -1,5 +1,8 @@
+---
+layout: default
+title: Federation
+---
 
-# Federation README
 # Federation Guide
 
 ## Overview

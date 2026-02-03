@@ -885,3 +885,335 @@ func (m *APIRateLimiter) GetRemaining(ctx context.Context, key string) (int, err
 	defer m.mu.Unlock()
 	return m.Limit - m.counters[key], nil
 }
+
+// =============================================================================
+// Mock Vault Client for Auth and PKI
+// =============================================================================
+
+// MockVaultClient provides mock implementations for Vault auth and PKI operations.
+type MockVaultClient struct {
+	mu             sync.Mutex
+	authBackends   map[string]bool
+	jwtConfigs     map[string]*JWTConfig
+	jwtRoles       map[string]map[string]*JWTRoleConfig
+	appRoles       map[string]map[string]*AppRoleRoleConfig
+	appRoleIDs     map[string]map[string]string
+	appRoleSecrets map[string]map[string][]string
+	pkiEnabled     map[string]bool
+	pkiRoles       map[string]map[string]*PKIRoleConfig
+	certificates   map[string][]*CertificateResult
+	policies       map[string]string
+}
+
+// JWTConfig represents JWT auth configuration.
+type JWTConfig struct {
+	Path             string
+	Description      string
+	OIDCDiscoveryURL string
+	OIDCClientID     string
+	OIDCClientSecret string
+	BoundIssuer      string
+	DefaultRole      string
+}
+
+// JWTRoleConfig represents JWT role configuration.
+type JWTRoleConfig struct {
+	Name           string
+	BoundAudiences []string
+	UserClaim      string
+	GroupsClaim    string
+	ClaimMappings  map[string]string
+	TokenPolicies  []string
+	TokenTTL       string
+}
+
+// AppRoleRoleConfig represents AppRole role configuration.
+type AppRoleRoleConfig struct {
+	Name               string
+	BindSecretID       bool
+	TokenPolicies      []string
+	TokenTTL           string
+	TokenMaxTTL        string
+	SecretIDTTL        string
+	SecretIDNumUses    int
+	SecretIDBoundCIDRs []string
+}
+
+// PKIRoleConfig represents PKI role configuration.
+type PKIRoleConfig struct {
+	PKIPath          string
+	Name             string
+	AllowedDomains   []string
+	AllowSubdomains  bool
+	AllowLocalhost   bool
+	MaxTTL           string
+	KeyType          string
+	KeyBits          int
+	EnforceHostnames bool
+	AllowIPSans      bool
+	RequireCN        bool
+	AllowedURISANs   []string
+	AllowedOtherSANs []string
+}
+
+// CertificateRequest represents a certificate issuance request.
+type CertificateRequest struct {
+	PKIPath    string
+	Role       string
+	CommonName string
+	TTL        string
+	AltNames   []string
+	IPSANs     []string
+}
+
+// CertificateResult represents an issued certificate.
+type CertificateResult struct {
+	Certificate  string
+	PrivateKey   string
+	SerialNumber string
+	IssuingCA    string
+	Expiration   int64
+}
+
+// NewMockVaultClient creates a new mock Vault client.
+func NewMockVaultClient() *MockVaultClient {
+	return &MockVaultClient{
+		authBackends:   make(map[string]bool),
+		jwtConfigs:     make(map[string]*JWTConfig),
+		jwtRoles:       make(map[string]map[string]*JWTRoleConfig),
+		appRoles:       make(map[string]map[string]*AppRoleRoleConfig),
+		appRoleIDs:     make(map[string]map[string]string),
+		appRoleSecrets: make(map[string]map[string][]string),
+		pkiEnabled:     make(map[string]bool),
+		pkiRoles:       make(map[string]map[string]*PKIRoleConfig),
+		certificates:   make(map[string][]*CertificateResult),
+		policies:       make(map[string]string),
+	}
+}
+
+// ConfigureJWTAuth configures a JWT authentication backend.
+func (m *MockVaultClient) ConfigureJWTAuth(ctx context.Context, cfg JWTConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if cfg.Path == "" {
+		cfg.Path = "jwt"
+	}
+
+	m.authBackends[cfg.Path] = true
+	m.jwtConfigs[cfg.Path] = &cfg
+	m.jwtRoles[cfg.Path] = make(map[string]*JWTRoleConfig)
+
+	return nil
+}
+
+// CreateJWTRole creates a JWT role.
+func (m *MockVaultClient) CreateJWTRole(ctx context.Context, authPath string, cfg JWTRoleConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if authPath == "" {
+		authPath = "jwt"
+	}
+
+	if m.jwtRoles[authPath] == nil {
+		m.jwtRoles[authPath] = make(map[string]*JWTRoleConfig)
+	}
+
+	m.jwtRoles[authPath][cfg.Name] = &cfg
+	return nil
+}
+
+// ConfigureAppRoleAuth configures an AppRole authentication backend.
+func (m *MockVaultClient) ConfigureAppRoleAuth(ctx context.Context, path, description string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if path == "" {
+		path = "approle"
+	}
+
+	m.authBackends[path] = true
+	m.appRoles[path] = make(map[string]*AppRoleRoleConfig)
+	m.appRoleIDs[path] = make(map[string]string)
+	m.appRoleSecrets[path] = make(map[string][]string)
+
+	return nil
+}
+
+// CreateAppRole creates an AppRole role.
+func (m *MockVaultClient) CreateAppRole(ctx context.Context, authPath string, cfg AppRoleRoleConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if authPath == "" {
+		authPath = "approle"
+	}
+
+	if m.appRoles[authPath] == nil {
+		m.appRoles[authPath] = make(map[string]*AppRoleRoleConfig)
+		m.appRoleIDs[authPath] = make(map[string]string)
+		m.appRoleSecrets[authPath] = make(map[string][]string)
+	}
+
+	m.appRoles[authPath][cfg.Name] = &cfg
+	m.appRoleIDs[authPath][cfg.Name] = uuid.New().String()
+
+	return nil
+}
+
+// GetAppRoleRoleID gets the role ID for an AppRole.
+func (m *MockVaultClient) GetAppRoleRoleID(ctx context.Context, authPath, roleName string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if authPath == "" {
+		authPath = "approle"
+	}
+
+	roleID, ok := m.appRoleIDs[authPath][roleName]
+	if !ok {
+		return "", fmt.Errorf("role not found: %s", roleName)
+	}
+
+	return roleID, nil
+}
+
+// GenerateAppRoleSecretID generates a secret ID for an AppRole.
+func (m *MockVaultClient) GenerateAppRoleSecretID(ctx context.Context, authPath, roleName string) (string, string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if authPath == "" {
+		authPath = "approle"
+	}
+
+	secretID := uuid.New().String()
+	accessor := uuid.New().String()
+
+	if m.appRoleSecrets[authPath] == nil {
+		m.appRoleSecrets[authPath] = make(map[string][]string)
+	}
+	m.appRoleSecrets[authPath][roleName] = append(m.appRoleSecrets[authPath][roleName], secretID)
+
+	return secretID, accessor, nil
+}
+
+// LoginWithAppRole logs in with AppRole credentials.
+func (m *MockVaultClient) LoginWithAppRole(ctx context.Context, authPath, roleID, secretID string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Generate mock token
+	return "s.mock-token-" + uuid.New().String()[:8], nil
+}
+
+// EnablePKI enables a PKI engine.
+func (m *MockVaultClient) EnablePKI(ctx context.Context, path, maxLease string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.pkiEnabled[path] = true
+	m.pkiRoles[path] = make(map[string]*PKIRoleConfig)
+
+	return nil
+}
+
+// GenerateRootCA generates a root CA certificate.
+func (m *MockVaultClient) GenerateRootCA(ctx context.Context, pkiPath, commonName, ttl string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Return mock CA certificate
+	return `-----BEGIN CERTIFICATE-----
+MIIBkTCB+wIJAKH...mock-ca-certificate...
+-----END CERTIFICATE-----`, nil
+}
+
+// CreatePKIRole creates a PKI role.
+func (m *MockVaultClient) CreatePKIRole(ctx context.Context, cfg PKIRoleConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	pkiPath := cfg.PKIPath
+	if pkiPath == "" {
+		pkiPath = "pki"
+	}
+
+	if m.pkiRoles[pkiPath] == nil {
+		m.pkiRoles[pkiPath] = make(map[string]*PKIRoleConfig)
+	}
+
+	m.pkiRoles[pkiPath][cfg.Name] = &cfg
+	return nil
+}
+
+// IssueCertificate issues a certificate.
+func (m *MockVaultClient) IssueCertificate(ctx context.Context, req CertificateRequest) (*CertificateResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	serial := fmt.Sprintf("%d", time.Now().UnixNano())
+
+	result := &CertificateResult{
+		Certificate: fmt.Sprintf(`-----BEGIN CERTIFICATE-----
+MIIBkTCB+wIJAKH...mock-certificate-for-%s...
+-----END CERTIFICATE-----`, req.CommonName),
+		PrivateKey: `-----BEGIN EC PRIVATE KEY-----
+MHQCAQEEIKnYp...mock-private-key...
+-----END EC PRIVATE KEY-----`,
+		SerialNumber: serial,
+		IssuingCA: `-----BEGIN CERTIFICATE-----
+MIIBkTCB+wIJAKH...mock-issuing-ca...
+-----END CERTIFICATE-----`,
+		Expiration: time.Now().Add(720 * time.Hour).Unix(),
+	}
+
+	pkiPath := req.PKIPath
+	if pkiPath == "" {
+		pkiPath = "pki"
+	}
+
+	m.certificates[pkiPath] = append(m.certificates[pkiPath], result)
+
+	return result, nil
+}
+
+// RevokeCertificate revokes a certificate.
+func (m *MockVaultClient) RevokeCertificate(ctx context.Context, pkiPath, serialNumber string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Just log the revocation - in real implementation would mark as revoked
+	return nil
+}
+
+// CreatePolicy creates a Vault policy.
+func (m *MockVaultClient) CreatePolicy(ctx context.Context, name, rules string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.policies[name] = rules
+	return nil
+}
+
+// DeletePolicy deletes a Vault policy.
+func (m *MockVaultClient) DeletePolicy(ctx context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.policies, name)
+	return nil
+}
+
+// ListPolicies lists all policies.
+func (m *MockVaultClient) ListPolicies(ctx context.Context) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	policies := make([]string, 0, len(m.policies))
+	for name := range m.policies {
+		policies = append(policies, name)
+	}
+	return policies, nil
+}

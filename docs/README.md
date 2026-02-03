@@ -1,3 +1,8 @@
+---
+layout: default
+title: Getting Started
+---
+
 # Getting Started with Sovra
 
 Welcome to Sovra! This guide will help you get started with deploying and using Sovra for federated sovereign key management.
@@ -6,8 +11,22 @@ Welcome to Sovra! This guide will help you get started with deploying and using 
 
 - **[Quick Start](quickstart.md)** - Get running in 15 minutes
 - **[Installation](installation.md)** - Complete installation guide
+- **[Configuration](configuration.md)** - All configuration options
 - **[Core Concepts](concepts.md)** - Understand the architecture
-- **[Security](security/README.md)** - Authentication, authorization, and best practices
+
+### For Users
+- **[User Guide](user-guide.md)** - Encrypt and decrypt data
+- **[Identity Management](identity-management.md)** - Users, services, and RBAC
+
+### For Administrators
+- **[Administrator Guide](admin-guide.md)** - Platform administration
+- **[CRK Management](crk-management.md)** - Customer Root Key lifecycle
+- **[Emergency Access](emergency-access.md)** - Break-glass procedures
+- **[Operations](operations/)** - Day-to-day operations
+- **[Telemetry](telemetry.md)** - Tracing, metrics, and logging
+
+### Security
+- **[Security Overview](security/README.md)** - Authentication, authorization, and best practices
 
 ## What is Sovra?
 

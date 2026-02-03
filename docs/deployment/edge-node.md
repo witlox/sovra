@@ -1,3 +1,9 @@
+---
+layout: default
+title: Edge Node Deployment
+parent: Deployment Guide
+---
+
 # Edge Node Deployment
 
 ## Overview
@@ -21,20 +27,65 @@ Edge Node
 
 ### Option 1: Kubernetes (Recommended)
 
-Deploy Vault as StatefulSet:
+Deploy Vault and OPA using Kustomize:
 
 ```bash
-# Deploy Vault cluster
-kubectl apply -f infrastructure/kubernetes/edge-node/vault-statefulset.yaml
+# Review all manifests
+ls infrastructure/kubernetes/edge-node/
+# vault-statefulset.yaml  - Vault 3-replica StatefulSet
+# vault-config.yaml       - Vault HCL configuration
+# opa-deployment.yaml     - OPA 2-replica Deployment
+# opa-policies.yaml       - Default Rego policies
+# network-policies.yaml   - Network isolation rules
+# kustomization.yaml      - Kustomize configuration
+
+# Deploy all components
+kubectl apply -k infrastructure/kubernetes/edge-node/
+
+# Verify pods are running
+kubectl get pods -n sovra-edge
 
 # Initialize Vault
-kubectl exec -it vault-0 -n sovra-edge -- vault operator init
+kubectl exec -it vault-0 -n sovra-edge -- vault operator init \
+  -key-shares=5 -key-threshold=3 -format=json > vault-init.json
+
+# Store the unseal keys and root token securely!
 
 # Unseal all Vault instances (use unseal keys from init)
-kubectl exec -it vault-0 -n sovra-edge -- vault operator unseal
-kubectl exec -it vault-1 -n sovra-edge -- vault operator unseal
-kubectl exec -it vault-2 -n sovra-edge -- vault operator unseal
+UNSEAL_KEY_1=$(jq -r '.unseal_keys_b64[0]' vault-init.json)
+UNSEAL_KEY_2=$(jq -r '.unseal_keys_b64[1]' vault-init.json)
+UNSEAL_KEY_3=$(jq -r '.unseal_keys_b64[2]' vault-init.json)
+
+for pod in vault-0 vault-1 vault-2; do
+  kubectl exec -it $pod -n sovra-edge -- vault operator unseal $UNSEAL_KEY_1
+  kubectl exec -it $pod -n sovra-edge -- vault operator unseal $UNSEAL_KEY_2
+  kubectl exec -it $pod -n sovra-edge -- vault operator unseal $UNSEAL_KEY_3
+done
+
+# Verify cluster status
+kubectl exec vault-0 -n sovra-edge -- vault operator raft list-peers
 ```
+
+### OPA Configuration
+
+The OPA deployment includes default Sovra policies:
+
+```bash
+# Verify OPA is running
+kubectl get pods -n sovra-edge -l app=opa
+
+# Test policy evaluation
+kubectl exec -it deployment/opa -n sovra-edge -- \
+  opa eval -d /policies 'data.sovra.allow' -i '{"user":{"org":"test"},"action":"read"}'
+```
+
+### Network Policies
+
+Network policies are applied for security isolation:
+
+- Vault pods can only receive traffic from control plane and OPA
+- OPA pods can only receive traffic from Vault
+- Prometheus can scrape metrics from both
 
 ### Option 2: VM-Based
 

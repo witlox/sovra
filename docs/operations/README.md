@@ -1,3 +1,7 @@
+---
+layout: default
+title: Operations
+---
 
 # Operations Guide
 
@@ -6,6 +10,11 @@
 This guide covers operational aspects of running Sovra in production.
 
 ## Topics
+
+### Setup & Initialization
+
+- **[Initialization](initialization.md)** - Bootstrap control plane
+- **Configuration** - Service configuration <!-- Coming soon -->
 
 ### Monitoring & Observability
 

@@ -1,3 +1,8 @@
+---
+layout: default
+title: On-Premises Deployment
+parent: Deployment Guide
+---
 
 # On-Premises Deployment
 
@@ -329,5 +334,5 @@ kubectl get all --all-namespaces -o yaml > /backup/k8s-$(date +%Y%m%d).yaml
 ## Next Steps
 
 - [Air-Gap Deployment](air-gap.md) (if needed)
-- [Configure Federation](../federation/README.md)
+- [Configure Federation](federation/)
 - [Set up Monitoring](../operations/monitoring.md)

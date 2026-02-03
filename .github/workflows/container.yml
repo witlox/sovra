@@ -2,15 +2,9 @@ name: Container
 
 on:
   push:
-    branches: [main]
     tags:
       - "v*"
       - "[0-9]+.[0-9]+.[0-9]+"
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'LICENSE'
-      - '.github/workflows/docs.yml'
   pull_request:
     branches: [main]
     paths-ignore:
@@ -62,7 +56,7 @@ jobs:
         id: version
         run: |
           YEAR=$(date +%Y)
-          MAJOR=2
+          MAJOR=3
           COMMIT_COUNT=$(git rev-list --count HEAD)
           echo "version=${YEAR}.${MAJOR}.${COMMIT_COUNT}" >> $GITHUB_OUTPUT
 

@@ -1,3 +1,8 @@
+---
+layout: default
+title: Disaster Recovery
+parent: Operations
+---
 
 # Disaster Recovery
 
