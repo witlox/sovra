@@ -9,7 +9,7 @@ title: Operations
 - [User Guide](user-guide) - End user operations
 
 # Critical Concepts
-- [CRK Management](../concepts/crk-management.md) - Customer Root Key lifecycle
-- [Identity Management](../concepts/identity-management.md) - Users, roles, and permissions
-- [Emergency Access](../concepts/emergency-access.md) - Break-glass procedures
-- [Telemetry](../concepts/telemetry.md) - Monitoring and observability
+- [CRK Management](../concepts/crk-management) - Customer Root Key lifecycle
+- [Identity Management](../concepts/identity-management) - Users, roles, and permissions
+- [Emergency Access](../concepts/emergency-access) - Break-glass procedures
+- [Telemetry](../concepts/telemetry) - Monitoring and observability

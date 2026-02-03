@@ -424,7 +424,3 @@ sovra-cli workspace import \
 # - CRK shares (separate USB)
 # - Audit logs
 ```
-
-### Recovery Procedure
-
-See [Disaster Recovery Guide](../operations/disaster-recovery)

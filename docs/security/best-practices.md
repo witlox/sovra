@@ -352,7 +352,7 @@ kubectl exec -n sovra sovra-api-gateway-xxx -- \
 
 ## Compliance
 
-### GDPR
+### GDPR procedures
 
 **Data Subject Rights:**
 ```bash
@@ -366,7 +366,7 @@ sovra-cli user delete researcher@example.com --confirm
 sovra-cli data export --workspace cancer-research
 ```
 
-### ISO 27001
+### ISO 27001 procedures
 
 **Documentation requirements:**
 - Information security policy
@@ -386,34 +386,3 @@ sovra-cli user list --last-login "90 days ago"
 # Security patches
 kubectl get pods -n sovra -o json | jq '.items[].spec.containers[].image'
 ```
-
-## Security Checklist
-
-### Deployment
-
-- [ ] TLS 1.3 enforced
-- [ ] Network segmentation implemented
-- [ ] Firewall rules configured
-- [ ] RBAC policies applied
-- [ ] Secrets in external store
-- [ ] Audit logging enabled
-- [ ] Monitoring alerts configured
-- [ ] Backup encryption enabled
-
-### Operations
-
-- [ ] Regular security patches
-- [ ] Certificate rotation automated
-- [ ] Access reviews (quarterly)
-- [ ] Penetration testing (annual)
-- [ ] Incident response drills (quarterly)
-- [ ] Backup restoration tested (monthly)
-
-### Compliance
-
-- [ ] Data classification defined
-- [ ] Privacy policy published
-- [ ] DPO appointed
-- [ ] GDPR processes documented
-- [ ] ISO 27001 controls mapped
-- [ ] Regular compliance audits

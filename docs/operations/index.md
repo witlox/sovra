@@ -45,8 +45,6 @@ kubectl port-forward -n monitoring svc/grafana 3000:3000
 kubectl port-forward -n monitoring svc/prometheus 9090:9090
 ```
 
-See [Monitoring Guide](monitoring) for details.
-
 ## Daily Operations
 
 ### Health Checks
@@ -85,7 +83,7 @@ sovra-cli cert list --expiring 30d
 sovra-cli cert rotate --all
 ```
 
-## Weekly Operations
+## Recommended Weekly Operations
 
 ### Backup Verification
 
@@ -109,7 +107,7 @@ sovra-cli audit query \
 sovra-cli policy validate --all
 ```
 
-## Monthly Operations
+## Recommended Monthly Operations
 
 ### Capacity Planning
 
@@ -137,33 +135,7 @@ sovra-cli version check
 # Plan upgrade window
 ```
 
-## Incident Response
-
-### Severity Levels
-
-| Level | Response Time | Description |
-|-------|---------------|-------------|
-| P0 | 15 minutes | Complete outage |
-| P1 | 1 hour | Major degradation |
-| P2 | 4 hours | Minor degradation |
-| P3 | 1 business day | No impact |
-
-### On-Call Procedures
-
-See incident response section above for severity levels and response times.
-
-## Metrics & SLOs
-
-### Service Level Objectives
-
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| Availability | 99.9% | Uptime |
-| API Latency (p95) | < 100ms | Response time |
-| Edge Node Heartbeat | < 60s | Health check |
-| Audit Log Delivery | < 5min | Log latency |
-
-### Key Metrics
+### Key Metrics to monitor 
 
 ```
 Control Plane:

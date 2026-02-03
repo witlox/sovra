@@ -169,8 +169,6 @@ Federated organizations authenticate using bilateral mTLS:
 3. Certificates are signed by respective org root keys
 4. mTLS channels are established
 
-See [Federation Guide](../federation/) for details.
-
 ## API Authentication Examples
 
 ### Using mTLS (curl)
