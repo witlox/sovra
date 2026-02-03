@@ -26,7 +26,7 @@ Welcome to Sovra! This guide will help you get started with deploying and using 
 - **[Telemetry](telemetry.md)** - Tracing, metrics, and logging
 
 ### Security
-- **[Security Overview](security/README.md)** - Authentication, authorization, and best practices
+- **[Security Overview](security/)** - Authentication, authorization, and best practices
 
 ## What is Sovra?
 

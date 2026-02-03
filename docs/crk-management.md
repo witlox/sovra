@@ -682,7 +682,7 @@ sovra-cli crk regenerate-shares --shares 5 --threshold 3
 
 - [Installation Guide](installation.md)
 - [Security Best Practices](security/best-practices.md)
-- [Federation Guide](federation/README.md)
+- [Federation Guide](federation/)
 
 ---
 

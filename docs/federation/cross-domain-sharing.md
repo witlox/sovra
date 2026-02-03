@@ -443,4 +443,4 @@ sovra-cli audit query \
 
 ---
 
-**Next:** [Federation Overview](README.md) <!-- Protocol and trust model guides coming soon -->
+**Next:** [Federation Overview](./) <!-- Protocol and trust model guides coming soon -->

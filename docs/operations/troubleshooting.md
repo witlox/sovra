@@ -383,6 +383,6 @@ kubectl set env deployment/sovra-api-gateway \
 
 ## Getting More Help
 
-- [Operations Guide](README.md)
+- [Operations Guide](./)
 - [Monitoring](monitoring.md)
 - [GitHub Discussions](https://github.com/witlox/sovra/discussions)
