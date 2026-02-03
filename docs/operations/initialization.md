@@ -271,6 +271,6 @@ After successful initialization:
 
 ## Next Steps
 
-- [Deploy edge nodes](../deployment/edge-node.md)
+- [Deploy edge nodes](../deployment/edge-node)
 - [Configure federation](federation/)
-- [Set up monitoring](monitoring.md)
+- [Set up monitoring](monitoring)

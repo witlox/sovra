@@ -447,6 +447,6 @@ sovra-cli encrypt \
 
 ## Next Steps
 
-- [Administrator Guide](admin-guide.md) - For workspace administrators
-- [CRK Management](crk-management.md) - Understanding cryptographic keys
+- [Administrator Guide](admin-guide) - For workspace administrators
+- [CRK Management](crk-management) - Understanding cryptographic keys
 - [Federation Guide](federation/) - Cross-organization sharing

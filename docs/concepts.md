@@ -64,7 +64,7 @@ sovra-cli workspace create \
   ...
 ```
 
-**Important:** See [CRK Management Guide](crk-management.md) for comprehensive information on:
+**Important:** See [CRK Management Guide](crk-management) for comprehensive information on:
 - How Shamir Secret Sharing works
 - Share storage strategies
 - Key ceremonies
@@ -378,8 +378,8 @@ Layer 6: Monitoring (anomaly detection)
 
 ## Next Steps
 
-- [Quick Start Guide](quickstart.md)
-- [Installation Guide](installation.md)
+- [Quick Start Guide](quickstart)
+- [Installation Guide](installation)
 - [Deployment Guide](deployment/)
 
 ---

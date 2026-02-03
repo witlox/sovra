@@ -13,22 +13,22 @@ Sovra can be deployed on any Kubernetes cluster, in any cloud provider, or on-pr
 
 ### Cloud Providers
 
-- **[AWS](aws.md)** - Deploy on Amazon EKS
-- **[Azure](azure.md)** - Deploy on Azure AKS
-- **[GCP](gcp.md)** - Deploy on Google GKE
-- **[Hetzner](hetzner.md)** - Deploy on Hetzner Cloud with K3s
-- **[OVHcloud](ovhcloud.md)** - Deploy on OVHcloud Managed Kubernetes
-- **[Exoscale](exoscale.md)** - Deploy on Exoscale SKS
+- **[AWS](aws)** - Deploy on Amazon EKS
+- **[Azure](azure)** - Deploy on Azure AKS
+- **[GCP](gcp)** - Deploy on Google GKE
+- **[Hetzner](hetzner)** - Deploy on Hetzner Cloud with K3s
+- **[OVHcloud](ovhcloud)** - Deploy on OVHcloud Managed Kubernetes
+- **[Exoscale](exoscale)** - Deploy on Exoscale SKS
 
 ### Self-Hosted
 
-- **[On-Premises](on-premises.md)** - Deploy on your own Kubernetes cluster
-- **[Air-Gap](air-gap.md)** - Offline deployment for SECRET classification
+- **[On-Premises](on-premises)** - Deploy on your own Kubernetes cluster
+- **[Air-Gap](air-gap)** - Offline deployment for SECRET classification
 
 ### Components
 
-- **[Control Plane](../control-plane.md)** - Core Sovra services
-- **[Edge Nodes](edge-node.md)** - Vault clusters for crypto operations
+- **[Control Plane](../control-plane)** - Core Sovra services
+- **[Edge Nodes](edge-node)** - Vault clusters for crypto operations
 - **PostgreSQL** - Database deployment <!-- Guide coming soon -->
 
 ## Architecture Patterns
@@ -92,7 +92,7 @@ All deployments require:
 - TLS certificates
 - kubectl configured
 
-See [Control Plane](../control-plane.md) for details.
+See [Control Plane](../control-plane) for details.
 
 ## Next Steps
 
@@ -104,5 +104,5 @@ See [Control Plane](../control-plane.md) for details.
 
 ## Getting Help
 
-- [Troubleshooting](../operations/troubleshooting.md)
+- [Troubleshooting](../operations/troubleshooting)
 - [GitHub Discussions](https://github.com/witlox/sovra/discussions)

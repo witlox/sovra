@@ -420,6 +420,6 @@ kubectl get pods -n sovra -o json | jq '.items[].spec.containers[].image'
 
 ## Next Steps
 
-- [CRK Management Guide](../crk-management.md)
-- [Disaster Recovery](../operations/disaster-recovery.md)
+- [CRK Management Guide](../crk-management)
+- [Disaster Recovery](../operations/disaster-recovery)
 <!-- Dedicated compliance, incident response, and penetration testing guides coming soon -->

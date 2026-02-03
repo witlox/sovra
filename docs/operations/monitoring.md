@@ -407,6 +407,6 @@ kubectl get pod -n sovra -o yaml | grep prometheus
 
 ## Next Steps
 
-- [Disaster Recovery](disaster-recovery.md)
-- [Troubleshooting](troubleshooting.md)
+- [Disaster Recovery](disaster-recovery)
+- [Troubleshooting](troubleshooting)
 <!-- Dedicated alerting and logging guides coming soon -->

@@ -10,6 +10,9 @@ kramdown:
   input: GFM
   syntax_highlighter: rouge
 
+# Remove .html/.md from URLs
+permalink: pretty
+
 defaults:
   - scope:
       path: ""

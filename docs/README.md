@@ -9,21 +9,21 @@ Welcome to Sovra! This guide will help you get started with deploying and using 
 
 ## Quick Links
 
-- **[Quick Start](quickstart.md)** - Get running in 15 minutes
-- **[Installation](installation.md)** - Complete installation guide
-- **[Configuration](configuration.md)** - All configuration options
-- **[Core Concepts](concepts.md)** - Understand the architecture
+- **[Quick Start](quickstart)** - Get running in 15 minutes
+- **[Installation](installation)** - Complete installation guide
+- **[Configuration](configuration)** - All configuration options
+- **[Core Concepts](concepts)** - Understand the architecture
 
 ### For Users
-- **[User Guide](user-guide.md)** - Encrypt and decrypt data
-- **[Identity Management](identity-management.md)** - Users, services, and RBAC
+- **[User Guide](user-guide)** - Encrypt and decrypt data
+- **[Identity Management](identity-management)** - Users, services, and RBAC
 
 ### For Administrators
-- **[Administrator Guide](admin-guide.md)** - Platform administration
-- **[CRK Management](crk-management.md)** - Customer Root Key lifecycle
-- **[Emergency Access](emergency-access.md)** - Break-glass procedures
+- **[Administrator Guide](admin-guide)** - Platform administration
+- **[CRK Management](crk-management)** - Customer Root Key lifecycle
+- **[Emergency Access](emergency-access)** - Break-glass procedures
 - **[Operations](operations/)** - Day-to-day operations
-- **[Telemetry](telemetry.md)** - Tracing, metrics, and logging
+- **[Telemetry](telemetry)** - Tracing, metrics, and logging
 
 ### Security
 - **[Security Overview](security/)** - Authentication, authorization, and best practices
@@ -43,7 +43,7 @@ Sovra is an open source federated control plane that enables organizations to ma
 
 ### 1. Understand the Concepts (15 minutes)
 
-Read [Core Concepts](concepts.md) to understand:
+Read [Core Concepts](concepts) to understand:
 - Organizations and control planes
 - Customer Root Keys (CRK)
 - Edge nodes and Vault
@@ -52,7 +52,7 @@ Read [Core Concepts](concepts.md) to understand:
 
 ### 2. Set Up Your Environment (30 minutes)
 
-Follow [Installation Guide](installation.md) to:
+Follow [Installation Guide](installation) to:
 - Install prerequisites
 - Deploy PostgreSQL
 - Generate certificates
@@ -60,7 +60,7 @@ Follow [Installation Guide](installation.md) to:
 
 ### 3. Deploy Control Plane (45 minutes)
 
-Follow [Quick Start](quickstart.md) to:
+Follow [Quick Start](quickstart) to:
 - Deploy control plane on Kubernetes
 - Connect your first edge node
 - Create your first workspace
@@ -78,10 +78,10 @@ Learn how to:
 
 ### Where should I deploy Sovra?
 
-- **AWS**: Use [AWS deployment guide](deployment/aws.md)
-- **Azure**: Use [Azure deployment guide](deployment/azure.md)
-- **On-premises**: Use [on-premises guide](deployment/on-premises.md)
-- **Air-gap**: Use [air-gap guide](deployment/air-gap.md)
+- **AWS**: Use [AWS deployment guide](deployment/aws)
+- **Azure**: Use [Azure deployment guide](deployment/azure)
+- **On-premises**: Use [on-premises guide](deployment/on-premises)
+- **Air-gap**: Use [air-gap guide](deployment/air-gap)
 
 ### How secure is Sovra?
 
@@ -96,7 +96,7 @@ Learn how to:
 Yes. Sovra supports:
 - **CONFIDENTIAL**: Connected mode
 - **SECRET**: Air-gap mode
-- See [Air-Gap Deployment](deployment/air-gap.md)
+- See [Air-Gap Deployment](deployment/air-gap)
 
 ### What clouds does Sovra support?
 
@@ -113,10 +113,10 @@ All major clouds plus on-premises:
 
 After getting started:
 
-1. **[Deploy edge nodes](deployment/edge-node.md)** in your infrastructure
+1. **[Deploy edge nodes](deployment/edge-node)** in your infrastructure
 2. **[Configure federation](federation/)** with partner organizations
-3. **[Set up monitoring](operations/monitoring.md)** for production
-4. **[Create workspaces](federation/cross-domain-sharing.md)** for data sharing
+3. **[Set up monitoring](operations/monitoring)** for production
+4. **[Create workspaces](federation/cross-domain-sharing)** for data sharing
 
 ## Getting Help
 
@@ -128,4 +128,4 @@ After getting started:
 
 ## Contributing
 
-Want to contribute? See [Contributing Guide](../CONTRIBUTING.md)
+Want to contribute? See [Contributing Guide](../CONTRIBUTING)

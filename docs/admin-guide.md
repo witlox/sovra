@@ -524,7 +524,7 @@ sovra-cli audit query --event-type federation.* --since "1 hour ago"
 
 ## Next Steps
 
-- [User Guide](user-guide.md) - End-user operations
-- [CRK Management](crk-management.md) - Customer Root Key procedures
+- [User Guide](user-guide) - End-user operations
+- [CRK Management](crk-management) - Customer Root Key procedures
 - [Operations Guide](operations/) - Day-to-day operations
-- [Security Best Practices](security/best-practices.md) - Hardening guide
+- [Security Best Practices](security/best-practices) - Hardening guide

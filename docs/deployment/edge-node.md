@@ -301,6 +301,6 @@ vault operator raft join https://vault-0:8200
 
 ## Next Steps
 
-- [Configure workspaces](../federation/cross-domain-sharing.md)
-- [Set up monitoring](../operations/monitoring.md)
-- [Review security](../security/best-practices.md)
+- [Configure workspaces](../federation/cross-domain-sharing)
+- [Set up monitoring](../operations/monitoring)
+- [Review security](../security/best-practices)

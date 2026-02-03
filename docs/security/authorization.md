@@ -307,6 +307,6 @@ See [Policy Engine Architecture](../control-plane.md#policy-engine) for details.
 
 ## Next Steps
 
-- [Authentication Guide](authentication.md)
-- [Security Best Practices](best-practices.md)
-- [Monitoring Guide](../operations/monitoring.md)
+- [Authentication Guide](authentication)
+- [Security Best Practices](best-practices)
+- [Monitoring Guide](../operations/monitoring)

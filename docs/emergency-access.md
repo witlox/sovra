@@ -332,6 +332,6 @@ All emergency access and recovery operations are logged:
 
 ## Related Documentation
 
-- [CRK Management](crk-management.md) - CRK generation and reconstruction
-- [Identity Management](identity-management.md) - Identity types and RBAC
+- [CRK Management](crk-management) - CRK generation and reconstruction
+- [Identity Management](identity-management) - Identity types and RBAC
 - [Security Overview](security/) - Overall security architecture

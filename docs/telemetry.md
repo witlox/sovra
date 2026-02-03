@@ -483,6 +483,6 @@ jaeger:
 
 ## Next Steps
 
-- [Monitoring Guide](operations/monitoring.md) - Full monitoring setup
-- [Configuration Guide](configuration.md) - Configuration reference
+- [Monitoring Guide](operations/monitoring) - Full monitoring setup
+- [Configuration Guide](configuration) - Configuration reference
 - [Operations Guide](operations/) - Day-to-day operations

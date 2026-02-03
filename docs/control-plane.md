@@ -230,10 +230,10 @@ kubectl get secrets -n sovra -o yaml > secrets-backup.yaml
 
 ## Disaster Recovery
 
-See [Disaster Recovery Guide](operations/disaster-recovery.md)
+See [Disaster Recovery Guide](operations/disaster-recovery)
 
 ## Next Steps
 
-- [Deploy Edge Nodes](deployment/edge-node.md)
+- [Deploy Edge Nodes](deployment/edge-node)
 - [Configure Federation](federation/)
-- [Set up Monitoring](operations/monitoring.md)
+- [Set up Monitoring](operations/monitoring)

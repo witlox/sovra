@@ -411,7 +411,7 @@ terraform destroy
 
 ## Next Steps
 
-- [Deploy edge nodes](edge-node.md)
+- [Deploy edge nodes](edge-node)
 - [Configure TLS certificates](../security/authentication.md#mtls)
-- [Set up monitoring](../operations/monitoring.md)
+- [Set up monitoring](../operations/monitoring)
 - [Configure federation](federation/)

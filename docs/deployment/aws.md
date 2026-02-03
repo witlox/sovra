@@ -193,5 +193,5 @@ aws eks update-cluster-config \
 ## Next Steps
 
 - [Configure Federation](federation/)
-- [Deploy Edge Nodes](edge-node.md)
-- [Set up Monitoring](../operations/monitoring.md)
+- [Deploy Edge Nodes](edge-node)
+- [Set up Monitoring](../operations/monitoring)

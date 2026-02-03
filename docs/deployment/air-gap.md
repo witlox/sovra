@@ -427,10 +427,10 @@ sovra-cli workspace import \
 
 ### Recovery Procedure
 
-See [Disaster Recovery Guide](../operations/disaster-recovery.md) <!-- Air-gap specific runbook coming soon -->
+See [Disaster Recovery Guide](../operations/disaster-recovery) <!-- Air-gap specific runbook coming soon -->
 
 ## Next Steps
 
 - [Operations Guide](operations/)
-- [Security Best Practices](../security/best-practices.md)
+- [Security Best Practices](../security/best-practices)
 - [Compliance Guide](../security/best-practices.md#compliance) <!-- Dedicated compliance guide coming soon -->

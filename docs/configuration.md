@@ -309,6 +309,6 @@ sovra-cli config test-opa
 
 ## Next Steps
 
-- [Quick Start](quickstart.md) - Deploy Sovra
+- [Quick Start](quickstart) - Deploy Sovra
 - [Operations Guide](operations/) - Production operations
-- [Security Best Practices](security/best-practices.md) - Secure configuration
+- [Security Best Practices](security/best-practices) - Secure configuration

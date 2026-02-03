@@ -13,9 +13,9 @@ Sovra is designed with security as a first principle. This guide covers authenti
 
 ## Topics
 
-- **[Authentication](authentication.md)** - mTLS, JWT, OIDC integration
-- **[Authorization](authorization.md)** - OPA-based policy enforcement
-- **[Best Practices](best-practices.md)** - Security hardening and recommendations
+- **[Authentication](authentication)** - mTLS, JWT, OIDC integration
+- **[Authorization](authorization)** - OPA-based policy enforcement
+- **[Best Practices](best-practices)** - Security hardening and recommendations
 
 ## Quick Reference
 
@@ -66,4 +66,4 @@ Sovra is designed with security as a first principle. This guide covers authenti
 
 Please report security vulnerabilities through GitHub Security Advisories or by emailing security@witlox.org.
 
-See [SECURITY.md](../SECURITY.md) for our security policy.
+See [SECURITY.md](../SECURITY) for our security policy.

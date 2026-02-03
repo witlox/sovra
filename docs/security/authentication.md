@@ -247,6 +247,6 @@ sovra-cli auth check
 
 ## Next Steps
 
-- [Authorization Guide](authorization.md)
-- [Security Best Practices](best-practices.md)
+- [Authorization Guide](authorization)
+- [Security Best Practices](best-practices)
 - [Federation Guide](federation/)

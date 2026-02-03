@@ -231,5 +231,5 @@ echo "All backups verified successfully"
 
 ## Next Steps
 
-- [Set up monitoring](monitoring.md)
+- [Set up monitoring](monitoring)
 <!-- Runbooks coming soon -->

@@ -314,7 +314,7 @@ manager.RevokeDevice(ctx, device.ID)
 
 ## Related Documentation
 
-- [CRK Management](crk-management.md) - Customer Root Key lifecycle
-- [Emergency Access](emergency-access.md) - Break-glass procedures
-- [Authentication](security/authentication.md) - Auth backend configuration
-- [Authorization](security/authorization.md) - OPA policy setup
+- [CRK Management](crk-management) - Customer Root Key lifecycle
+- [Emergency Access](emergency-access) - Break-glass procedures
+- [Authentication](security/authentication) - Auth backend configuration
+- [Authorization](security/authorization) - OPA policy setup

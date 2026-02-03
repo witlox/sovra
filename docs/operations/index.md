@@ -13,12 +13,12 @@ This guide covers operational aspects of running Sovra in production.
 
 ### Setup & Initialization
 
-- **[Initialization](initialization.md)** - Bootstrap control plane
+- **[Initialization](initialization)** - Bootstrap control plane
 - **Configuration** - Service configuration <!-- Coming soon -->
 
 ### Monitoring & Observability
 
-- **[Monitoring](monitoring.md)** - Prometheus + Grafana setup
+- **[Monitoring](monitoring)** - Prometheus + Grafana setup
 - **[Logging](monitoring.md#log-aggregation)** - Centralized log aggregation <!-- Dedicated logging guide coming soon -->
 - **[Alerting](monitoring.md#alerts)** - Alert configuration <!-- Dedicated alerting guide coming soon -->
 - **Tracing** - Distributed tracing <!-- Coming soon -->
@@ -26,13 +26,13 @@ This guide covers operational aspects of running Sovra in production.
 ### Maintenance
 
 - **[Backup & Restore](disaster-recovery.md#backup-strategy)** - Data protection <!-- Dedicated backup guide coming soon -->
-- **[Disaster Recovery](disaster-recovery.md)** - DR procedures
+- **[Disaster Recovery](disaster-recovery)** - DR procedures
 - **Upgrades** - Version upgrades <!-- Coming soon -->
 - **Certificate Rotation** - TLS cert management <!-- Coming soon -->
 
 ### Troubleshooting
 
-- **[Troubleshooting Guide](troubleshooting.md)** - Common issues
+- **[Troubleshooting Guide](troubleshooting)** - Common issues
 - **Debugging** - Debugging techniques <!-- Coming soon -->
 - **Performance** - Performance tuning <!-- Coming soon -->
 
@@ -56,7 +56,7 @@ kubectl port-forward -n monitoring svc/grafana 3000:3000
 kubectl port-forward -n monitoring svc/prometheus 9090:9090
 ```
 
-See [Monitoring Guide](monitoring.md) for details.
+See [Monitoring Guide](monitoring) for details.
 
 ## Daily Operations
 
@@ -210,6 +210,6 @@ Edge Nodes:
 
 ## Next Steps
 
-- [Set up monitoring](monitoring.md)
-- [Configure disaster recovery](disaster-recovery.md)
-- [Review troubleshooting guide](troubleshooting.md)
+- [Set up monitoring](monitoring)
+- [Configure disaster recovery](disaster-recovery)
+- [Review troubleshooting guide](troubleshooting)
