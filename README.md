@@ -132,10 +132,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Documentation
 
-- [Getting Started](docs/)
-- [Deployment](docs/deployment/)
-- [Federation](docs/federation/)
-- [Operations](docs/operations/)
+See [Github Pages](https://witlox.github.io/sovra)
 
 ---
 
