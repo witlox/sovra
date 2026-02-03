@@ -301,10 +301,10 @@ Both organizations see audit logs.
 
 ## Next Steps
 
-- [Deploy on AWS](deployment/aws)
-- [Cross-Domain Sharing Guide](federation/cross-domain-sharing)
-- [Operations Guide](operations/monitoring)
-- [Security Best Practices](security/best-practices)
+- [Deploy on AWS](../deployment/aws)
+- [Cross-Domain Sharing Guide](../federation/cross-domain-sharing)
+- [Operations Guide](../operations/monitoring)
+- [Security Best Practices](../security/best-practices)
 
 ---
 

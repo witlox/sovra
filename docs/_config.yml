@@ -10,7 +10,7 @@ kramdown:
   input: GFM
   syntax_highlighter: rouge
 
-# Remove .html/.md from URLs
+# Clean URLs without .html extension
 permalink: pretty
 
 defaults:

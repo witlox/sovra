@@ -22,11 +22,11 @@ Welcome to Sovra! This guide will help you get started with deploying and using 
 - **[Administrator Guide](admin-guide)** - Platform administration
 - **[CRK Management](crk-management)** - Customer Root Key lifecycle
 - **[Emergency Access](emergency-access)** - Break-glass procedures
-- **[Operations](operations/)** - Day-to-day operations
+- **[Operations](../operations/)** - Day-to-day operations
 - **[Telemetry](telemetry)** - Tracing, metrics, and logging
 
 ### Security
-- **[Security Overview](security/)** - Authentication, authorization, and best practices
+- **[Security Overview](../security/)** - Authentication, authorization, and best practices
 
 ## What is Sovra?
 
@@ -78,10 +78,10 @@ Learn how to:
 
 ### Where should I deploy Sovra?
 
-- **AWS**: Use [AWS deployment guide](deployment/aws)
-- **Azure**: Use [Azure deployment guide](deployment/azure)
-- **On-premises**: Use [on-premises guide](deployment/on-premises)
-- **Air-gap**: Use [air-gap guide](deployment/air-gap)
+- **AWS**: Use [AWS deployment guide](../deployment/aws)
+- **Azure**: Use [Azure deployment guide](../deployment/azure)
+- **On-premises**: Use [on-premises guide](../deployment/on-premises)
+- **Air-gap**: Use [air-gap guide](../deployment/air-gap)
 
 ### How secure is Sovra?
 
@@ -89,14 +89,14 @@ Learn how to:
 - mTLS for all communications
 - Customer-controlled root keys (Shamir 5-of-3)
 - Immutable audit logs
-- See [Security](security/) for details
+- See [Security](../security/) for details
 
 ### Can I use Sovra for classified data?
 
 Yes. Sovra supports:
 - **CONFIDENTIAL**: Connected mode
 - **SECRET**: Air-gap mode
-- See [Air-Gap Deployment](deployment/air-gap)
+- See [Air-Gap Deployment](../deployment/air-gap)
 
 ### What clouds does Sovra support?
 
@@ -113,10 +113,10 @@ All major clouds plus on-premises:
 
 After getting started:
 
-1. **[Deploy edge nodes](deployment/edge-node)** in your infrastructure
-2. **[Configure federation](federation/)** with partner organizations
-3. **[Set up monitoring](operations/monitoring)** for production
-4. **[Create workspaces](federation/cross-domain-sharing)** for data sharing
+1. **[Deploy edge nodes](../deployment/edge-node)** in your infrastructure
+2. **[Configure federation](../federation/)** with partner organizations
+3. **[Set up monitoring](../operations/monitoring)** for production
+4. **[Create workspaces](../federation/cross-domain-sharing)** for data sharing
 
 ## Getting Help
 

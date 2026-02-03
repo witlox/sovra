@@ -251,8 +251,8 @@ Expected response:
 ## Next Steps
 
 - [Quick Start Guide](quickstart)
-- [Deploy Edge Nodes](deployment/edge-node)
-- [Configure Federation](federation/)
+- [Deploy Edge Nodes](../deployment/edge-node)
+- [Configure Federation](../federation/)
 
 ---
 

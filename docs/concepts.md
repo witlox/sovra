@@ -380,7 +380,7 @@ Layer 6: Monitoring (anomaly detection)
 
 - [Quick Start Guide](quickstart)
 - [Installation Guide](installation)
-- [Deployment Guide](deployment/)
+- [Deployment Guide](../deployment/)
 
 ---
 

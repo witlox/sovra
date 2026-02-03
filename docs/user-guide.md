@@ -449,4 +449,4 @@ sovra-cli encrypt \
 
 - [Administrator Guide](admin-guide) - For workspace administrators
 - [CRK Management](crk-management) - Understanding cryptographic keys
-- [Federation Guide](federation/) - Cross-organization sharing
+- [Federation Guide](../federation/) - Cross-organization sharing
