@@ -102,10 +102,10 @@ kubectl apply -k infrastructure/kubernetes/base
 ./scripts/init-control-plane.sh
 
 # Connect edge node
-sovra edge-node register --control-plane https://sovra.example.org
+sovra-cli edge-node register --control-plane https://sovra.example.org
 
 # Federate with partner
-sovra federation establish --partner https://partner.example.org
+sovra-cli federation establish --partner https://partner.example.org
 ```
 ---
 
