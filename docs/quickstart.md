@@ -132,10 +132,13 @@ terraform apply
 ### Register Edge Node
 
 ```bash
+#Note that this may not be the latest version, docs are more static than build
+
 # Install CLI
-wget https://github.com/witlox/sovra/releases/download/v0.5.0/sovra-cli-linux-amd64
-chmod +x sovra-cli-linux-amd64
-sudo mv sovra-cli-linux-amd64 /usr/local/bin/sovra-cli
+curl -LO https://github.com/witlox/sovra/releases/download/2026.3.71/sovra_2026.3.71_linux_amd64.tar.gz
+tar xzf sovra_2026.3.71_linux_amd64.tar.gz
+chmod +x sovra
+sudo mv sovra /usr/local/bin/sovra-cli
 
 # Configure CLI
 sovra-cli config set control-plane https://sovra.example.org
