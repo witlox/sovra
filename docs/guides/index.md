@@ -3,10 +3,16 @@ layout: default
 title: Operations
 ---
 
-# Guides
+# Various Guides
 
+## For users and admins
 - [Admin Guide](admin-guide) - Platform administration
 - [User Guide](user-guide) - End user operations
+
+## For admins and operators
+- [Configuration](../configuration) - Configuring Sovra
+- [Control Plane](../control-plane) - Deploying the control plane
+- [Installation](../installation) - Setup and installation
 
 # Critical Concepts
 - [CRK Management](../concepts/crk-management) - Customer Root Key lifecycle

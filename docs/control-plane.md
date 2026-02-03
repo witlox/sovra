@@ -228,7 +228,4 @@ kubectl exec -n sovra postgres-0 -- \
 kubectl get secrets -n sovra -o yaml > secrets-backup.yaml
 ```
 
-## Disaster Recovery
-
-See [Disaster Recovery Guide](operations/disaster-recovery)
 
