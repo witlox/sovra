@@ -6,9 +6,9 @@ require (
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-version v1.8.0
-	github.com/hashicorp/vault v1.21.2
+	github.com/hashicorp/vault v1.21.3
 	github.com/hashicorp/vault/api v1.22.0
-	github.com/lib/pq v1.11.1
+	github.com/lib/pq v1.11.2
 	github.com/open-policy-agent/opa v1.13.1
 	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.23.2
