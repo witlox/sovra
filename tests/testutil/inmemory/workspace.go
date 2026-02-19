@@ -255,6 +255,26 @@ func (s *WorkspaceService) Create(ctx context.Context, req workspace.CreateReque
 	return ws, nil
 }
 
+func (s *WorkspaceService) Update(ctx context.Context, id string, req workspace.UpdateRequest) (*models.Workspace, error) {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if req.Purpose != "" {
+		ws.Purpose = req.Purpose
+	}
+	if req.Classification != "" {
+		ws.Classification = req.Classification
+	}
+	if req.Mode != "" {
+		ws.Mode = req.Mode
+	}
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return nil, err
+	}
+	return ws, nil
+}
+
 func (s *WorkspaceService) Get(ctx context.Context, id string) (*models.Workspace, error) {
 	return s.repo.Get(ctx, id)
 }

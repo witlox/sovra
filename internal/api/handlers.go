@@ -16,6 +16,7 @@ import (
 	"github.com/witlox/sovra/internal/crk"
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
+	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/workspace"
 	apierrors "github.com/witlox/sovra/pkg/errors"
@@ -186,8 +187,10 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // UpdateWorkspaceRequest represents workspace update request.
 type UpdateWorkspaceRequest struct {
-	Purpose   string `json:"purpose,omitempty"`
-	Signature []byte `json:"signature"`
+	Purpose        string                `json:"purpose,omitempty"`
+	Classification models.Classification `json:"classification,omitempty"`
+	Mode           models.WorkspaceMode  `json:"mode,omitempty"`
+	Signature      []byte                `json:"signature"`
 }
 
 // Update handles PUT /api/v1/workspaces/{id}.
@@ -198,8 +201,182 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For now, update is handled via archive - workspace updates are limited
-	writeJSONError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "workspace update not implemented")
+	var req UpdateWorkspaceRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	ws, err := h.service.Update(r.Context(), id, workspace.UpdateRequest{
+		Purpose:        req.Purpose,
+		Classification: req.Classification,
+		Mode:           req.Mode,
+	})
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ws)
+}
+
+// RotateDEKRequest represents a DEK rotation request.
+type RotateDEKRequest struct {
+	Signature []byte `json:"signature"`
+}
+
+// RotateDEK handles POST /api/v1/workspaces/{id}/rotate-dek.
+func (h *WorkspaceHandler) RotateDEK(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+		return
+	}
+
+	var req RotateDEKRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if err := h.service.RotateDEK(r.Context(), id, req.Signature); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ExtendExpirationRequest represents an expiration extension request.
+type ExtendExpirationRequest struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	Signature []byte    `json:"signature"`
+}
+
+// ExtendExpiration handles POST /api/v1/workspaces/{id}/extend.
+func (h *WorkspaceHandler) ExtendExpiration(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+		return
+	}
+
+	var req ExtendExpirationRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.ExpiresAt.IsZero() {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "expires_at is required")
+		return
+	}
+
+	if err := h.service.ExtendExpiration(r.Context(), id, req.ExpiresAt, req.Signature); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// InviteParticipantRequest represents a participant invitation request.
+type InviteParticipantRequest struct {
+	OrgID     string `json:"org_id"`
+	Signature []byte `json:"signature"`
+}
+
+// InviteParticipant handles POST /api/v1/workspaces/{id}/invite.
+func (h *WorkspaceHandler) InviteParticipant(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+		return
+	}
+
+	var req InviteParticipantRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.OrgID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "org_id is required")
+		return
+	}
+
+	invitation, err := h.service.InviteParticipant(r.Context(), id, req.OrgID, req.Signature)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, invitation)
+}
+
+// AcceptInvitationRequest represents an invitation acceptance request.
+type AcceptInvitationRequest struct {
+	OrgID     string `json:"org_id"`
+	Signature []byte `json:"signature"`
+}
+
+// AcceptInvitation handles POST /api/v1/workspaces/{id}/accept-invitation.
+func (h *WorkspaceHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+		return
+	}
+
+	var req AcceptInvitationRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.OrgID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "org_id is required")
+		return
+	}
+
+	if err := h.service.AcceptInvitation(r.Context(), id, req.OrgID, req.Signature); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeclineInvitationRequest represents an invitation decline request.
+type DeclineInvitationRequest struct {
+	OrgID string `json:"org_id"`
+}
+
+// DeclineInvitation handles POST /api/v1/workspaces/{id}/decline-invitation.
+func (h *WorkspaceHandler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+		return
+	}
+
+	var req DeclineInvitationRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.OrgID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "org_id is required")
+		return
+	}
+
+	if err := h.service.DeclineInvitation(r.Context(), id, req.OrgID); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Delete handles DELETE /api/v1/workspaces/{id}.
@@ -1380,6 +1557,45 @@ func (h *CRKHandler) CompleteCeremony(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// RotateCRKRequest represents a CRK rotation request.
+type RotateCRKRequest struct {
+	OrgID     string `json:"org_id"`
+	Threshold int    `json:"threshold"`
+}
+
+// RotateCRK handles POST /api/v1/crk/rotate.
+func (h *CRKHandler) RotateCRK(w http.ResponseWriter, r *http.Request) {
+	if h.ceremony == nil {
+		writeJSONError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "ceremony manager not configured")
+		return
+	}
+
+	var req RotateCRKRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	orgID := req.OrgID
+	if orgID == "" {
+		orgID = getOrgID(r)
+	}
+
+	threshold := req.Threshold
+	if threshold < 1 {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "threshold must be at least 1")
+		return
+	}
+
+	ceremony, err := h.ceremony.StartCeremony(orgID, "rotate", threshold)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, ceremony)
+}
+
 // CancelCeremony handles DELETE /api/v1/crk/ceremony/{id}.
 func (h *CRKHandler) CancelCeremony(w http.ResponseWriter, r *http.Request) {
 	if h.ceremony == nil {
@@ -1394,6 +1610,742 @@ func (h *CRKHandler) CancelCeremony(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.ceremony.CancelCeremony(id); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Identity Handler
+// =============================================================================
+
+// IdentityHandler handles identity management API requests.
+type IdentityHandler struct {
+	manager *identity.Manager
+}
+
+// NewIdentityHandler creates a new identity handler.
+func NewIdentityHandler(manager *identity.Manager) *IdentityHandler {
+	return &IdentityHandler{manager: manager}
+}
+
+// --- Admin Request Types ---
+
+// CreateAdminRequest represents an admin creation request.
+type CreateAdminRequest struct {
+	Email string           `json:"email"`
+	Name  string           `json:"name"`
+	Role  models.AdminRole `json:"role"`
+}
+
+// UpdateAdminRequest represents an admin update request.
+type UpdateAdminRequest struct {
+	Email  string           `json:"email,omitempty"`
+	Name   string           `json:"name,omitempty"`
+	Role   models.AdminRole `json:"role,omitempty"`
+	Active *bool            `json:"active,omitempty"`
+}
+
+// VerifyMFARequest represents an MFA verification request.
+type VerifyMFARequest struct {
+	TOTPCode string `json:"totp_code"`
+}
+
+// --- User Request Types ---
+
+// CreateUserFromSSORequest represents a user creation from SSO request.
+type CreateUserFromSSORequest struct {
+	Provider models.SSOProvider `json:"provider"`
+	Subject  string             `json:"subject"`
+	Email    string             `json:"email"`
+	Name     string             `json:"name"`
+	Groups   []string           `json:"groups,omitempty"`
+}
+
+// --- Service Request Types ---
+
+// CreateServiceRequest represents a service identity creation request.
+type CreateServiceRequest struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	AuthMethod  models.AuthMethod `json:"auth_method"`
+}
+
+// --- Device Request Types ---
+
+// EnrollDeviceRequest represents a device enrollment request.
+type EnrollDeviceRequest struct {
+	DeviceName string    `json:"device_name"`
+	DeviceType string    `json:"device_type,omitempty"`
+	CertSerial string    `json:"cert_serial"`
+	CertExpiry time.Time `json:"cert_expiry"`
+}
+
+// --- Group Request Types ---
+
+// CreateGroupRequest represents a group creation request.
+type CreateGroupRequest struct {
+	Name          string   `json:"name"`
+	Description   string   `json:"description,omitempty"`
+	VaultPolicies []string `json:"vault_policies,omitempty"`
+}
+
+// AddGroupMemberRequest represents a request to add a member to a group.
+type AddGroupMemberRequest struct {
+	IdentityID   string              `json:"identity_id"`
+	IdentityType models.IdentityType `json:"identity_type"`
+}
+
+// --- Role Request Types ---
+
+// CreateRoleRequest represents a role creation request.
+type CreateRoleRequest struct {
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	Permissions []models.Permission `json:"permissions"`
+}
+
+// AssignRoleRequest represents a role assignment request.
+type AssignRoleRequest struct {
+	IdentityID   string              `json:"identity_id"`
+	IdentityType models.IdentityType `json:"identity_type"`
+	AssignedBy   string              `json:"assigned_by"`
+}
+
+// =============================================================================
+// Admin Handlers
+// =============================================================================
+
+// CreateAdmin handles POST /api/v1/identities/admins.
+func (h *IdentityHandler) CreateAdmin(w http.ResponseWriter, r *http.Request) {
+	var req CreateAdminRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.Email == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "email is required")
+		return
+	}
+	if req.Name == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "name is required")
+		return
+	}
+
+	orgID := getOrgID(r)
+	admin, err := h.manager.CreateAdmin(r.Context(), orgID, req.Email, req.Name, req.Role)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, admin)
+}
+
+// ListAdmins handles GET /api/v1/identities/admins.
+func (h *IdentityHandler) ListAdmins(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+
+	admins, err := h.manager.ListAdmins(r.Context(), orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"admins": admins,
+		"count":  len(admins),
+	})
+}
+
+// GetAdmin handles GET /api/v1/identities/admins/{id}.
+func (h *IdentityHandler) GetAdmin(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "admin id is required")
+		return
+	}
+
+	admin, err := h.manager.GetAdmin(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, admin)
+}
+
+// UpdateAdmin handles PUT /api/v1/identities/admins/{id}.
+func (h *IdentityHandler) UpdateAdmin(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "admin id is required")
+		return
+	}
+
+	var req UpdateAdminRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	admin, err := h.manager.GetAdmin(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	if req.Email != "" {
+		admin.Email = req.Email
+	}
+	if req.Name != "" {
+		admin.Name = req.Name
+	}
+	if req.Role != "" {
+		admin.Role = req.Role
+	}
+	if req.Active != nil {
+		admin.Active = *req.Active
+	}
+
+	if err := h.manager.UpdateAdmin(r.Context(), admin); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, admin)
+}
+
+// DeleteAdmin handles DELETE /api/v1/identities/admins/{id}.
+func (h *IdentityHandler) DeleteAdmin(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "admin id is required")
+		return
+	}
+
+	if err := h.manager.DeleteAdmin(r.Context(), id); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// EnableMFA handles POST /api/v1/identities/admins/{id}/mfa/enable.
+func (h *IdentityHandler) EnableMFA(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "admin id is required")
+		return
+	}
+
+	provisioningURL, err := h.manager.EnableMFA(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provisioning_url": provisioningURL,
+	})
+}
+
+// VerifyMFA handles POST /api/v1/identities/admins/{id}/mfa/verify.
+func (h *IdentityHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "admin id is required")
+		return
+	}
+
+	var req VerifyMFARequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.TOTPCode == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "totp_code is required")
+		return
+	}
+
+	if err := h.manager.VerifyMFA(r.Context(), id, req.TOTPCode); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"verified": true,
+	})
+}
+
+// =============================================================================
+// User Handlers
+// =============================================================================
+
+// CreateUserFromSSO handles POST /api/v1/identities/users/sso.
+func (h *IdentityHandler) CreateUserFromSSO(w http.ResponseWriter, r *http.Request) {
+	var req CreateUserFromSSORequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.Provider == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "provider is required")
+		return
+	}
+	if req.Subject == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "subject is required")
+		return
+	}
+	if req.Email == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "email is required")
+		return
+	}
+
+	orgID := getOrgID(r)
+	user, err := h.manager.CreateUserFromSSO(r.Context(), orgID, req.Provider, req.Subject, req.Email, req.Name, req.Groups)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, user)
+}
+
+// ListUsers handles GET /api/v1/identities/users.
+func (h *IdentityHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+
+	users, err := h.manager.ListUsers(r.Context(), orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"users": users,
+		"count": len(users),
+	})
+}
+
+// GetUser handles GET /api/v1/identities/users/{id}.
+func (h *IdentityHandler) GetUser(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "user id is required")
+		return
+	}
+
+	user, err := h.manager.GetUser(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, user)
+}
+
+// DeleteUser handles DELETE /api/v1/identities/users/{id}.
+func (h *IdentityHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "user id is required")
+		return
+	}
+
+	if err := h.manager.DeleteUser(r.Context(), id); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Service Handlers
+// =============================================================================
+
+// CreateService handles POST /api/v1/identities/services.
+func (h *IdentityHandler) CreateService(w http.ResponseWriter, r *http.Request) {
+	var req CreateServiceRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.Name == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "name is required")
+		return
+	}
+
+	orgID := getOrgID(r)
+	service, err := h.manager.CreateService(r.Context(), orgID, req.Name, req.Description, req.AuthMethod)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, service)
+}
+
+// ListServices handles GET /api/v1/identities/services.
+func (h *IdentityHandler) ListServices(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+
+	services, err := h.manager.ListServices(r.Context(), orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"services": services,
+		"count":    len(services),
+	})
+}
+
+// GetService handles GET /api/v1/identities/services/{id}.
+func (h *IdentityHandler) GetService(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "service id is required")
+		return
+	}
+
+	service, err := h.manager.GetService(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, service)
+}
+
+// DeleteService handles DELETE /api/v1/identities/services/{id}.
+func (h *IdentityHandler) DeleteService(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "service id is required")
+		return
+	}
+
+	if err := h.manager.DeleteService(r.Context(), id); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Device Handlers
+// =============================================================================
+
+// EnrollDevice handles POST /api/v1/identities/devices.
+func (h *IdentityHandler) EnrollDevice(w http.ResponseWriter, r *http.Request) {
+	var req EnrollDeviceRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.DeviceName == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "device_name is required")
+		return
+	}
+	if req.CertSerial == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "cert_serial is required")
+		return
+	}
+
+	orgID := getOrgID(r)
+	device, err := h.manager.EnrollDevice(r.Context(), orgID, req.DeviceName, req.DeviceType, req.CertSerial, req.CertExpiry)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, device)
+}
+
+// ListDevices handles GET /api/v1/identities/devices.
+func (h *IdentityHandler) ListDevices(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+
+	devices, err := h.manager.ListDevices(r.Context(), orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"devices": devices,
+		"count":   len(devices),
+	})
+}
+
+// GetDevice handles GET /api/v1/identities/devices/{id}.
+func (h *IdentityHandler) GetDevice(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "device id is required")
+		return
+	}
+
+	device, err := h.manager.GetDevice(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, device)
+}
+
+// RevokeDevice handles POST /api/v1/identities/devices/{id}/revoke.
+func (h *IdentityHandler) RevokeDevice(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "device id is required")
+		return
+	}
+
+	if err := h.manager.RevokeDevice(r.Context(), id); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Group Handlers
+// =============================================================================
+
+// CreateGroup handles POST /api/v1/identities/groups.
+func (h *IdentityHandler) CreateGroup(w http.ResponseWriter, r *http.Request) {
+	var req CreateGroupRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.Name == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "name is required")
+		return
+	}
+
+	orgID := getOrgID(r)
+	group, err := h.manager.CreateGroup(r.Context(), orgID, req.Name, req.Description, req.VaultPolicies)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, group)
+}
+
+// ListGroups handles GET /api/v1/identities/groups.
+func (h *IdentityHandler) ListGroups(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+
+	groups, err := h.manager.ListGroups(r.Context(), orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"groups": groups,
+		"count":  len(groups),
+	})
+}
+
+// GetGroup handles GET /api/v1/identities/groups/{id}.
+func (h *IdentityHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "group id is required")
+		return
+	}
+
+	group, err := h.manager.GetGroup(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, group)
+}
+
+// AddGroupMember handles POST /api/v1/identities/groups/{id}/members.
+func (h *IdentityHandler) AddGroupMember(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "group id is required")
+		return
+	}
+
+	var req AddGroupMemberRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.IdentityID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "identity_id is required")
+		return
+	}
+	if req.IdentityType == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "identity_type is required")
+		return
+	}
+
+	if err := h.manager.AddToGroup(r.Context(), id, req.IdentityID, req.IdentityType); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// RemoveGroupMember handles DELETE /api/v1/identities/groups/{id}/members/{identityId}.
+func (h *IdentityHandler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "group id is required")
+		return
+	}
+
+	identityID := chi.URLParam(r, "identityId")
+	if identityID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "identity id is required")
+		return
+	}
+
+	if err := h.manager.RemoveFromGroup(r.Context(), id, identityID); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Role Handlers
+// =============================================================================
+
+// CreateRole handles POST /api/v1/identities/roles.
+func (h *IdentityHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
+	var req CreateRoleRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.Name == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "name is required")
+		return
+	}
+
+	orgID := getOrgID(r)
+	role, err := h.manager.CreateRole(r.Context(), orgID, req.Name, req.Description, req.Permissions)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, role)
+}
+
+// ListRoles handles GET /api/v1/identities/roles.
+func (h *IdentityHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+
+	roles, err := h.manager.ListRoles(r.Context(), orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"roles": roles,
+		"count": len(roles),
+	})
+}
+
+// GetRole handles GET /api/v1/identities/roles/{id}.
+func (h *IdentityHandler) GetRole(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "role id is required")
+		return
+	}
+
+	role, err := h.manager.GetRole(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, role)
+}
+
+// AssignRole handles POST /api/v1/identities/roles/{id}/assign.
+func (h *IdentityHandler) AssignRole(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "role id is required")
+		return
+	}
+
+	var req AssignRoleRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.IdentityID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "identity_id is required")
+		return
+	}
+	if req.IdentityType == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "identity_type is required")
+		return
+	}
+	if req.AssignedBy == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "assigned_by is required")
+		return
+	}
+
+	if err := h.manager.AssignRole(r.Context(), id, req.IdentityID, req.IdentityType, req.AssignedBy); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// UnassignRole handles DELETE /api/v1/identities/roles/{id}/assignments/{identityId}.
+func (h *IdentityHandler) UnassignRole(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "role id is required")
+		return
+	}
+
+	identityID := chi.URLParam(r, "identityId")
+	if identityID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "identity id is required")
+		return
+	}
+
+	if err := h.manager.UnassignRole(r.Context(), id, identityID); err != nil {
 		handleError(w, err)
 		return
 	}

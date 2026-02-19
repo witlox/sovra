@@ -649,10 +649,10 @@ func TestWorkspaceHandlerUpdate(t *testing.T) {
 		Classification: models.ClassificationConfidential,
 	})
 
-	t.Run("update returns not implemented", func(t *testing.T) {
+	t.Run("updates workspace successfully", func(t *testing.T) {
 		reqBody := map[string]any{
-			"name":           "updated-name",
-			"classification": "secret",
+			"purpose":        "updated purpose",
+			"classification": "SECRET",
 		}
 		body, _ := json.Marshal(reqBody)
 
@@ -665,8 +665,7 @@ func TestWorkspaceHandlerUpdate(t *testing.T) {
 
 		r.ServeHTTP(w, req)
 
-		// Update is not implemented currently
-		assert.Equal(t, http.StatusNotImplemented, w.Code)
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
 

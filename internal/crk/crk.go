@@ -36,10 +36,19 @@ func NewManagerWithAudit(auditor Auditor) Manager {
 	}
 }
 
+// NewManagerWithRepo creates a new CRK Manager with share persistence.
+func NewManagerWithRepo(shareRepo ShareRepository) Manager {
+	return &managerImpl{
+		crkShares: make(map[string][][]byte),
+		shareRepo: shareRepo,
+	}
+}
+
 type managerImpl struct {
 	mu        sync.RWMutex
 	crkShares map[string][][]byte // crkID -> shares for validation
 	auditor   Auditor
+	shareRepo ShareRepository
 }
 
 // Generate creates a new CRK with the specified number of shares and threshold.
@@ -70,6 +79,26 @@ func (m *managerImpl) Generate(orgID string, totalShares, threshold int) (*model
 	m.mu.Lock()
 	m.crkShares[crkID] = shamirShares
 	m.mu.Unlock()
+
+	// Persist shares to repo if available
+	if m.shareRepo != nil {
+		for i, shareData := range shamirShares {
+			index := 1
+			if len(shareData) > 0 {
+				index = int(shareData[0])
+			}
+			share := &models.CRKShare{
+				ID:        uuid.New().String(),
+				CRKID:     crkID,
+				Index:     index,
+				Data:      shareData,
+				CreatedAt: time.Now(),
+			}
+			if err := m.shareRepo.CreateShare(context.Background(), share); err != nil {
+				return nil, fmt.Errorf("persist share %d: %w", i, err)
+			}
+		}
+	}
 
 	crk := &models.CRK{
 		ID:          crkID,
@@ -104,6 +133,15 @@ func (m *managerImpl) Generate(orgID string, totalShares, threshold int) (*model
 
 // GetShares returns the shares for a CRK (used during key generation ceremony).
 func (m *managerImpl) GetShares(crkID string) ([]models.CRKShare, error) {
+	// Try repo first if available
+	if m.shareRepo != nil {
+		shares, err := m.shareRepo.GetShares(context.Background(), crkID)
+		if err == nil && len(shares) > 0 {
+			return shares, nil
+		}
+	}
+
+	// Fallback to in-memory
 	m.mu.RLock()
 	shamirShares, ok := m.crkShares[crkID]
 	m.mu.RUnlock()
@@ -433,6 +471,35 @@ func (c *ceremonyManagerImpl) CompleteCeremony(ceremonyID string, witness string
 		signature := ed25519.Sign(privKey, testData)
 		return signature, nil
 
+	case "rotate":
+		// For rotation ceremonies, reconstruct and re-share
+		if c.manager == nil {
+			return nil, errors.NewCRKError("rotate", errors.ErrInternalError)
+		}
+		crk, ok := c.pendingCRKs[ceremonyID]
+		if !ok {
+			return nil, errors.ErrNotFound
+		}
+		privKey, err := c.manager.Reconstruct(ceremony.Shares, crk.PublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("reconstruct private key for rotation: %w", err)
+		}
+		newShares, err := c.manager.RegenerateShares(privKey, crk.TotalShares, crk.Threshold)
+		if err != nil {
+			return nil, fmt.Errorf("regenerate shares: %w", err)
+		}
+		// If manager has a share repo, persist new shares
+		if impl, ok := c.manager.(*managerImpl); ok && impl.shareRepo != nil {
+			for _, share := range newShares {
+				share.CRKID = crk.ID
+				if err := impl.shareRepo.CreateShare(context.Background(), &share); err != nil {
+					return nil, fmt.Errorf("persist rotated share: %w", err)
+				}
+			}
+		}
+		delete(c.pendingCRKs, ceremonyID)
+		return crk.PublicKey, nil
+
 	default:
 		// Generic completion - return a hash of shares to prove completion
 		result := make([]byte, 64)
@@ -482,7 +549,7 @@ func (g *ContextGenerator) Generate(ctx context.Context, orgID string, threshold
 
 	// Get the real SSS shares from the manager
 	if impl, ok := g.manager.(*managerImpl); ok {
-		modelShares, err := impl.GetShares(crk.ID)
+		modelShares, err := impl.GetShares(crk.ID) //nolint:contextcheck // GetShares interface doesn't accept context
 		if err != nil {
 			return nil, nil, err
 		}

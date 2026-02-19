@@ -1280,3 +1280,751 @@ func (m *MockVaultClient) ListPolicies(ctx context.Context) ([]string, error) {
 	}
 	return policies, nil
 }
+
+// =============================================================================
+// Identity Mocks
+// =============================================================================
+
+// AdminIdentityRepository mock for admin identity persistence.
+type AdminIdentityRepository struct {
+	mu       sync.RWMutex
+	admins   map[string]*models.AdminIdentity
+	FailNext bool
+}
+
+func NewAdminIdentityRepository() *AdminIdentityRepository {
+	return &AdminIdentityRepository{
+		admins: make(map[string]*models.AdminIdentity),
+	}
+}
+
+func (m *AdminIdentityRepository) Create(ctx context.Context, admin *models.AdminIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("create admin failed")
+	}
+	if admin.ID == "" {
+		admin.ID = uuid.New().String()
+	}
+	admin.CreatedAt = time.Now()
+	admin.UpdatedAt = time.Now()
+	m.admins[admin.ID] = admin
+	return nil
+}
+
+func (m *AdminIdentityRepository) Get(ctx context.Context, id string) (*models.AdminIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get admin failed")
+	}
+	admin, ok := m.admins[id]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return admin, nil
+}
+
+func (m *AdminIdentityRepository) GetByEmail(ctx context.Context, orgID, email string) (*models.AdminIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get admin by email failed")
+	}
+	for _, admin := range m.admins {
+		if admin.OrgID == orgID && admin.Email == email {
+			return admin, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *AdminIdentityRepository) List(ctx context.Context, orgID string) ([]*models.AdminIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("list admins failed")
+	}
+	var result []*models.AdminIdentity
+	for _, admin := range m.admins {
+		if orgID == "" || admin.OrgID == orgID {
+			result = append(result, admin)
+		}
+	}
+	return result, nil
+}
+
+func (m *AdminIdentityRepository) Update(ctx context.Context, admin *models.AdminIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("update admin failed")
+	}
+	if _, ok := m.admins[admin.ID]; !ok {
+		return errors.ErrNotFound
+	}
+	admin.UpdatedAt = time.Now()
+	m.admins[admin.ID] = admin
+	return nil
+}
+
+func (m *AdminIdentityRepository) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("delete admin failed")
+	}
+	delete(m.admins, id)
+	return nil
+}
+
+// UserIdentityRepository mock for user identity persistence.
+type UserIdentityRepository struct {
+	mu       sync.RWMutex
+	users    map[string]*models.UserIdentity
+	FailNext bool
+}
+
+func NewUserIdentityRepository() *UserIdentityRepository {
+	return &UserIdentityRepository{
+		users: make(map[string]*models.UserIdentity),
+	}
+}
+
+func (m *UserIdentityRepository) Create(ctx context.Context, user *models.UserIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("create user failed")
+	}
+	if user.ID == "" {
+		user.ID = uuid.New().String()
+	}
+	user.CreatedAt = time.Now()
+	user.UpdatedAt = time.Now()
+	m.users[user.ID] = user
+	return nil
+}
+
+func (m *UserIdentityRepository) Get(ctx context.Context, id string) (*models.UserIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get user failed")
+	}
+	user, ok := m.users[id]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return user, nil
+}
+
+func (m *UserIdentityRepository) GetByEmail(ctx context.Context, orgID, email string) (*models.UserIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get user by email failed")
+	}
+	for _, user := range m.users {
+		if user.OrgID == orgID && user.Email == email {
+			return user, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *UserIdentityRepository) GetBySSOSubject(ctx context.Context, provider models.SSOProvider, subject string) (*models.UserIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get user by SSO subject failed")
+	}
+	for _, user := range m.users {
+		if user.SSOProvider == provider && user.SSOSubject == subject {
+			return user, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *UserIdentityRepository) List(ctx context.Context, orgID string) ([]*models.UserIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("list users failed")
+	}
+	var result []*models.UserIdentity
+	for _, user := range m.users {
+		if orgID == "" || user.OrgID == orgID {
+			result = append(result, user)
+		}
+	}
+	return result, nil
+}
+
+func (m *UserIdentityRepository) Update(ctx context.Context, user *models.UserIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("update user failed")
+	}
+	if _, ok := m.users[user.ID]; !ok {
+		return errors.ErrNotFound
+	}
+	user.UpdatedAt = time.Now()
+	m.users[user.ID] = user
+	return nil
+}
+
+func (m *UserIdentityRepository) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("delete user failed")
+	}
+	delete(m.users, id)
+	return nil
+}
+
+// ServiceIdentityRepository mock for service identity persistence.
+type ServiceIdentityRepository struct {
+	mu       sync.RWMutex
+	services map[string]*models.ServiceIdentity
+	FailNext bool
+}
+
+func NewServiceIdentityRepository() *ServiceIdentityRepository {
+	return &ServiceIdentityRepository{
+		services: make(map[string]*models.ServiceIdentity),
+	}
+}
+
+func (m *ServiceIdentityRepository) Create(ctx context.Context, service *models.ServiceIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("create service failed")
+	}
+	if service.ID == "" {
+		service.ID = uuid.New().String()
+	}
+	service.CreatedAt = time.Now()
+	service.UpdatedAt = time.Now()
+	m.services[service.ID] = service
+	return nil
+}
+
+func (m *ServiceIdentityRepository) Get(ctx context.Context, id string) (*models.ServiceIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get service failed")
+	}
+	service, ok := m.services[id]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return service, nil
+}
+
+func (m *ServiceIdentityRepository) GetByName(ctx context.Context, orgID, name string) (*models.ServiceIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get service by name failed")
+	}
+	for _, service := range m.services {
+		if service.OrgID == orgID && service.Name == name {
+			return service, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *ServiceIdentityRepository) List(ctx context.Context, orgID string) ([]*models.ServiceIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("list services failed")
+	}
+	var result []*models.ServiceIdentity
+	for _, service := range m.services {
+		if orgID == "" || service.OrgID == orgID {
+			result = append(result, service)
+		}
+	}
+	return result, nil
+}
+
+func (m *ServiceIdentityRepository) Update(ctx context.Context, service *models.ServiceIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("update service failed")
+	}
+	if _, ok := m.services[service.ID]; !ok {
+		return errors.ErrNotFound
+	}
+	service.UpdatedAt = time.Now()
+	m.services[service.ID] = service
+	return nil
+}
+
+func (m *ServiceIdentityRepository) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("delete service failed")
+	}
+	delete(m.services, id)
+	return nil
+}
+
+// DeviceIdentityRepository mock for device identity persistence.
+type DeviceIdentityRepository struct {
+	mu       sync.RWMutex
+	devices  map[string]*models.DeviceIdentity
+	FailNext bool
+}
+
+func NewDeviceIdentityRepository() *DeviceIdentityRepository {
+	return &DeviceIdentityRepository{
+		devices: make(map[string]*models.DeviceIdentity),
+	}
+}
+
+func (m *DeviceIdentityRepository) Create(ctx context.Context, device *models.DeviceIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("create device failed")
+	}
+	if device.ID == "" {
+		device.ID = uuid.New().String()
+	}
+	m.devices[device.ID] = device
+	return nil
+}
+
+func (m *DeviceIdentityRepository) Get(ctx context.Context, id string) (*models.DeviceIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get device failed")
+	}
+	device, ok := m.devices[id]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return device, nil
+}
+
+func (m *DeviceIdentityRepository) GetByCertSerial(ctx context.Context, serial string) (*models.DeviceIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get device by cert serial failed")
+	}
+	for _, device := range m.devices {
+		if device.CertificateSerial == serial {
+			return device, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *DeviceIdentityRepository) List(ctx context.Context, orgID string) ([]*models.DeviceIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("list devices failed")
+	}
+	var result []*models.DeviceIdentity
+	for _, device := range m.devices {
+		if orgID == "" || device.OrgID == orgID {
+			result = append(result, device)
+		}
+	}
+	return result, nil
+}
+
+func (m *DeviceIdentityRepository) Update(ctx context.Context, device *models.DeviceIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("update device failed")
+	}
+	if _, ok := m.devices[device.ID]; !ok {
+		return errors.ErrNotFound
+	}
+	m.devices[device.ID] = device
+	return nil
+}
+
+func (m *DeviceIdentityRepository) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("delete device failed")
+	}
+	delete(m.devices, id)
+	return nil
+}
+
+// IdentityGroupRepository mock for identity group persistence.
+type IdentityGroupRepository struct {
+	mu          sync.RWMutex
+	groups      map[string]*models.IdentityGroup
+	memberships map[string]*models.GroupMembership
+	FailNext    bool
+}
+
+func NewIdentityGroupRepository() *IdentityGroupRepository {
+	return &IdentityGroupRepository{
+		groups:      make(map[string]*models.IdentityGroup),
+		memberships: make(map[string]*models.GroupMembership),
+	}
+}
+
+func (m *IdentityGroupRepository) Create(ctx context.Context, group *models.IdentityGroup) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("create group failed")
+	}
+	if group.ID == "" {
+		group.ID = uuid.New().String()
+	}
+	group.CreatedAt = time.Now()
+	group.UpdatedAt = time.Now()
+	m.groups[group.ID] = group
+	return nil
+}
+
+func (m *IdentityGroupRepository) Get(ctx context.Context, id string) (*models.IdentityGroup, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get group failed")
+	}
+	group, ok := m.groups[id]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return group, nil
+}
+
+func (m *IdentityGroupRepository) GetByName(ctx context.Context, orgID, name string) (*models.IdentityGroup, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get group by name failed")
+	}
+	for _, group := range m.groups {
+		if group.OrgID == orgID && group.Name == name {
+			return group, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *IdentityGroupRepository) List(ctx context.Context, orgID string) ([]*models.IdentityGroup, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("list groups failed")
+	}
+	var result []*models.IdentityGroup
+	for _, group := range m.groups {
+		if orgID == "" || group.OrgID == orgID {
+			result = append(result, group)
+		}
+	}
+	return result, nil
+}
+
+func (m *IdentityGroupRepository) Update(ctx context.Context, group *models.IdentityGroup) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("update group failed")
+	}
+	if _, ok := m.groups[group.ID]; !ok {
+		return errors.ErrNotFound
+	}
+	group.UpdatedAt = time.Now()
+	m.groups[group.ID] = group
+	return nil
+}
+
+func (m *IdentityGroupRepository) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("delete group failed")
+	}
+	delete(m.groups, id)
+	return nil
+}
+
+func (m *IdentityGroupRepository) AddMember(ctx context.Context, membership *models.GroupMembership) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("add member failed")
+	}
+	if membership.ID == "" {
+		membership.ID = uuid.New().String()
+	}
+	m.memberships[membership.ID] = membership
+	return nil
+}
+
+func (m *IdentityGroupRepository) RemoveMember(ctx context.Context, groupID, identityID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("remove member failed")
+	}
+	for id, membership := range m.memberships {
+		if membership.GroupID == groupID && membership.IdentityID == identityID {
+			delete(m.memberships, id)
+			return nil
+		}
+	}
+	return errors.ErrNotFound
+}
+
+func (m *IdentityGroupRepository) GetMembers(ctx context.Context, groupID string) ([]*models.GroupMembership, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get members failed")
+	}
+	var result []*models.GroupMembership
+	for _, membership := range m.memberships {
+		if membership.GroupID == groupID {
+			result = append(result, membership)
+		}
+	}
+	return result, nil
+}
+
+func (m *IdentityGroupRepository) GetGroupsForIdentity(ctx context.Context, identityID string) ([]*models.IdentityGroup, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get groups for identity failed")
+	}
+	var result []*models.IdentityGroup
+	for _, membership := range m.memberships {
+		if membership.IdentityID == identityID {
+			if group, ok := m.groups[membership.GroupID]; ok {
+				result = append(result, group)
+			}
+		}
+	}
+	return result, nil
+}
+
+// RoleRepository mock for role persistence.
+type RoleRepository struct {
+	mu          sync.RWMutex
+	roles       map[string]*models.Role
+	assignments map[string]*models.RoleAssignment
+	FailNext    bool
+}
+
+func NewRoleRepository() *RoleRepository {
+	return &RoleRepository{
+		roles:       make(map[string]*models.Role),
+		assignments: make(map[string]*models.RoleAssignment),
+	}
+}
+
+func (m *RoleRepository) Create(ctx context.Context, role *models.Role) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("create role failed")
+	}
+	if role.ID == "" {
+		role.ID = uuid.New().String()
+	}
+	role.CreatedAt = time.Now()
+	role.UpdatedAt = time.Now()
+	m.roles[role.ID] = role
+	return nil
+}
+
+func (m *RoleRepository) Get(ctx context.Context, id string) (*models.Role, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get role failed")
+	}
+	role, ok := m.roles[id]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return role, nil
+}
+
+func (m *RoleRepository) GetByName(ctx context.Context, orgID, name string) (*models.Role, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get role by name failed")
+	}
+	for _, role := range m.roles {
+		if role.OrgID == orgID && role.Name == name {
+			return role, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *RoleRepository) List(ctx context.Context, orgID string) ([]*models.Role, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("list roles failed")
+	}
+	var result []*models.Role
+	for _, role := range m.roles {
+		if orgID == "" || role.OrgID == orgID {
+			result = append(result, role)
+		}
+	}
+	return result, nil
+}
+
+func (m *RoleRepository) Update(ctx context.Context, role *models.Role) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("update role failed")
+	}
+	if _, ok := m.roles[role.ID]; !ok {
+		return errors.ErrNotFound
+	}
+	role.UpdatedAt = time.Now()
+	m.roles[role.ID] = role
+	return nil
+}
+
+func (m *RoleRepository) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("delete role failed")
+	}
+	delete(m.roles, id)
+	return nil
+}
+
+func (m *RoleRepository) Assign(ctx context.Context, assignment *models.RoleAssignment) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("assign role failed")
+	}
+	if assignment.ID == "" {
+		assignment.ID = uuid.New().String()
+	}
+	m.assignments[assignment.ID] = assignment
+	return nil
+}
+
+func (m *RoleRepository) Unassign(ctx context.Context, roleID, identityID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("unassign role failed")
+	}
+	for id, assignment := range m.assignments {
+		if assignment.RoleID == roleID && assignment.IdentityID == identityID {
+			delete(m.assignments, id)
+			return nil
+		}
+	}
+	return errors.ErrNotFound
+}
+
+func (m *RoleRepository) GetAssignments(ctx context.Context, roleID string) ([]*models.RoleAssignment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get assignments failed")
+	}
+	var result []*models.RoleAssignment
+	for _, assignment := range m.assignments {
+		if assignment.RoleID == roleID {
+			result = append(result, assignment)
+		}
+	}
+	return result, nil
+}
+
+func (m *RoleRepository) GetRolesForIdentity(ctx context.Context, identityID string) ([]*models.Role, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get roles for identity failed")
+	}
+	var result []*models.Role
+	for _, assignment := range m.assignments {
+		if assignment.IdentityID == identityID {
+			if role, ok := m.roles[assignment.RoleID]; ok {
+				result = append(result, role)
+			}
+		}
+	}
+	return result, nil
+}

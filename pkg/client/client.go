@@ -381,3 +381,347 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 	}
 	return &result, nil
 }
+
+// Admin Identity API
+
+// CreateAdminRequest represents a request to create an admin identity.
+type CreateAdminRequest struct {
+	Email    string           `json:"email"`
+	Name     string           `json:"name"`
+	Role     models.AdminRole `json:"role"`
+	Password string           `json:"password"`
+}
+
+// UpdateAdminRequest represents a request to update an admin identity.
+type UpdateAdminRequest struct {
+	Name   string           `json:"name,omitempty"`
+	Role   models.AdminRole `json:"role,omitempty"`
+	Active *bool            `json:"active,omitempty"`
+}
+
+// EnableMFAResponse represents the response from enabling MFA.
+type EnableMFAResponse struct {
+	Secret    string `json:"secret"`
+	QRCodeURL string `json:"qr_code_url"`
+}
+
+// VerifyMFARequest represents a request to verify MFA setup.
+type VerifyMFARequest struct {
+	Code string `json:"code"`
+}
+
+// CreateAdmin creates a new admin identity.
+func (c *Client) CreateAdmin(ctx context.Context, req CreateAdminRequest) (*models.AdminIdentity, error) {
+	var result models.AdminIdentity
+	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/admins", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// listAdminsResponse wraps the list of admin identities.
+type listAdminsResponse struct {
+	Admins []*models.AdminIdentity `json:"admins"`
+}
+
+// ListAdmins lists all admin identities.
+func (c *Client) ListAdmins(ctx context.Context) ([]*models.AdminIdentity, error) {
+	var result listAdminsResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/admins", nil, &result); err != nil {
+		return nil, err
+	}
+	return result.Admins, nil
+}
+
+// GetAdmin retrieves an admin identity by ID.
+func (c *Client) GetAdmin(ctx context.Context, id string) (*models.AdminIdentity, error) {
+	var result models.AdminIdentity
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/admins/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// UpdateAdmin updates an admin identity.
+func (c *Client) UpdateAdmin(ctx context.Context, id string, req UpdateAdminRequest) (*models.AdminIdentity, error) {
+	var result models.AdminIdentity
+	if err := c.request(ctx, http.MethodPut, "/api/v1/identities/admins/"+id, req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DeleteAdmin deletes an admin identity.
+func (c *Client) DeleteAdmin(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/identities/admins/"+id, nil, nil)
+}
+
+// EnableMFA enables MFA for an admin identity.
+func (c *Client) EnableMFA(ctx context.Context, id string) (*EnableMFAResponse, error) {
+	var result EnableMFAResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/admins/"+id+"/mfa/enable", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// VerifyMFA verifies MFA setup for an admin identity.
+func (c *Client) VerifyMFA(ctx context.Context, id string, req VerifyMFARequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/identities/admins/"+id+"/mfa/verify", req, nil)
+}
+
+// User Identity API
+
+// CreateUserSSORequest represents a request to create a user identity via SSO.
+type CreateUserSSORequest struct {
+	Email       string             `json:"email"`
+	Name        string             `json:"name"`
+	SSOProvider models.SSOProvider `json:"sso_provider"`
+	SSOSubject  string             `json:"sso_subject"`
+}
+
+// CreateUserFromSSO creates a new user identity from SSO.
+func (c *Client) CreateUserFromSSO(ctx context.Context, req CreateUserSSORequest) (*models.UserIdentity, error) {
+	var result models.UserIdentity
+	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/users/sso", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// listUsersResponse wraps the list of user identities.
+type listUsersResponse struct {
+	Users []*models.UserIdentity `json:"users"`
+}
+
+// ListUsers lists all user identities.
+func (c *Client) ListUsers(ctx context.Context) ([]*models.UserIdentity, error) {
+	var result listUsersResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/users", nil, &result); err != nil {
+		return nil, err
+	}
+	return result.Users, nil
+}
+
+// GetUser retrieves a user identity by ID.
+func (c *Client) GetUser(ctx context.Context, id string) (*models.UserIdentity, error) {
+	var result models.UserIdentity
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/users/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DeleteUser deletes a user identity.
+func (c *Client) DeleteUser(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/identities/users/"+id, nil, nil)
+}
+
+// Service Identity API
+
+// CreateServiceRequest represents a request to create a service identity.
+type CreateServiceRequest struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	AuthMethod  models.AuthMethod `json:"auth_method"`
+	VaultRole   string            `json:"vault_role"`
+	Namespace   string            `json:"namespace,omitempty"`
+	ServiceAcct string            `json:"service_acct,omitempty"`
+}
+
+// CreateService creates a new service identity.
+func (c *Client) CreateService(ctx context.Context, req CreateServiceRequest) (*models.ServiceIdentity, error) {
+	var result models.ServiceIdentity
+	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/services", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// listServicesResponse wraps the list of service identities.
+type listServicesResponse struct {
+	Services []*models.ServiceIdentity `json:"services"`
+}
+
+// ListServices lists all service identities.
+func (c *Client) ListServices(ctx context.Context) ([]*models.ServiceIdentity, error) {
+	var result listServicesResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/services", nil, &result); err != nil {
+		return nil, err
+	}
+	return result.Services, nil
+}
+
+// GetService retrieves a service identity by ID.
+func (c *Client) GetService(ctx context.Context, id string) (*models.ServiceIdentity, error) {
+	var result models.ServiceIdentity
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/services/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DeleteService deletes a service identity.
+func (c *Client) DeleteService(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/identities/services/"+id, nil, nil)
+}
+
+// Device Identity API
+
+// EnrollDeviceRequest represents a request to enroll a device.
+type EnrollDeviceRequest struct {
+	DeviceName string         `json:"device_name"`
+	DeviceType string         `json:"device_type,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
+// EnrollDevice enrolls a new device identity.
+func (c *Client) EnrollDevice(ctx context.Context, req EnrollDeviceRequest) (*models.DeviceIdentity, error) {
+	var result models.DeviceIdentity
+	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/devices", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// listDevicesResponse wraps the list of device identities.
+type listDevicesResponse struct {
+	Devices []*models.DeviceIdentity `json:"devices"`
+}
+
+// ListDevices lists all device identities.
+func (c *Client) ListDevices(ctx context.Context) ([]*models.DeviceIdentity, error) {
+	var result listDevicesResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/devices", nil, &result); err != nil {
+		return nil, err
+	}
+	return result.Devices, nil
+}
+
+// GetDevice retrieves a device identity by ID.
+func (c *Client) GetDevice(ctx context.Context, id string) (*models.DeviceIdentity, error) {
+	var result models.DeviceIdentity
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/devices/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RevokeDevice revokes a device identity.
+func (c *Client) RevokeDevice(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/identities/devices/"+id+"/revoke", nil, nil)
+}
+
+// Groups API
+
+// CreateGroupRequest represents a request to create an identity group.
+type CreateGroupRequest struct {
+	Name          string   `json:"name"`
+	Description   string   `json:"description,omitempty"`
+	VaultPolicies []string `json:"vault_policies,omitempty"`
+}
+
+// CreateGroup creates a new identity group.
+func (c *Client) CreateGroup(ctx context.Context, req CreateGroupRequest) (*models.IdentityGroup, error) {
+	var result models.IdentityGroup
+	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/groups", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// listGroupsResponse wraps the list of identity groups.
+type listGroupsResponse struct {
+	Groups []*models.IdentityGroup `json:"groups"`
+}
+
+// ListGroups lists all identity groups.
+func (c *Client) ListGroups(ctx context.Context) ([]*models.IdentityGroup, error) {
+	var result listGroupsResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/groups", nil, &result); err != nil {
+		return nil, err
+	}
+	return result.Groups, nil
+}
+
+// GetGroup retrieves an identity group by ID.
+func (c *Client) GetGroup(ctx context.Context, id string) (*models.IdentityGroup, error) {
+	var result models.IdentityGroup
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/groups/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// AddGroupMemberRequest represents a request to add a member to a group.
+type AddGroupMemberRequest struct {
+	IdentityID   string              `json:"identity_id"`
+	IdentityType models.IdentityType `json:"identity_type"`
+}
+
+// AddGroupMember adds a member to an identity group.
+func (c *Client) AddGroupMember(ctx context.Context, groupID string, req AddGroupMemberRequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/identities/groups/"+groupID+"/members", req, nil)
+}
+
+// RemoveGroupMember removes a member from an identity group.
+func (c *Client) RemoveGroupMember(ctx context.Context, groupID, identityID string) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/identities/groups/"+groupID+"/members/"+identityID, nil, nil)
+}
+
+// Roles API
+
+// CreateRoleRequest represents a request to create a role.
+type CreateRoleRequest struct {
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	Permissions []models.Permission `json:"permissions"`
+}
+
+// CreateRole creates a new role.
+func (c *Client) CreateRole(ctx context.Context, req CreateRoleRequest) (*models.Role, error) {
+	var result models.Role
+	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/roles", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// listRolesResponse wraps the list of roles.
+type listRolesResponse struct {
+	Roles []*models.Role `json:"roles"`
+}
+
+// ListRoles lists all roles.
+func (c *Client) ListRoles(ctx context.Context) ([]*models.Role, error) {
+	var result listRolesResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/roles", nil, &result); err != nil {
+		return nil, err
+	}
+	return result.Roles, nil
+}
+
+// GetRole retrieves a role by ID.
+func (c *Client) GetRole(ctx context.Context, id string) (*models.Role, error) {
+	var result models.Role
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/roles/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// AssignRoleRequest represents a request to assign a role to an identity.
+type AssignRoleRequest struct {
+	IdentityID   string              `json:"identity_id"`
+	IdentityType models.IdentityType `json:"identity_type"`
+}
+
+// AssignRole assigns a role to an identity.
+func (c *Client) AssignRole(ctx context.Context, roleID string, req AssignRoleRequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/identities/roles/"+roleID+"/assign", req, nil)
+}
+
+// UnassignRole removes a role assignment from an identity.
+func (c *Client) UnassignRole(ctx context.Context, roleID, identityID string) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/identities/roles/"+roleID+"/assignments/"+identityID, nil, nil)
+}

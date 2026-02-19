@@ -138,6 +138,57 @@ func (s *productionService) List(ctx context.Context, orgID string, limit, offse
 	return workspaces, nil
 }
 
+func (s *productionService) Update(ctx context.Context, id string, req UpdateRequest) (*models.Workspace, error) {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace: %w", err)
+	}
+
+	if ws.Archived || ws.Status == models.WorkspaceStatusArchived {
+		return nil, errors.NewValidationError("workspace", "cannot update archived workspace")
+	}
+
+	if err := checkExpiration(ws); err != nil {
+		return nil, err
+	}
+
+	if req.Purpose != "" {
+		ws.Purpose = req.Purpose
+	}
+	if req.Classification != "" {
+		ws.Classification = req.Classification
+	}
+	if req.Mode != "" {
+		ws.Mode = req.Mode
+	}
+
+	ws.UpdatedAt = time.Now()
+
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return nil, fmt.Errorf("failed to update workspace: %w", err)
+	}
+
+	if s.audit != nil {
+		auditEvent := &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     ws.OwnerOrgID,
+			Workspace: ws.ID,
+			EventType: "workspace.update",
+			Actor:     ws.OwnerOrgID,
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"purpose":        req.Purpose,
+				"classification": string(req.Classification),
+				"mode":           string(req.Mode),
+			},
+		}
+		_ = s.audit.Log(ctx, auditEvent)
+	}
+
+	return ws, nil
+}
+
 func (s *productionService) AddParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
@@ -900,6 +951,31 @@ func (s *serviceImpl) List(ctx context.Context, orgID string, limit, offset int)
 		return nil, fmt.Errorf("failed to list workspaces: %w", err)
 	}
 	return workspaces, nil
+}
+
+func (s *serviceImpl) Update(ctx context.Context, id string, req UpdateRequest) (*models.Workspace, error) {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace: %w", err)
+	}
+
+	if req.Purpose != "" {
+		ws.Purpose = req.Purpose
+	}
+	if req.Classification != "" {
+		ws.Classification = req.Classification
+	}
+	if req.Mode != "" {
+		ws.Mode = req.Mode
+	}
+
+	ws.UpdatedAt = time.Now()
+
+	if err := s.repo.Update(ctx, ws); err != nil {
+		return nil, fmt.Errorf("failed to update workspace: %w", err)
+	}
+
+	return ws, nil
 }
 
 func (s *serviceImpl) AddParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error {

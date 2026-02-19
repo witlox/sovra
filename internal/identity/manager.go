@@ -430,6 +430,165 @@ func (m *Manager) GetIdentityPolicies(ctx context.Context, identityID string) ([
 	return policies, nil
 }
 
+// GetAdmin returns an admin identity by ID.
+func (m *Manager) GetAdmin(ctx context.Context, id string) (*models.AdminIdentity, error) {
+	admin, err := m.admins.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get admin: %w", err)
+	}
+	return admin, nil
+}
+
+// ListAdmins returns all admin identities for an organization.
+func (m *Manager) ListAdmins(ctx context.Context, orgID string) ([]*models.AdminIdentity, error) {
+	admins, err := m.admins.List(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list admins: %w", err)
+	}
+	return admins, nil
+}
+
+// UpdateAdmin updates an admin identity.
+func (m *Manager) UpdateAdmin(ctx context.Context, admin *models.AdminIdentity) error {
+	admin.UpdatedAt = time.Now()
+	if err := m.admins.Update(ctx, admin); err != nil {
+		return fmt.Errorf("update admin: %w", err)
+	}
+	return nil
+}
+
+// DeleteAdmin deletes an admin identity.
+func (m *Manager) DeleteAdmin(ctx context.Context, id string) error {
+	if err := m.admins.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete admin: %w", err)
+	}
+	return nil
+}
+
+// GetUser returns a user identity by ID.
+func (m *Manager) GetUser(ctx context.Context, id string) (*models.UserIdentity, error) {
+	user, err := m.users.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get user: %w", err)
+	}
+	return user, nil
+}
+
+// ListUsers returns all user identities for an organization.
+func (m *Manager) ListUsers(ctx context.Context, orgID string) ([]*models.UserIdentity, error) {
+	users, err := m.users.List(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	return users, nil
+}
+
+// DeleteUser deletes a user identity.
+func (m *Manager) DeleteUser(ctx context.Context, id string) error {
+	if err := m.users.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	return nil
+}
+
+// GetService returns a service identity by ID.
+func (m *Manager) GetService(ctx context.Context, id string) (*models.ServiceIdentity, error) {
+	svc, err := m.services.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get service: %w", err)
+	}
+	return svc, nil
+}
+
+// ListServices returns all service identities for an organization.
+func (m *Manager) ListServices(ctx context.Context, orgID string) ([]*models.ServiceIdentity, error) {
+	svcs, err := m.services.List(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list services: %w", err)
+	}
+	return svcs, nil
+}
+
+// DeleteService deletes a service identity.
+func (m *Manager) DeleteService(ctx context.Context, id string) error {
+	if err := m.services.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete service: %w", err)
+	}
+	return nil
+}
+
+// GetDevice returns a device identity by ID.
+func (m *Manager) GetDevice(ctx context.Context, id string) (*models.DeviceIdentity, error) {
+	device, err := m.devices.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get device: %w", err)
+	}
+	return device, nil
+}
+
+// ListDevices returns all device identities for an organization.
+func (m *Manager) ListDevices(ctx context.Context, orgID string) ([]*models.DeviceIdentity, error) {
+	devices, err := m.devices.List(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+	return devices, nil
+}
+
+// GetGroup returns an identity group by ID.
+func (m *Manager) GetGroup(ctx context.Context, id string) (*models.IdentityGroup, error) {
+	group, err := m.groups.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get group: %w", err)
+	}
+	return group, nil
+}
+
+// ListGroups returns all identity groups for an organization.
+func (m *Manager) ListGroups(ctx context.Context, orgID string) ([]*models.IdentityGroup, error) {
+	groups, err := m.groups.List(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list groups: %w", err)
+	}
+	return groups, nil
+}
+
+// GetGroupMembers returns all members of a group.
+func (m *Manager) GetGroupMembers(ctx context.Context, groupID string) ([]*models.GroupMembership, error) {
+	members, err := m.groups.GetMembers(ctx, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("get group members: %w", err)
+	}
+	return members, nil
+}
+
+// GetRole returns a role by ID.
+func (m *Manager) GetRole(ctx context.Context, id string) (*models.Role, error) {
+	role, err := m.roles.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get role: %w", err)
+	}
+	return role, nil
+}
+
+// ListRoles returns all roles for an organization.
+func (m *Manager) ListRoles(ctx context.Context, orgID string) ([]*models.Role, error) {
+	roles, err := m.roles.List(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list roles: %w", err)
+	}
+	return roles, nil
+}
+
+// GetRoleAssignments returns all assignments for a role.
+func (m *Manager) GetRoleAssignments(ctx context.Context, roleID string) ([]*models.RoleAssignment, error) {
+	assignments, err := m.roles.GetAssignments(ctx, roleID)
+	if err != nil {
+		return nil, fmt.Errorf("get role assignments: %w", err)
+	}
+	return assignments, nil
+}
+
 // ShareEncryptor handles CRK share encryption for distribution.
 type ShareEncryptor struct{}
 

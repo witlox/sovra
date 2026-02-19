@@ -110,9 +110,23 @@ func init() {
 	crkVerifyCmd.Flags().String("data", "", "Original data")
 	crkVerifyCmd.Flags().String("data-file", "", "File containing original data")
 
+	// CRK ceremony start flags
+	crkCeremonyStartCmd.Flags().Int("shares", 5, "Total number of shares")
+	crkCeremonyStartCmd.Flags().Int("threshold", 3, "Threshold required to reconstruct")
+
+	// CRK ceremony add-share flags
+	crkCeremonyAddShareCmd.Flags().String("share-file", "", "JSON file containing the share")
+	crkCeremonyAddShareCmd.Flags().String("share-data", "", "Base64-encoded share data")
+	crkCeremonyAddShareCmd.Flags().Int("share-index", 0, "Share index")
+
+	crkCeremonyCmd.AddCommand(crkCeremonyStartCmd)
+	crkCeremonyCmd.AddCommand(crkCeremonyAddShareCmd)
+	crkCeremonyCmd.AddCommand(crkCeremonyCompleteCmd)
+
 	crkCmd.AddCommand(crkGenerateCmd)
 	crkCmd.AddCommand(crkSignCmd)
 	crkCmd.AddCommand(crkVerifyCmd)
+	crkCmd.AddCommand(crkCeremonyCmd)
 }
 
 func runCRKGenerate(cmd *cobra.Command, args []string) error {
@@ -278,6 +292,121 @@ func runCRKVerify(cmd *cobra.Command, args []string) error {
 	fmt.Println("Signature is INVALID")
 	os.Exit(1)
 	return nil
+}
+
+// CRK Ceremony Commands
+
+var crkCeremonyCmd = &cobra.Command{
+	Use:   "ceremony",
+	Short: "CRK ceremony management",
+	Long:  `Manage CRK ceremonies for key generation and rotation.`,
+}
+
+var crkCeremonyStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start a CRK ceremony",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Root().PersistentFlags().GetString("org-id")
+		if orgID == "" {
+			return fmt.Errorf("--org-id is required")
+		}
+
+		shares, _ := cmd.Flags().GetInt("shares")
+		threshold, _ := cmd.Flags().GetInt("threshold")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.StartCRKCeremony(ctx, orgID, shares, threshold)
+		if err != nil {
+			return fmt.Errorf("start ceremony: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Ceremony started: %s\nStatus: %s\nThreshold: %d\nCollected: %d\n",
+				resp.ID, resp.Status, resp.Threshold, resp.Collected)
+		}
+		return nil
+	},
+}
+
+var crkCeremonyAddShareCmd = &cobra.Command{
+	Use:   "add-share [ceremony-id]",
+	Short: "Add a share to a CRK ceremony",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		shareFile, _ := cmd.Flags().GetString("share-file")
+		shareData, _ := cmd.Flags().GetString("share-data")
+		shareIndex, _ := cmd.Flags().GetInt("share-index")
+
+		var share models.CRKShare
+		if shareFile != "" {
+			content, err := os.ReadFile(shareFile)
+			if err != nil {
+				return fmt.Errorf("read share file: %w", err)
+			}
+			if err := json.Unmarshal(content, &share); err != nil {
+				return fmt.Errorf("parse share file: %w", err)
+			}
+		} else if shareData != "" {
+			decoded, err := base64.StdEncoding.DecodeString(shareData)
+			if err != nil {
+				return fmt.Errorf("decode share data: %w", err)
+			}
+			share = models.CRKShare{
+				Index: shareIndex,
+				Data:  decoded,
+			}
+		} else {
+			return fmt.Errorf("--share-file or --share-data is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.AddCRKShare(ctx, args[0], share)
+		if err != nil {
+			return fmt.Errorf("add share: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Share added to ceremony %s\nStatus: %s\nCollected: %d/%d\n",
+				resp.ID, resp.Status, resp.Collected, resp.Threshold)
+		}
+		return nil
+	},
+}
+
+var crkCeremonyCompleteCmd = &cobra.Command{
+	Use:   "complete [ceremony-id]",
+	Short: "Complete a CRK ceremony",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.CompleteCRKCeremony(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("complete ceremony: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Ceremony completed: %s\nStatus: %s\n", resp.ID, resp.Status)
+		}
+		return nil
+	},
 }
 
 // ============================================================================
@@ -620,14 +749,78 @@ func init() {
 var identityCmd = &cobra.Command{
 	Use:   "identity",
 	Short: "Identity management",
-	Long:  `Manage user and service identities.`,
+	Long:  `Manage admin, user, service, and device identities.`,
 }
 
 var identityListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List identities",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Identity listing requires API connection with identity endpoints.")
+		idType, _ := cmd.Flags().GetString("type")
+		if idType == "" {
+			return fmt.Errorf("--type is required (admin, user, service, device)")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+
+		switch idType {
+		case "admin":
+			admins, err := c.ListAdmins(ctx)
+			if err != nil {
+				return fmt.Errorf("list admins: %w", err)
+			}
+			if jsonOutput {
+				data, _ := json.MarshalIndent(admins, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				for _, a := range admins {
+					fmt.Printf("%s  %s  %s  %s  active=%v\n", a.ID, a.Email, a.Name, a.Role, a.Active)
+				}
+			}
+		case "user":
+			users, err := c.ListUsers(ctx)
+			if err != nil {
+				return fmt.Errorf("list users: %w", err)
+			}
+			if jsonOutput {
+				data, _ := json.MarshalIndent(users, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				for _, u := range users {
+					fmt.Printf("%s  %s  %s  active=%v\n", u.ID, u.Email, u.Name, u.Active)
+				}
+			}
+		case "service":
+			services, err := c.ListServices(ctx)
+			if err != nil {
+				return fmt.Errorf("list services: %w", err)
+			}
+			if jsonOutput {
+				data, _ := json.MarshalIndent(services, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				for _, s := range services {
+					fmt.Printf("%s  %s  %s  active=%v\n", s.ID, s.Name, s.AuthMethod, s.Active)
+				}
+			}
+		case "device":
+			devices, err := c.ListDevices(ctx)
+			if err != nil {
+				return fmt.Errorf("list devices: %w", err)
+			}
+			if jsonOutput {
+				data, _ := json.MarshalIndent(devices, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				for _, d := range devices {
+					fmt.Printf("%s  %s  %s  %s\n", d.ID, d.DeviceName, d.DeviceType, d.Status)
+				}
+			}
+		default:
+			return fmt.Errorf("unknown identity type: %s (use admin, user, service, device)", idType)
+		}
 		return nil
 	},
 }
@@ -637,14 +830,592 @@ var identityGetCmd = &cobra.Command{
 	Short: "Get identity details",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Printf("Getting identity: %s\n", args[0])
+		idType, _ := cmd.Flags().GetString("type")
+		if idType == "" {
+			return fmt.Errorf("--type is required (admin, user, service, device)")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+
+		switch idType {
+		case "admin":
+			admin, err := c.GetAdmin(ctx, args[0])
+			if err != nil {
+				return fmt.Errorf("get admin: %w", err)
+			}
+			if jsonOutput {
+				data, _ := json.MarshalIndent(admin, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				fmt.Printf("ID: %s\nEmail: %s\nName: %s\nRole: %s\nMFA: %v\nActive: %v\nCreated: %s\n",
+					admin.ID, admin.Email, admin.Name, admin.Role, admin.MFAEnabled, admin.Active, admin.CreatedAt.Format(time.RFC3339))
+			}
+		case "user":
+			user, err := c.GetUser(ctx, args[0])
+			if err != nil {
+				return fmt.Errorf("get user: %w", err)
+			}
+			if jsonOutput {
+				data, _ := json.MarshalIndent(user, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				fmt.Printf("ID: %s\nEmail: %s\nName: %s\nSSO: %s\nActive: %v\nCreated: %s\n",
+					user.ID, user.Email, user.Name, user.SSOProvider, user.Active, user.CreatedAt.Format(time.RFC3339))
+			}
+		case "service":
+			svc, err := c.GetService(ctx, args[0])
+			if err != nil {
+				return fmt.Errorf("get service: %w", err)
+			}
+			if jsonOutput {
+				data, _ := json.MarshalIndent(svc, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				fmt.Printf("ID: %s\nName: %s\nAuth: %s\nVaultRole: %s\nActive: %v\nCreated: %s\n",
+					svc.ID, svc.Name, svc.AuthMethod, svc.VaultRole, svc.Active, svc.CreatedAt.Format(time.RFC3339))
+			}
+		case "device":
+			dev, err := c.GetDevice(ctx, args[0])
+			if err != nil {
+				return fmt.Errorf("get device: %w", err)
+			}
+			if jsonOutput {
+				data, _ := json.MarshalIndent(dev, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				fmt.Printf("ID: %s\nName: %s\nType: %s\nStatus: %s\nCertSerial: %s\nEnrolled: %s\n",
+					dev.ID, dev.DeviceName, dev.DeviceType, dev.Status, dev.CertificateSerial, dev.EnrolledAt.Format(time.RFC3339))
+			}
+		default:
+			return fmt.Errorf("unknown identity type: %s (use admin, user, service, device)", idType)
+		}
+		return nil
+	},
+}
+
+// identity create subcommands
+
+var identityCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create an identity",
+}
+
+var identityCreateAdminCmd = &cobra.Command{
+	Use:   "admin",
+	Short: "Create an admin identity",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		email, _ := cmd.Flags().GetString("email")
+		name, _ := cmd.Flags().GetString("name")
+		role, _ := cmd.Flags().GetString("role")
+
+		if email == "" || name == "" {
+			return fmt.Errorf("--email and --name are required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		admin, err := c.CreateAdmin(ctx, client.CreateAdminRequest{
+			Email: email,
+			Name:  name,
+			Role:  models.AdminRole(role),
+		})
+		if err != nil {
+			return fmt.Errorf("create admin: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(admin, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Admin created: %s (%s)\n", admin.Name, admin.ID)
+		}
+		return nil
+	},
+}
+
+var identityCreateServiceCmd = &cobra.Command{
+	Use:   "service",
+	Short: "Create a service identity",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
+		authMethod, _ := cmd.Flags().GetString("auth-method")
+
+		if name == "" {
+			return fmt.Errorf("--name is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		svc, err := c.CreateService(ctx, client.CreateServiceRequest{
+			Name:       name,
+			AuthMethod: models.AuthMethod(authMethod),
+		})
+		if err != nil {
+			return fmt.Errorf("create service: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(svc, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Service created: %s (%s)\n", svc.Name, svc.ID)
+		}
+		return nil
+	},
+}
+
+var identityDeleteCmd = &cobra.Command{
+	Use:   "delete [identity-id]",
+	Short: "Delete an identity",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		idType, _ := cmd.Flags().GetString("type")
+		if idType == "" {
+			return fmt.Errorf("--type is required (admin, user, service)")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		switch idType {
+		case "admin":
+			if err := c.DeleteAdmin(ctx, args[0]); err != nil {
+				return fmt.Errorf("delete admin: %w", err)
+			}
+		case "user":
+			if err := c.DeleteUser(ctx, args[0]); err != nil {
+				return fmt.Errorf("delete user: %w", err)
+			}
+		case "service":
+			if err := c.DeleteService(ctx, args[0]); err != nil {
+				return fmt.Errorf("delete service: %w", err)
+			}
+		default:
+			return fmt.Errorf("unknown identity type: %s (use admin, user, service)", idType)
+		}
+
+		fmt.Printf("Identity deleted: %s\n", args[0])
+		return nil
+	},
+}
+
+// Device enrollment/revocation
+
+var identityEnrollDeviceCmd = &cobra.Command{
+	Use:   "enroll-device",
+	Short: "Enroll a device identity",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
+		deviceType, _ := cmd.Flags().GetString("device-type")
+
+		if name == "" {
+			return fmt.Errorf("--name is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		dev, err := c.EnrollDevice(ctx, client.EnrollDeviceRequest{
+			DeviceName: name,
+			DeviceType: deviceType,
+		})
+		if err != nil {
+			return fmt.Errorf("enroll device: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(dev, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Device enrolled: %s (%s)\n", dev.DeviceName, dev.ID)
+		}
+		return nil
+	},
+}
+
+var identityRevokeDeviceCmd = &cobra.Command{
+	Use:   "revoke-device [device-id]",
+	Short: "Revoke a device identity",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.RevokeDevice(ctx, args[0]); err != nil {
+			return fmt.Errorf("revoke device: %w", err)
+		}
+
+		fmt.Printf("Device revoked: %s\n", args[0])
+		return nil
+	},
+}
+
+// MFA subcommands
+
+var identityMFACmd = &cobra.Command{
+	Use:   "mfa",
+	Short: "MFA management for admin identities",
+}
+
+var identityMFAEnableCmd = &cobra.Command{
+	Use:   "enable [admin-id]",
+	Short: "Enable MFA for an admin identity",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.EnableMFA(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("enable MFA: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("MFA enabled for admin %s\nSecret: %s\nQR Code URL: %s\n", args[0], resp.Secret, resp.QRCodeURL)
+		}
+		return nil
+	},
+}
+
+var identityMFAVerifyCmd = &cobra.Command{
+	Use:   "verify [admin-id]",
+	Short: "Verify MFA setup for an admin identity",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		code, _ := cmd.Flags().GetString("code")
+		if code == "" {
+			return fmt.Errorf("--code is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.VerifyMFA(ctx, args[0], client.VerifyMFARequest{Code: code}); err != nil {
+			return fmt.Errorf("verify MFA: %w", err)
+		}
+
+		fmt.Printf("MFA verified for admin %s\n", args[0])
+		return nil
+	},
+}
+
+// Group subcommands
+
+var identityGroupCmd = &cobra.Command{
+	Use:   "group",
+	Short: "Identity group management",
+}
+
+var identityGroupCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create an identity group",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
+		description, _ := cmd.Flags().GetString("description")
+
+		if name == "" {
+			return fmt.Errorf("--name is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		group, err := c.CreateGroup(ctx, client.CreateGroupRequest{
+			Name:        name,
+			Description: description,
+		})
+		if err != nil {
+			return fmt.Errorf("create group: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(group, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Group created: %s (%s)\n", group.Name, group.ID)
+		}
+		return nil
+	},
+}
+
+var identityGroupListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List identity groups",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		groups, err := c.ListGroups(ctx)
+		if err != nil {
+			return fmt.Errorf("list groups: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(groups, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			for _, g := range groups {
+				fmt.Printf("%s  %s  %s\n", g.ID, g.Name, g.Description)
+			}
+		}
+		return nil
+	},
+}
+
+var identityGroupAddMemberCmd = &cobra.Command{
+	Use:   "add-member [group-id]",
+	Short: "Add a member to a group",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		identityID, _ := cmd.Flags().GetString("identity-id")
+		identityType, _ := cmd.Flags().GetString("identity-type")
+
+		if identityID == "" || identityType == "" {
+			return fmt.Errorf("--identity-id and --identity-type are required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.AddGroupMember(ctx, args[0], client.AddGroupMemberRequest{
+			IdentityID:   identityID,
+			IdentityType: models.IdentityType(identityType),
+		}); err != nil {
+			return fmt.Errorf("add group member: %w", err)
+		}
+
+		fmt.Printf("Member %s added to group %s\n", identityID, args[0])
+		return nil
+	},
+}
+
+var identityGroupRemoveMemberCmd = &cobra.Command{
+	Use:   "remove-member [group-id]",
+	Short: "Remove a member from a group",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		identityID, _ := cmd.Flags().GetString("identity-id")
+		if identityID == "" {
+			return fmt.Errorf("--identity-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.RemoveGroupMember(ctx, args[0], identityID); err != nil {
+			return fmt.Errorf("remove group member: %w", err)
+		}
+
+		fmt.Printf("Member %s removed from group %s\n", identityID, args[0])
+		return nil
+	},
+}
+
+// Role subcommands
+
+var identityRoleCmd = &cobra.Command{
+	Use:   "role",
+	Short: "Role management",
+}
+
+var identityRoleCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a role",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
+		description, _ := cmd.Flags().GetString("description")
+
+		if name == "" {
+			return fmt.Errorf("--name is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		role, err := c.CreateRole(ctx, client.CreateRoleRequest{
+			Name:        name,
+			Description: description,
+		})
+		if err != nil {
+			return fmt.Errorf("create role: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(role, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Role created: %s (%s)\n", role.Name, role.ID)
+		}
+		return nil
+	},
+}
+
+var identityRoleListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List roles",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		roles, err := c.ListRoles(ctx)
+		if err != nil {
+			return fmt.Errorf("list roles: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(roles, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			for _, r := range roles {
+				fmt.Printf("%s  %s  %s\n", r.ID, r.Name, r.Description)
+			}
+		}
+		return nil
+	},
+}
+
+var identityRoleAssignCmd = &cobra.Command{
+	Use:   "assign [role-id]",
+	Short: "Assign a role to an identity",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		identityID, _ := cmd.Flags().GetString("identity-id")
+		identityType, _ := cmd.Flags().GetString("identity-type")
+
+		if identityID == "" || identityType == "" {
+			return fmt.Errorf("--identity-id and --identity-type are required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.AssignRole(ctx, args[0], client.AssignRoleRequest{
+			IdentityID:   identityID,
+			IdentityType: models.IdentityType(identityType),
+		}); err != nil {
+			return fmt.Errorf("assign role: %w", err)
+		}
+
+		fmt.Printf("Role %s assigned to %s\n", args[0], identityID)
+		return nil
+	},
+}
+
+var identityRoleUnassignCmd = &cobra.Command{
+	Use:   "unassign [role-id]",
+	Short: "Unassign a role from an identity",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		identityID, _ := cmd.Flags().GetString("identity-id")
+		if identityID == "" {
+			return fmt.Errorf("--identity-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.UnassignRole(ctx, args[0], identityID); err != nil {
+			return fmt.Errorf("unassign role: %w", err)
+		}
+
+		fmt.Printf("Role %s unassigned from %s\n", args[0], identityID)
 		return nil
 	},
 }
 
 func init() {
+	// identity list flags
+	identityListCmd.Flags().String("type", "", "Identity type (admin, user, service, device)")
+
+	// identity get flags
+	identityGetCmd.Flags().String("type", "", "Identity type (admin, user, service, device)")
+
+	// identity create admin flags
+	identityCreateAdminCmd.Flags().String("email", "", "Admin email address")
+	identityCreateAdminCmd.Flags().String("name", "", "Admin display name")
+	identityCreateAdminCmd.Flags().String("role", "operations_admin", "Admin role (super_admin, security_admin, operations_admin, auditor)")
+
+	// identity create service flags
+	identityCreateServiceCmd.Flags().String("name", "", "Service name")
+	identityCreateServiceCmd.Flags().String("auth-method", "approle", "Authentication method (approle, kubernetes, cert)")
+
+	// identity delete flags
+	identityDeleteCmd.Flags().String("type", "", "Identity type (admin, user, service)")
+
+	// identity enroll-device flags
+	identityEnrollDeviceCmd.Flags().String("name", "", "Device name")
+	identityEnrollDeviceCmd.Flags().String("device-type", "", "Device type")
+
+	// identity mfa verify flags
+	identityMFAVerifyCmd.Flags().String("code", "", "MFA verification code")
+
+	// identity group create flags
+	identityGroupCreateCmd.Flags().String("name", "", "Group name")
+	identityGroupCreateCmd.Flags().String("description", "", "Group description")
+
+	// identity group add-member flags
+	identityGroupAddMemberCmd.Flags().String("identity-id", "", "Identity ID to add")
+	identityGroupAddMemberCmd.Flags().String("identity-type", "", "Identity type (admin, user, service, device)")
+
+	// identity group remove-member flags
+	identityGroupRemoveMemberCmd.Flags().String("identity-id", "", "Identity ID to remove")
+
+	// identity role create flags
+	identityRoleCreateCmd.Flags().String("name", "", "Role name")
+	identityRoleCreateCmd.Flags().String("description", "", "Role description")
+
+	// identity role assign flags
+	identityRoleAssignCmd.Flags().String("identity-id", "", "Identity ID to assign role to")
+	identityRoleAssignCmd.Flags().String("identity-type", "", "Identity type (admin, user, service, device)")
+
+	// identity role unassign flags
+	identityRoleUnassignCmd.Flags().String("identity-id", "", "Identity ID to unassign role from")
+
+	// Wire up create subcommands
+	identityCreateCmd.AddCommand(identityCreateAdminCmd)
+	identityCreateCmd.AddCommand(identityCreateServiceCmd)
+
+	// Wire up MFA subcommands
+	identityMFACmd.AddCommand(identityMFAEnableCmd)
+	identityMFACmd.AddCommand(identityMFAVerifyCmd)
+
+	// Wire up group subcommands
+	identityGroupCmd.AddCommand(identityGroupCreateCmd)
+	identityGroupCmd.AddCommand(identityGroupListCmd)
+	identityGroupCmd.AddCommand(identityGroupAddMemberCmd)
+	identityGroupCmd.AddCommand(identityGroupRemoveMemberCmd)
+
+	// Wire up role subcommands
+	identityRoleCmd.AddCommand(identityRoleCreateCmd)
+	identityRoleCmd.AddCommand(identityRoleListCmd)
+	identityRoleCmd.AddCommand(identityRoleAssignCmd)
+	identityRoleCmd.AddCommand(identityRoleUnassignCmd)
+
+	// Wire up identity subcommands
 	identityCmd.AddCommand(identityListCmd)
 	identityCmd.AddCommand(identityGetCmd)
+	identityCmd.AddCommand(identityCreateCmd)
+	identityCmd.AddCommand(identityDeleteCmd)
+	identityCmd.AddCommand(identityEnrollDeviceCmd)
+	identityCmd.AddCommand(identityRevokeDeviceCmd)
+	identityCmd.AddCommand(identityMFACmd)
+	identityCmd.AddCommand(identityGroupCmd)
+	identityCmd.AddCommand(identityRoleCmd)
 }
 
 // ============================================================================

@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/witlox/sovra/internal/audit"
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
+	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/workspace"
 	"github.com/witlox/sovra/pkg/errors"
@@ -1384,4 +1386,1315 @@ func (r *EdgeNodeRepository) Delete(ctx context.Context, id string) error {
 		return errors.ErrNotFound
 	}
 	return nil
+}
+
+// =============================================================================
+// Admin Identity Repository
+// =============================================================================
+
+// AdminIdentityRepository implements identity.AdminRepository.
+type AdminIdentityRepository struct {
+	db *DB
+}
+
+// NewAdminIdentityRepository creates a new admin identity repository.
+func NewAdminIdentityRepository(db *DB) *AdminIdentityRepository {
+	return &AdminIdentityRepository{db: db}
+}
+
+var _ identity.AdminRepository = (*AdminIdentityRepository)(nil)
+
+// Create persists a new admin identity.
+func (r *AdminIdentityRepository) Create(ctx context.Context, admin *models.AdminIdentity) error {
+	id, err := uuid.Parse(admin.ID)
+	if err != nil {
+		return fmt.Errorf("invalid admin identity ID: %w", err)
+	}
+	orgID, err := uuid.Parse(admin.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var mfaSecret sql.NullString
+	if admin.MFASecret != "" {
+		mfaSecret = sql.NullString{String: admin.MFASecret, Valid: true}
+	}
+	var lastLoginAt *time.Time
+	if !admin.LastLoginAt.IsZero() {
+		lastLoginAt = &admin.LastLoginAt
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO admin_identities (id, org_id, email, name, role, mfa_enabled, mfa_secret, active, created_at, updated_at, last_login_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		id, orgID, admin.Email, admin.Name, admin.Role, admin.MFAEnabled, mfaSecret, admin.Active, admin.CreatedAt, admin.UpdatedAt, lastLoginAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create admin identity: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves an admin identity by ID.
+func (r *AdminIdentityRepository) Get(ctx context.Context, id string) (*models.AdminIdentity, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid admin identity ID: %w", err)
+	}
+
+	admin := &models.AdminIdentity{}
+	var mfaSecret sql.NullString
+	var lastLoginAt sql.NullTime
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, org_id, email, name, role, mfa_enabled, mfa_secret, active, created_at, updated_at, last_login_at
+		 FROM admin_identities WHERE id = $1`,
+		uid,
+	).Scan(&admin.ID, &admin.OrgID, &admin.Email, &admin.Name, &admin.Role, &admin.MFAEnabled, &mfaSecret, &admin.Active, &admin.CreatedAt, &admin.UpdatedAt, &lastLoginAt)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get admin identity: %w", err)
+	}
+	if mfaSecret.Valid {
+		admin.MFASecret = mfaSecret.String
+	}
+	if lastLoginAt.Valid {
+		admin.LastLoginAt = lastLoginAt.Time
+	}
+	return admin, nil
+}
+
+// GetByEmail retrieves an admin identity by organization ID and email.
+func (r *AdminIdentityRepository) GetByEmail(ctx context.Context, orgID, email string) (*models.AdminIdentity, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var id string
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id FROM admin_identities WHERE org_id = $1 AND email = $2`,
+		uid, email,
+	).Scan(&id)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get admin identity by email: %w", err)
+	}
+	return r.Get(ctx, id)
+}
+
+// List returns all admin identities for an organization.
+func (r *AdminIdentityRepository) List(ctx context.Context, orgID string) ([]*models.AdminIdentity, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id FROM admin_identities WHERE org_id = $1 ORDER BY created_at DESC`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list admin identities: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var admins []*models.AdminIdentity
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan admin identity ID: %w", err)
+		}
+		admin, err := r.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		admins = append(admins, admin)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate admin identities: %w", err)
+	}
+	return admins, nil
+}
+
+// Update updates an existing admin identity.
+func (r *AdminIdentityRepository) Update(ctx context.Context, admin *models.AdminIdentity) error {
+	id, err := uuid.Parse(admin.ID)
+	if err != nil {
+		return fmt.Errorf("invalid admin identity ID: %w", err)
+	}
+
+	var mfaSecret sql.NullString
+	if admin.MFASecret != "" {
+		mfaSecret = sql.NullString{String: admin.MFASecret, Valid: true}
+	}
+	var lastLoginAt *time.Time
+	if !admin.LastLoginAt.IsZero() {
+		lastLoginAt = &admin.LastLoginAt
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE admin_identities SET email = $2, name = $3, role = $4, mfa_enabled = $5, mfa_secret = $6, active = $7, updated_at = $8, last_login_at = $9
+		 WHERE id = $1`,
+		id, admin.Email, admin.Name, admin.Role, admin.MFAEnabled, mfaSecret, admin.Active, admin.UpdatedAt, lastLoginAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update admin identity: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// Delete removes an admin identity.
+func (r *AdminIdentityRepository) Delete(ctx context.Context, id string) error {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid admin identity ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, `DELETE FROM admin_identities WHERE id = $1`, uid)
+	if err != nil {
+		return fmt.Errorf("failed to delete admin identity: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// =============================================================================
+// User Identity Repository
+// =============================================================================
+
+// UserIdentityRepository implements identity.UserRepository.
+type UserIdentityRepository struct {
+	db *DB
+}
+
+// NewUserIdentityRepository creates a new user identity repository.
+func NewUserIdentityRepository(db *DB) *UserIdentityRepository {
+	return &UserIdentityRepository{db: db}
+}
+
+var _ identity.UserRepository = (*UserIdentityRepository)(nil)
+
+// Create persists a new user identity.
+func (r *UserIdentityRepository) Create(ctx context.Context, user *models.UserIdentity) error {
+	id, err := uuid.Parse(user.ID)
+	if err != nil {
+		return fmt.Errorf("invalid user identity ID: %w", err)
+	}
+	orgID, err := uuid.Parse(user.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var lastLoginAt *time.Time
+	if !user.LastLoginAt.IsZero() {
+		lastLoginAt = &user.LastLoginAt
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO user_identities (id, org_id, email, name, sso_provider, sso_subject, groups, active, created_at, updated_at, last_login_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		id, orgID, user.Email, user.Name, user.SSOProvider, user.SSOSubject, pq.Array(user.Groups), user.Active, user.CreatedAt, user.UpdatedAt, lastLoginAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create user identity: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves a user identity by ID.
+func (r *UserIdentityRepository) Get(ctx context.Context, id string) (*models.UserIdentity, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user identity ID: %w", err)
+	}
+
+	user := &models.UserIdentity{}
+	var lastLoginAt sql.NullTime
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, org_id, email, name, sso_provider, sso_subject, groups, active, created_at, updated_at, last_login_at
+		 FROM user_identities WHERE id = $1`,
+		uid,
+	).Scan(&user.ID, &user.OrgID, &user.Email, &user.Name, &user.SSOProvider, &user.SSOSubject, pq.Array(&user.Groups), &user.Active, &user.CreatedAt, &user.UpdatedAt, &lastLoginAt)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user identity: %w", err)
+	}
+	if lastLoginAt.Valid {
+		user.LastLoginAt = lastLoginAt.Time
+	}
+	return user, nil
+}
+
+// GetByEmail retrieves a user identity by organization ID and email.
+func (r *UserIdentityRepository) GetByEmail(ctx context.Context, orgID, email string) (*models.UserIdentity, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var id string
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id FROM user_identities WHERE org_id = $1 AND email = $2`,
+		uid, email,
+	).Scan(&id)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user identity by email: %w", err)
+	}
+	return r.Get(ctx, id)
+}
+
+// GetBySSOSubject retrieves a user identity by SSO provider and subject.
+func (r *UserIdentityRepository) GetBySSOSubject(ctx context.Context, provider models.SSOProvider, subject string) (*models.UserIdentity, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id FROM user_identities WHERE sso_provider = $1 AND sso_subject = $2`,
+		provider, subject,
+	).Scan(&id)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user identity by SSO subject: %w", err)
+	}
+	return r.Get(ctx, id)
+}
+
+// List returns all user identities for an organization.
+func (r *UserIdentityRepository) List(ctx context.Context, orgID string) ([]*models.UserIdentity, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id FROM user_identities WHERE org_id = $1 ORDER BY created_at DESC`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list user identities: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var users []*models.UserIdentity
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan user identity ID: %w", err)
+		}
+		user, err := r.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user identities: %w", err)
+	}
+	return users, nil
+}
+
+// Update updates an existing user identity.
+func (r *UserIdentityRepository) Update(ctx context.Context, user *models.UserIdentity) error {
+	id, err := uuid.Parse(user.ID)
+	if err != nil {
+		return fmt.Errorf("invalid user identity ID: %w", err)
+	}
+
+	var lastLoginAt *time.Time
+	if !user.LastLoginAt.IsZero() {
+		lastLoginAt = &user.LastLoginAt
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE user_identities SET email = $2, name = $3, sso_provider = $4, sso_subject = $5, groups = $6, active = $7, updated_at = $8, last_login_at = $9
+		 WHERE id = $1`,
+		id, user.Email, user.Name, user.SSOProvider, user.SSOSubject, pq.Array(user.Groups), user.Active, user.UpdatedAt, lastLoginAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update user identity: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// Delete removes a user identity.
+func (r *UserIdentityRepository) Delete(ctx context.Context, id string) error {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid user identity ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, `DELETE FROM user_identities WHERE id = $1`, uid)
+	if err != nil {
+		return fmt.Errorf("failed to delete user identity: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// =============================================================================
+// Service Identity Repository
+// =============================================================================
+
+// ServiceIdentityRepository implements identity.ServiceRepository.
+type ServiceIdentityRepository struct {
+	db *DB
+}
+
+// NewServiceIdentityRepository creates a new service identity repository.
+func NewServiceIdentityRepository(db *DB) *ServiceIdentityRepository {
+	return &ServiceIdentityRepository{db: db}
+}
+
+var _ identity.ServiceRepository = (*ServiceIdentityRepository)(nil)
+
+// Create persists a new service identity.
+func (r *ServiceIdentityRepository) Create(ctx context.Context, service *models.ServiceIdentity) error {
+	id, err := uuid.Parse(service.ID)
+	if err != nil {
+		return fmt.Errorf("invalid service identity ID: %w", err)
+	}
+	orgID, err := uuid.Parse(service.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var namespace, serviceAcct, description sql.NullString
+	if service.Namespace != "" {
+		namespace = sql.NullString{String: service.Namespace, Valid: true}
+	}
+	if service.ServiceAcct != "" {
+		serviceAcct = sql.NullString{String: service.ServiceAcct, Valid: true}
+	}
+	if service.Description != "" {
+		description = sql.NullString{String: service.Description, Valid: true}
+	}
+	var lastAuthAt *time.Time
+	if !service.LastAuthAt.IsZero() {
+		lastAuthAt = &service.LastAuthAt
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO service_identities (id, org_id, name, description, auth_method, vault_role, namespace, service_acct, active, created_at, updated_at, last_auth_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		id, orgID, service.Name, description, service.AuthMethod, service.VaultRole, namespace, serviceAcct, service.Active, service.CreatedAt, service.UpdatedAt, lastAuthAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create service identity: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves a service identity by ID.
+func (r *ServiceIdentityRepository) Get(ctx context.Context, id string) (*models.ServiceIdentity, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid service identity ID: %w", err)
+	}
+
+	service := &models.ServiceIdentity{}
+	var namespace, serviceAcct, description sql.NullString
+	var lastAuthAt sql.NullTime
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, org_id, name, description, auth_method, vault_role, namespace, service_acct, active, created_at, updated_at, last_auth_at
+		 FROM service_identities WHERE id = $1`,
+		uid,
+	).Scan(&service.ID, &service.OrgID, &service.Name, &description, &service.AuthMethod, &service.VaultRole, &namespace, &serviceAcct, &service.Active, &service.CreatedAt, &service.UpdatedAt, &lastAuthAt)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service identity: %w", err)
+	}
+	if namespace.Valid {
+		service.Namespace = namespace.String
+	}
+	if serviceAcct.Valid {
+		service.ServiceAcct = serviceAcct.String
+	}
+	if description.Valid {
+		service.Description = description.String
+	}
+	if lastAuthAt.Valid {
+		service.LastAuthAt = lastAuthAt.Time
+	}
+	return service, nil
+}
+
+// GetByName retrieves a service identity by organization ID and name.
+func (r *ServiceIdentityRepository) GetByName(ctx context.Context, orgID, name string) (*models.ServiceIdentity, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var id string
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id FROM service_identities WHERE org_id = $1 AND name = $2`,
+		uid, name,
+	).Scan(&id)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service identity by name: %w", err)
+	}
+	return r.Get(ctx, id)
+}
+
+// List returns all service identities for an organization.
+func (r *ServiceIdentityRepository) List(ctx context.Context, orgID string) ([]*models.ServiceIdentity, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id FROM service_identities WHERE org_id = $1 ORDER BY created_at DESC`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list service identities: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var services []*models.ServiceIdentity
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan service identity ID: %w", err)
+		}
+		service, err := r.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		services = append(services, service)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate service identities: %w", err)
+	}
+	return services, nil
+}
+
+// Update updates an existing service identity.
+func (r *ServiceIdentityRepository) Update(ctx context.Context, service *models.ServiceIdentity) error {
+	id, err := uuid.Parse(service.ID)
+	if err != nil {
+		return fmt.Errorf("invalid service identity ID: %w", err)
+	}
+
+	var namespace, serviceAcct, description sql.NullString
+	if service.Namespace != "" {
+		namespace = sql.NullString{String: service.Namespace, Valid: true}
+	}
+	if service.ServiceAcct != "" {
+		serviceAcct = sql.NullString{String: service.ServiceAcct, Valid: true}
+	}
+	if service.Description != "" {
+		description = sql.NullString{String: service.Description, Valid: true}
+	}
+	var lastAuthAt *time.Time
+	if !service.LastAuthAt.IsZero() {
+		lastAuthAt = &service.LastAuthAt
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE service_identities SET name = $2, description = $3, auth_method = $4, vault_role = $5, namespace = $6, service_acct = $7, active = $8, updated_at = $9, last_auth_at = $10
+		 WHERE id = $1`,
+		id, service.Name, description, service.AuthMethod, service.VaultRole, namespace, serviceAcct, service.Active, service.UpdatedAt, lastAuthAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update service identity: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// Delete removes a service identity.
+func (r *ServiceIdentityRepository) Delete(ctx context.Context, id string) error {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid service identity ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, `DELETE FROM service_identities WHERE id = $1`, uid)
+	if err != nil {
+		return fmt.Errorf("failed to delete service identity: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// =============================================================================
+// Device Identity Repository
+// =============================================================================
+
+// DeviceIdentityRepository implements identity.DeviceRepository.
+type DeviceIdentityRepository struct {
+	db *DB
+}
+
+// NewDeviceIdentityRepository creates a new device identity repository.
+func NewDeviceIdentityRepository(db *DB) *DeviceIdentityRepository {
+	return &DeviceIdentityRepository{db: db}
+}
+
+var _ identity.DeviceRepository = (*DeviceIdentityRepository)(nil)
+
+// Create persists a new device identity.
+func (r *DeviceIdentityRepository) Create(ctx context.Context, device *models.DeviceIdentity) error {
+	id, err := uuid.Parse(device.ID)
+	if err != nil {
+		return fmt.Errorf("invalid device identity ID: %w", err)
+	}
+	orgID, err := uuid.Parse(device.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var metadata []byte
+	if device.Metadata != nil {
+		metadata, err = json.Marshal(device.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to marshal device metadata: %w", err)
+		}
+	}
+	var lastSeenAt *time.Time
+	if !device.LastSeenAt.IsZero() {
+		lastSeenAt = &device.LastSeenAt
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO device_identities (id, org_id, device_name, device_type, certificate_serial, certificate_expiry, status, enrolled_at, last_seen_at, metadata)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		id, orgID, device.DeviceName, device.DeviceType, device.CertificateSerial, device.CertificateExpiry, device.Status, device.EnrolledAt, lastSeenAt, metadata,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create device identity: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves a device identity by ID.
+func (r *DeviceIdentityRepository) Get(ctx context.Context, id string) (*models.DeviceIdentity, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid device identity ID: %w", err)
+	}
+
+	device := &models.DeviceIdentity{}
+	var lastSeenAt sql.NullTime
+	var metadata []byte
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, org_id, device_name, device_type, certificate_serial, certificate_expiry, status, enrolled_at, last_seen_at, metadata
+		 FROM device_identities WHERE id = $1`,
+		uid,
+	).Scan(&device.ID, &device.OrgID, &device.DeviceName, &device.DeviceType, &device.CertificateSerial, &device.CertificateExpiry, &device.Status, &device.EnrolledAt, &lastSeenAt, &metadata)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get device identity: %w", err)
+	}
+	if lastSeenAt.Valid {
+		device.LastSeenAt = lastSeenAt.Time
+	}
+	if len(metadata) > 0 {
+		_ = json.Unmarshal(metadata, &device.Metadata)
+	}
+	return device, nil
+}
+
+// GetByCertSerial retrieves a device identity by certificate serial number.
+func (r *DeviceIdentityRepository) GetByCertSerial(ctx context.Context, serial string) (*models.DeviceIdentity, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id FROM device_identities WHERE certificate_serial = $1`,
+		serial,
+	).Scan(&id)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get device identity by certificate serial: %w", err)
+	}
+	return r.Get(ctx, id)
+}
+
+// List returns all device identities for an organization.
+func (r *DeviceIdentityRepository) List(ctx context.Context, orgID string) ([]*models.DeviceIdentity, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id FROM device_identities WHERE org_id = $1 ORDER BY enrolled_at DESC`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list device identities: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var devices []*models.DeviceIdentity
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan device identity ID: %w", err)
+		}
+		device, err := r.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		devices = append(devices, device)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device identities: %w", err)
+	}
+	return devices, nil
+}
+
+// Update updates an existing device identity.
+func (r *DeviceIdentityRepository) Update(ctx context.Context, device *models.DeviceIdentity) error {
+	id, err := uuid.Parse(device.ID)
+	if err != nil {
+		return fmt.Errorf("invalid device identity ID: %w", err)
+	}
+
+	var metadata []byte
+	if device.Metadata != nil {
+		metadata, err = json.Marshal(device.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to marshal device metadata: %w", err)
+		}
+	}
+	var lastSeenAt *time.Time
+	if !device.LastSeenAt.IsZero() {
+		lastSeenAt = &device.LastSeenAt
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE device_identities SET device_name = $2, device_type = $3, certificate_serial = $4, certificate_expiry = $5, status = $6, last_seen_at = $7, metadata = $8
+		 WHERE id = $1`,
+		id, device.DeviceName, device.DeviceType, device.CertificateSerial, device.CertificateExpiry, device.Status, lastSeenAt, metadata,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update device identity: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// Delete removes a device identity.
+func (r *DeviceIdentityRepository) Delete(ctx context.Context, id string) error {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid device identity ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, `DELETE FROM device_identities WHERE id = $1`, uid)
+	if err != nil {
+		return fmt.Errorf("failed to delete device identity: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// =============================================================================
+// Identity Group Repository
+// =============================================================================
+
+// IdentityGroupRepository implements identity.GroupRepository.
+type IdentityGroupRepository struct {
+	db *DB
+}
+
+// NewIdentityGroupRepository creates a new identity group repository.
+func NewIdentityGroupRepository(db *DB) *IdentityGroupRepository {
+	return &IdentityGroupRepository{db: db}
+}
+
+var _ identity.GroupRepository = (*IdentityGroupRepository)(nil)
+
+// Create persists a new identity group.
+func (r *IdentityGroupRepository) Create(ctx context.Context, group *models.IdentityGroup) error {
+	id, err := uuid.Parse(group.ID)
+	if err != nil {
+		return fmt.Errorf("invalid identity group ID: %w", err)
+	}
+	orgID, err := uuid.Parse(group.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO identity_groups (id, org_id, name, description, vault_policies, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		id, orgID, group.Name, group.Description, pq.Array(group.VaultPolicies), group.CreatedAt, group.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create identity group: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves an identity group by ID.
+func (r *IdentityGroupRepository) Get(ctx context.Context, id string) (*models.IdentityGroup, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid identity group ID: %w", err)
+	}
+
+	group := &models.IdentityGroup{}
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, org_id, name, description, vault_policies, created_at, updated_at
+		 FROM identity_groups WHERE id = $1`,
+		uid,
+	).Scan(&group.ID, &group.OrgID, &group.Name, &group.Description, pq.Array(&group.VaultPolicies), &group.CreatedAt, &group.UpdatedAt)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get identity group: %w", err)
+	}
+	return group, nil
+}
+
+// GetByName retrieves an identity group by organization ID and name.
+func (r *IdentityGroupRepository) GetByName(ctx context.Context, orgID, name string) (*models.IdentityGroup, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var id string
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id FROM identity_groups WHERE org_id = $1 AND name = $2`,
+		uid, name,
+	).Scan(&id)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get identity group by name: %w", err)
+	}
+	return r.Get(ctx, id)
+}
+
+// List returns all identity groups for an organization.
+func (r *IdentityGroupRepository) List(ctx context.Context, orgID string) ([]*models.IdentityGroup, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id FROM identity_groups WHERE org_id = $1 ORDER BY created_at DESC`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list identity groups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var groups []*models.IdentityGroup
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan identity group ID: %w", err)
+		}
+		group, err := r.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate identity groups: %w", err)
+	}
+	return groups, nil
+}
+
+// Update updates an existing identity group.
+func (r *IdentityGroupRepository) Update(ctx context.Context, group *models.IdentityGroup) error {
+	id, err := uuid.Parse(group.ID)
+	if err != nil {
+		return fmt.Errorf("invalid identity group ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE identity_groups SET name = $2, description = $3, vault_policies = $4, updated_at = $5
+		 WHERE id = $1`,
+		id, group.Name, group.Description, pq.Array(group.VaultPolicies), group.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update identity group: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// Delete removes an identity group.
+func (r *IdentityGroupRepository) Delete(ctx context.Context, id string) error {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid identity group ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, `DELETE FROM identity_groups WHERE id = $1`, uid)
+	if err != nil {
+		return fmt.Errorf("failed to delete identity group: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// AddMember adds an identity to a group.
+func (r *IdentityGroupRepository) AddMember(ctx context.Context, membership *models.GroupMembership) error {
+	id, err := uuid.Parse(membership.ID)
+	if err != nil {
+		return fmt.Errorf("invalid membership ID: %w", err)
+	}
+	groupID, err := uuid.Parse(membership.GroupID)
+	if err != nil {
+		return fmt.Errorf("invalid group ID: %w", err)
+	}
+	identityID, err := uuid.Parse(membership.IdentityID)
+	if err != nil {
+		return fmt.Errorf("invalid identity ID: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO group_memberships (id, group_id, identity_id, identity_type, joined_at)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		id, groupID, identityID, membership.IdentityType, membership.JoinedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to add group member: %w", err)
+	}
+	return nil
+}
+
+// RemoveMember removes an identity from a group.
+func (r *IdentityGroupRepository) RemoveMember(ctx context.Context, groupID, identityID string) error {
+	gID, err := uuid.Parse(groupID)
+	if err != nil {
+		return fmt.Errorf("invalid group ID: %w", err)
+	}
+	iID, err := uuid.Parse(identityID)
+	if err != nil {
+		return fmt.Errorf("invalid identity ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`DELETE FROM group_memberships WHERE group_id = $1 AND identity_id = $2`,
+		gID, iID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to remove group member: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// GetMembers returns all memberships for a group.
+func (r *IdentityGroupRepository) GetMembers(ctx context.Context, groupID string) ([]*models.GroupMembership, error) {
+	uid, err := uuid.Parse(groupID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid group ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, group_id, identity_id, identity_type, joined_at
+		 FROM group_memberships WHERE group_id = $1`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get group members: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var memberships []*models.GroupMembership
+	for rows.Next() {
+		m := &models.GroupMembership{}
+		if err := rows.Scan(&m.ID, &m.GroupID, &m.IdentityID, &m.IdentityType, &m.JoinedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan group membership: %w", err)
+		}
+		memberships = append(memberships, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate group memberships: %w", err)
+	}
+	return memberships, nil
+}
+
+// GetGroupsForIdentity returns all groups an identity belongs to.
+func (r *IdentityGroupRepository) GetGroupsForIdentity(ctx context.Context, identityID string) ([]*models.IdentityGroup, error) {
+	uid, err := uuid.Parse(identityID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid identity ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT g.id, g.org_id, g.name, g.description, g.vault_policies, g.created_at, g.updated_at
+		 FROM identity_groups g
+		 INNER JOIN group_memberships gm ON g.id = gm.group_id
+		 WHERE gm.identity_id = $1`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get groups for identity: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var groups []*models.IdentityGroup
+	for rows.Next() {
+		group := &models.IdentityGroup{}
+		if err := rows.Scan(&group.ID, &group.OrgID, &group.Name, &group.Description, pq.Array(&group.VaultPolicies), &group.CreatedAt, &group.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan identity group: %w", err)
+		}
+		groups = append(groups, group)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate groups for identity: %w", err)
+	}
+	return groups, nil
+}
+
+// =============================================================================
+// Role Repository
+// =============================================================================
+
+// RoleRepository implements identity.RoleRepository.
+type RoleRepository struct {
+	db *DB
+}
+
+// NewRoleRepository creates a new role repository.
+func NewRoleRepository(db *DB) *RoleRepository {
+	return &RoleRepository{db: db}
+}
+
+var _ identity.RoleRepository = (*RoleRepository)(nil)
+
+// Create persists a new role.
+func (r *RoleRepository) Create(ctx context.Context, role *models.Role) error {
+	id, err := uuid.Parse(role.ID)
+	if err != nil {
+		return fmt.Errorf("invalid role ID: %w", err)
+	}
+	orgID, err := uuid.Parse(role.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var permissions []byte
+	if role.Permissions != nil {
+		permissions, err = json.Marshal(role.Permissions)
+		if err != nil {
+			return fmt.Errorf("failed to marshal role permissions: %w", err)
+		}
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO roles (id, org_id, name, description, permissions, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		id, orgID, role.Name, role.Description, permissions, role.CreatedAt, role.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create role: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves a role by ID.
+func (r *RoleRepository) Get(ctx context.Context, id string) (*models.Role, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid role ID: %w", err)
+	}
+
+	role := &models.Role{}
+	var permissions []byte
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, org_id, name, description, permissions, created_at, updated_at
+		 FROM roles WHERE id = $1`,
+		uid,
+	).Scan(&role.ID, &role.OrgID, &role.Name, &role.Description, &permissions, &role.CreatedAt, &role.UpdatedAt)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get role: %w", err)
+	}
+	if len(permissions) > 0 {
+		_ = json.Unmarshal(permissions, &role.Permissions)
+	}
+	return role, nil
+}
+
+// GetByName retrieves a role by organization ID and name.
+func (r *RoleRepository) GetByName(ctx context.Context, orgID, name string) (*models.Role, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var id string
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id FROM roles WHERE org_id = $1 AND name = $2`,
+		uid, name,
+	).Scan(&id)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get role by name: %w", err)
+	}
+	return r.Get(ctx, id)
+}
+
+// List returns all roles for an organization.
+func (r *RoleRepository) List(ctx context.Context, orgID string) ([]*models.Role, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id FROM roles WHERE org_id = $1 ORDER BY created_at DESC`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list roles: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var roles []*models.Role
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan role ID: %w", err)
+		}
+		role, err := r.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		roles = append(roles, role)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate roles: %w", err)
+	}
+	return roles, nil
+}
+
+// Update updates an existing role.
+func (r *RoleRepository) Update(ctx context.Context, role *models.Role) error {
+	id, err := uuid.Parse(role.ID)
+	if err != nil {
+		return fmt.Errorf("invalid role ID: %w", err)
+	}
+
+	var permissions []byte
+	if role.Permissions != nil {
+		permissions, err = json.Marshal(role.Permissions)
+		if err != nil {
+			return fmt.Errorf("failed to marshal role permissions: %w", err)
+		}
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE roles SET name = $2, description = $3, permissions = $4, updated_at = $5
+		 WHERE id = $1`,
+		id, role.Name, role.Description, permissions, role.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update role: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// Delete removes a role.
+func (r *RoleRepository) Delete(ctx context.Context, id string) error {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid role ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, `DELETE FROM roles WHERE id = $1`, uid)
+	if err != nil {
+		return fmt.Errorf("failed to delete role: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// Assign assigns a role to an identity.
+func (r *RoleRepository) Assign(ctx context.Context, assignment *models.RoleAssignment) error {
+	id, err := uuid.Parse(assignment.ID)
+	if err != nil {
+		return fmt.Errorf("invalid assignment ID: %w", err)
+	}
+	roleID, err := uuid.Parse(assignment.RoleID)
+	if err != nil {
+		return fmt.Errorf("invalid role ID: %w", err)
+	}
+	identityID, err := uuid.Parse(assignment.IdentityID)
+	if err != nil {
+		return fmt.Errorf("invalid identity ID: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO role_assignments (id, role_id, identity_id, identity_type, assigned_at, assigned_by)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		id, roleID, identityID, assignment.IdentityType, assignment.AssignedAt, assignment.AssignedBy,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to assign role: %w", err)
+	}
+	return nil
+}
+
+// Unassign removes a role assignment from an identity.
+func (r *RoleRepository) Unassign(ctx context.Context, roleID, identityID string) error {
+	rID, err := uuid.Parse(roleID)
+	if err != nil {
+		return fmt.Errorf("invalid role ID: %w", err)
+	}
+	iID, err := uuid.Parse(identityID)
+	if err != nil {
+		return fmt.Errorf("invalid identity ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`DELETE FROM role_assignments WHERE role_id = $1 AND identity_id = $2`,
+		rID, iID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to unassign role: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// GetAssignments returns all assignments for a role.
+func (r *RoleRepository) GetAssignments(ctx context.Context, roleID string) ([]*models.RoleAssignment, error) {
+	uid, err := uuid.Parse(roleID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid role ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, role_id, identity_id, identity_type, assigned_at, assigned_by
+		 FROM role_assignments WHERE role_id = $1`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get role assignments: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var assignments []*models.RoleAssignment
+	for rows.Next() {
+		a := &models.RoleAssignment{}
+		if err := rows.Scan(&a.ID, &a.RoleID, &a.IdentityID, &a.IdentityType, &a.AssignedAt, &a.AssignedBy); err != nil {
+			return nil, fmt.Errorf("failed to scan role assignment: %w", err)
+		}
+		assignments = append(assignments, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate role assignments: %w", err)
+	}
+	return assignments, nil
+}
+
+// GetRolesForIdentity returns all roles assigned to an identity.
+func (r *RoleRepository) GetRolesForIdentity(ctx context.Context, identityID string) ([]*models.Role, error) {
+	uid, err := uuid.Parse(identityID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid identity ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT r.id, r.org_id, r.name, r.description, r.permissions, r.created_at, r.updated_at
+		 FROM roles r
+		 INNER JOIN role_assignments ra ON r.id = ra.role_id
+		 WHERE ra.identity_id = $1`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get roles for identity: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var roles []*models.Role
+	for rows.Next() {
+		role := &models.Role{}
+		var permissions []byte
+		if err := rows.Scan(&role.ID, &role.OrgID, &role.Name, &role.Description, &permissions, &role.CreatedAt, &role.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan role: %w", err)
+		}
+		if len(permissions) > 0 {
+			_ = json.Unmarshal(permissions, &role.Permissions)
+		}
+		roles = append(roles, role)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate roles for identity: %w", err)
+	}
+	return roles, nil
 }

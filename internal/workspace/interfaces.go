@@ -89,6 +89,13 @@ type WorkspaceInvitation struct {
 	ExpiresAt   time.Time `json:"expires_at"`
 }
 
+// UpdateRequest represents a workspace update request.
+type UpdateRequest struct {
+	Purpose        string
+	Classification models.Classification
+	Mode           models.WorkspaceMode
+}
+
 // Service handles workspace business logic.
 type Service interface {
 	// Create creates a new workspace.
@@ -97,6 +104,8 @@ type Service interface {
 	Get(ctx context.Context, id string) (*models.Workspace, error)
 	// List returns workspaces for an organization.
 	List(ctx context.Context, orgID string, limit, offset int) ([]*models.Workspace, error)
+	// Update updates workspace fields.
+	Update(ctx context.Context, id string, req UpdateRequest) (*models.Workspace, error)
 	// AddParticipant adds a new participant to a workspace.
 	AddParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error
 	// RemoveParticipant removes a participant from a workspace.

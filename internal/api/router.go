@@ -12,6 +12,7 @@ import (
 	"github.com/witlox/sovra/internal/crk"
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
+	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/workspace"
 	"github.com/witlox/sovra/pkg/metrics"
@@ -48,6 +49,7 @@ type Services struct {
 	Edge        edge.Service
 	CRKManager  crk.Manager
 	CRKCeremony crk.CeremonyManager
+	Identity    *identity.Manager
 }
 
 // NewRouter creates a new chi router with all middleware and routes.
@@ -84,6 +86,7 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	registerAuditRoutes(r, services)
 	registerEdgeRoutes(r, services)
 	registerCRKRoutes(r, services)
+	registerIdentityRoutes(r, services)
 
 	return r
 }
@@ -168,6 +171,11 @@ func registerWorkspaceRoutes(r chi.Router, services *Services) {
 		r.Delete("/{id}", handler.Delete)
 		r.Post("/{id}/encrypt", handler.Encrypt)
 		r.Post("/{id}/decrypt", handler.Decrypt)
+		r.Post("/{id}/rotate-dek", handler.RotateDEK)
+		r.Post("/{id}/extend", handler.ExtendExpiration)
+		r.Post("/{id}/invite", handler.InviteParticipant)
+		r.Post("/{id}/accept-invitation", handler.AcceptInvitation)
+		r.Post("/{id}/decline-invitation", handler.DeclineInvitation)
 		r.Post("/{id}/participants", handler.AddParticipant)
 		r.Delete("/{id}/participants/{orgId}", handler.RemoveParticipant)
 		r.Post("/{id}/archive", handler.Archive)
@@ -251,9 +259,60 @@ func registerCRKRoutes(r chi.Router, services *Services) {
 		r.Post("/generate", handler.Generate)
 		r.Post("/sign", handler.Sign)
 		r.Post("/verify", handler.Verify)
+		r.Post("/rotate", handler.RotateCRK)
 		r.Post("/ceremony/start", handler.StartCeremony)
 		r.Post("/ceremony/{id}/share", handler.AddShare)
 		r.Post("/ceremony/{id}/complete", handler.CompleteCeremony)
 		r.Delete("/ceremony/{id}", handler.CancelCeremony)
+	})
+}
+
+// registerIdentityRoutes registers identity management endpoints.
+func registerIdentityRoutes(r chi.Router, services *Services) {
+	if services == nil || services.Identity == nil {
+		return
+	}
+	handler := NewIdentityHandler(services.Identity)
+	r.Route("/api/v1/identities", func(r chi.Router) {
+		// Admin identities
+		r.Post("/admins", handler.CreateAdmin)
+		r.Get("/admins", handler.ListAdmins)
+		r.Get("/admins/{id}", handler.GetAdmin)
+		r.Put("/admins/{id}", handler.UpdateAdmin)
+		r.Delete("/admins/{id}", handler.DeleteAdmin)
+		r.Post("/admins/{id}/mfa/enable", handler.EnableMFA)
+		r.Post("/admins/{id}/mfa/verify", handler.VerifyMFA)
+
+		// User identities
+		r.Post("/users/sso", handler.CreateUserFromSSO)
+		r.Get("/users", handler.ListUsers)
+		r.Get("/users/{id}", handler.GetUser)
+		r.Delete("/users/{id}", handler.DeleteUser)
+
+		// Service identities
+		r.Post("/services", handler.CreateService)
+		r.Get("/services", handler.ListServices)
+		r.Get("/services/{id}", handler.GetService)
+		r.Delete("/services/{id}", handler.DeleteService)
+
+		// Device identities
+		r.Post("/devices", handler.EnrollDevice)
+		r.Get("/devices", handler.ListDevices)
+		r.Get("/devices/{id}", handler.GetDevice)
+		r.Post("/devices/{id}/revoke", handler.RevokeDevice)
+
+		// Groups
+		r.Post("/groups", handler.CreateGroup)
+		r.Get("/groups", handler.ListGroups)
+		r.Get("/groups/{id}", handler.GetGroup)
+		r.Post("/groups/{id}/members", handler.AddGroupMember)
+		r.Delete("/groups/{id}/members/{identityId}", handler.RemoveGroupMember)
+
+		// Roles
+		r.Post("/roles", handler.CreateRole)
+		r.Get("/roles", handler.ListRoles)
+		r.Get("/roles/{id}", handler.GetRole)
+		r.Post("/roles/{id}/assign", handler.AssignRole)
+		r.Delete("/roles/{id}/assignments/{identityId}", handler.UnassignRole)
 	})
 }

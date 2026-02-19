@@ -18,6 +18,7 @@ import (
 	"github.com/witlox/sovra/internal/crk"
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
+	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/workspace"
 	"github.com/witlox/sovra/pkg/postgres"
@@ -92,11 +93,13 @@ func main() {
 	auditRepo := postgres.NewAuditRepository(db)
 	edgeRepo := postgres.NewEdgeNodeRepository(db)
 
+	crkRepo := postgres.NewCRKRepository(db)
+
 	auditSvc := audit.NewService(auditRepo, nil, nil)
 	wsSvc := workspace.NewWorkspaceService(wsRepo, vaultClient, auditSvc)
 	fedSvc := federation.NewFederationService(fedRepo, vaultClient, auditSvc)
 	policySvc := policy.NewPolicyService(policyRepo, opaClient, auditSvc)
-	crkMgr := crk.NewManager()
+	crkMgr := crk.NewManagerWithRepo(crkRepo)
 	crkCeremony := crk.NewCeremonyManager(crkMgr)
 
 	// VaultFactory creates vault clients for edge nodes
@@ -104,6 +107,14 @@ func main() {
 		return vault.NewClient(vault.Config{Address: address, Token: token})
 	}
 	edgeSvc := edge.NewEdgeService(edgeRepo, vaultFactory, auditSvc)
+
+	adminRepo := postgres.NewAdminIdentityRepository(db)
+	userRepo := postgres.NewUserIdentityRepository(db)
+	serviceRepo := postgres.NewServiceIdentityRepository(db)
+	deviceRepo := postgres.NewDeviceIdentityRepository(db)
+	groupRepo := postgres.NewIdentityGroupRepository(db)
+	roleRepo := postgres.NewRoleRepository(db)
+	identityMgr := identity.NewManager(adminRepo, userRepo, serviceRepo, deviceRepo, groupRepo, roleRepo)
 
 	services := &api.Services{
 		Workspace:   wsSvc,
@@ -113,6 +124,7 @@ func main() {
 		Edge:        edgeSvc,
 		CRKManager:  crkMgr,
 		CRKCeremony: crkCeremony,
+		Identity:    identityMgr,
 	}
 
 	routerCfg := api.DefaultRouterConfig()

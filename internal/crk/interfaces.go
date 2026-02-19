@@ -2,6 +2,7 @@
 package crk
 
 import (
+	"context"
 	"crypto/ed25519"
 	"time"
 
@@ -46,6 +47,14 @@ type Manager interface {
 	RegenerateShares(privateKey ed25519.PrivateKey, totalShares, threshold int) ([]models.CRKShare, error)
 	// GetShares returns the shares for a CRK (used during key generation ceremony).
 	GetShares(crkID string) ([]models.CRKShare, error)
+}
+
+// ShareRepository handles CRK share persistence.
+type ShareRepository interface {
+	// CreateShare persists a CRK share.
+	CreateShare(ctx context.Context, share *models.CRKShare) error
+	// GetShares retrieves all shares for a CRK.
+	GetShares(ctx context.Context, crkID string) ([]models.CRKShare, error)
 }
 
 // Ceremony represents a key ceremony for CRK operations.
