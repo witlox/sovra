@@ -2698,3 +2698,424 @@ func (r *RoleRepository) GetRolesForIdentity(ctx context.Context, identityID str
 	}
 	return roles, nil
 }
+
+// =============================================================================
+// Emergency Access Repository
+// =============================================================================
+
+// EmergencyAccessRepository handles emergency access request persistence.
+type EmergencyAccessRepository struct {
+	db *DB
+}
+
+// NewEmergencyAccessRepository creates a new emergency access repository.
+func NewEmergencyAccessRepository(db *DB) *EmergencyAccessRepository {
+	return &EmergencyAccessRepository{db: db}
+}
+
+// Create persists a new emergency access request.
+func (r *EmergencyAccessRepository) Create(ctx context.Context, req *models.EmergencyAccessRequest) error {
+	id, err := uuid.Parse(req.ID)
+	if err != nil {
+		return fmt.Errorf("invalid request ID: %w", err)
+	}
+	orgID, err := uuid.Parse(req.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var tokenExpiry *time.Time
+	if !req.TokenExpiry.IsZero() {
+		tokenExpiry = &req.TokenExpiry
+	}
+	var resolvedAt *time.Time
+	if !req.ResolvedAt.IsZero() {
+		resolvedAt = &req.ResolvedAt
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO emergency_access_requests (id, org_id, requested_by, reason, status, crk_signature, token_id, token_expiry, approved_by, required_approvals, requested_at, resolved_at, denied_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		id, orgID, req.RequestedBy, req.Reason, req.Status, req.CRKSignature,
+		sql.NullString{String: req.TokenID, Valid: req.TokenID != ""},
+		tokenExpiry, pq.Array(req.ApprovedBy), req.RequiredApprovals, req.RequestedAt, resolvedAt,
+		sql.NullString{String: req.DeniedBy, Valid: req.DeniedBy != ""},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create emergency access request: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves an emergency access request by ID.
+func (r *EmergencyAccessRepository) Get(ctx context.Context, id string) (*models.EmergencyAccessRequest, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid request ID: %w", err)
+	}
+
+	req := &models.EmergencyAccessRequest{}
+	var tokenID, deniedBy sql.NullString
+	var tokenExpiry, resolvedAt sql.NullTime
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, org_id, requested_by, reason, status, crk_signature, token_id, token_expiry, approved_by, required_approvals, requested_at, resolved_at, denied_by
+		 FROM emergency_access_requests WHERE id = $1`,
+		uid,
+	).Scan(&req.ID, &req.OrgID, &req.RequestedBy, &req.Reason, &req.Status, &req.CRKSignature,
+		&tokenID, &tokenExpiry, pq.Array(&req.ApprovedBy), &req.RequiredApprovals, &req.RequestedAt, &resolvedAt, &deniedBy)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get emergency access request: %w", err)
+	}
+	if tokenID.Valid {
+		req.TokenID = tokenID.String
+	}
+	if tokenExpiry.Valid {
+		req.TokenExpiry = tokenExpiry.Time
+	}
+	if resolvedAt.Valid {
+		req.ResolvedAt = resolvedAt.Time
+	}
+	if deniedBy.Valid {
+		req.DeniedBy = deniedBy.String
+	}
+	return req, nil
+}
+
+// List retrieves all emergency access requests for an organization.
+func (r *EmergencyAccessRepository) List(ctx context.Context, orgID string) ([]*models.EmergencyAccessRequest, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, org_id, requested_by, reason, status, crk_signature, token_id, token_expiry, approved_by, required_approvals, requested_at, resolved_at, denied_by
+		 FROM emergency_access_requests WHERE org_id = $1 ORDER BY requested_at DESC`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list emergency access requests: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return r.scanEmergencyRows(rows)
+}
+
+// ListPending retrieves pending emergency access requests for an organization.
+func (r *EmergencyAccessRepository) ListPending(ctx context.Context, orgID string) ([]*models.EmergencyAccessRequest, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, org_id, requested_by, reason, status, crk_signature, token_id, token_expiry, approved_by, required_approvals, requested_at, resolved_at, denied_by
+		 FROM emergency_access_requests WHERE org_id = $1 AND status = 'pending' ORDER BY requested_at DESC`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pending emergency access requests: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return r.scanEmergencyRows(rows)
+}
+
+// Update updates an existing emergency access request.
+func (r *EmergencyAccessRepository) Update(ctx context.Context, req *models.EmergencyAccessRequest) error {
+	id, err := uuid.Parse(req.ID)
+	if err != nil {
+		return fmt.Errorf("invalid request ID: %w", err)
+	}
+
+	var tokenExpiry *time.Time
+	if !req.TokenExpiry.IsZero() {
+		tokenExpiry = &req.TokenExpiry
+	}
+	var resolvedAt *time.Time
+	if !req.ResolvedAt.IsZero() {
+		resolvedAt = &req.ResolvedAt
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE emergency_access_requests SET status = $2, crk_signature = $3, token_id = $4, token_expiry = $5, approved_by = $6, resolved_at = $7, denied_by = $8 WHERE id = $1`,
+		id, req.Status, req.CRKSignature,
+		sql.NullString{String: req.TokenID, Valid: req.TokenID != ""},
+		tokenExpiry, pq.Array(req.ApprovedBy), resolvedAt,
+		sql.NullString{String: req.DeniedBy, Valid: req.DeniedBy != ""},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update emergency access request: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+func (r *EmergencyAccessRepository) scanEmergencyRows(rows *sql.Rows) ([]*models.EmergencyAccessRequest, error) {
+	var result []*models.EmergencyAccessRequest
+	for rows.Next() {
+		req := &models.EmergencyAccessRequest{}
+		var tokenID, deniedBy sql.NullString
+		var tokenExpiry, resolvedAt sql.NullTime
+		if err := rows.Scan(&req.ID, &req.OrgID, &req.RequestedBy, &req.Reason, &req.Status, &req.CRKSignature,
+			&tokenID, &tokenExpiry, pq.Array(&req.ApprovedBy), &req.RequiredApprovals, &req.RequestedAt, &resolvedAt, &deniedBy); err != nil {
+			return nil, fmt.Errorf("failed to scan emergency access request: %w", err)
+		}
+		if tokenID.Valid {
+			req.TokenID = tokenID.String
+		}
+		if tokenExpiry.Valid {
+			req.TokenExpiry = tokenExpiry.Time
+		}
+		if resolvedAt.Valid {
+			req.ResolvedAt = resolvedAt.Time
+		}
+		if deniedBy.Valid {
+			req.DeniedBy = deniedBy.String
+		}
+		result = append(result, req)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate emergency access requests: %w", err)
+	}
+	return result, nil
+}
+
+// =============================================================================
+// Account Recovery Repository
+// =============================================================================
+
+// AccountRecoveryRepository handles account recovery persistence.
+type AccountRecoveryRepository struct {
+	db *DB
+}
+
+// NewAccountRecoveryRepository creates a new account recovery repository.
+func NewAccountRecoveryRepository(db *DB) *AccountRecoveryRepository {
+	return &AccountRecoveryRepository{db: db}
+}
+
+// Create persists a new account recovery.
+func (r *AccountRecoveryRepository) Create(ctx context.Context, rec *models.AccountRecovery) error {
+	id, err := uuid.Parse(rec.ID)
+	if err != nil {
+		return fmt.Errorf("invalid recovery ID: %w", err)
+	}
+	orgID, err := uuid.Parse(rec.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	var completedAt *time.Time
+	if !rec.CompletedAt.IsZero() {
+		completedAt = &rec.CompletedAt
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO account_recoveries (id, org_id, recovery_type, initiated_by, reason, status, shares_needed, shares_collected, initiated_at, completed_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		id, orgID, rec.RecoveryType, rec.InitiatedBy, rec.Reason, rec.Status,
+		rec.SharesNeeded, rec.SharesCollected, rec.InitiatedAt, completedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create account recovery: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves an account recovery by ID.
+func (r *AccountRecoveryRepository) Get(ctx context.Context, id string) (*models.AccountRecovery, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid recovery ID: %w", err)
+	}
+
+	rec := &models.AccountRecovery{}
+	var completedAt sql.NullTime
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, org_id, recovery_type, initiated_by, reason, status, shares_needed, shares_collected, initiated_at, completed_at
+		 FROM account_recoveries WHERE id = $1`,
+		uid,
+	).Scan(&rec.ID, &rec.OrgID, &rec.RecoveryType, &rec.InitiatedBy, &rec.Reason, &rec.Status,
+		&rec.SharesNeeded, &rec.SharesCollected, &rec.InitiatedAt, &completedAt)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account recovery: %w", err)
+	}
+	if completedAt.Valid {
+		rec.CompletedAt = completedAt.Time
+	}
+	return rec, nil
+}
+
+// List retrieves all account recoveries for an organization.
+func (r *AccountRecoveryRepository) List(ctx context.Context, orgID string) ([]*models.AccountRecovery, error) {
+	uid, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, org_id, recovery_type, initiated_by, reason, status, shares_needed, shares_collected, initiated_at, completed_at
+		 FROM account_recoveries WHERE org_id = $1 ORDER BY initiated_at DESC`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list account recoveries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []*models.AccountRecovery
+	for rows.Next() {
+		rec := &models.AccountRecovery{}
+		var completedAt sql.NullTime
+		if err := rows.Scan(&rec.ID, &rec.OrgID, &rec.RecoveryType, &rec.InitiatedBy, &rec.Reason, &rec.Status,
+			&rec.SharesNeeded, &rec.SharesCollected, &rec.InitiatedAt, &completedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan account recovery: %w", err)
+		}
+		if completedAt.Valid {
+			rec.CompletedAt = completedAt.Time
+		}
+		result = append(result, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate account recoveries: %w", err)
+	}
+	return result, nil
+}
+
+// Update updates an existing account recovery.
+func (r *AccountRecoveryRepository) Update(ctx context.Context, rec *models.AccountRecovery) error {
+	id, err := uuid.Parse(rec.ID)
+	if err != nil {
+		return fmt.Errorf("invalid recovery ID: %w", err)
+	}
+
+	var completedAt *time.Time
+	if !rec.CompletedAt.IsZero() {
+		completedAt = &rec.CompletedAt
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE account_recoveries SET status = $2, shares_collected = $3, completed_at = $4 WHERE id = $1`,
+		id, rec.Status, rec.SharesCollected, completedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update account recovery: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// =============================================================================
+// Workspace Invitation Repository
+// =============================================================================
+
+// WorkspaceInvitationRepository handles workspace invitation persistence.
+type WorkspaceInvitationRepository struct {
+	db *DB
+}
+
+// NewWorkspaceInvitationRepository creates a new workspace invitation repository.
+func NewWorkspaceInvitationRepository(db *DB) *WorkspaceInvitationRepository {
+	return &WorkspaceInvitationRepository{db: db}
+}
+
+// Create persists a new workspace invitation.
+func (r *WorkspaceInvitationRepository) Create(ctx context.Context, inv *workspace.WorkspaceInvitation) error {
+	id, err := uuid.Parse(inv.ID)
+	if err != nil {
+		return fmt.Errorf("invalid invitation ID: %w", err)
+	}
+	wsID, err := uuid.Parse(inv.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("invalid workspace ID: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO workspace_invitations (id, workspace_id, org_id, invited_by, status, created_at, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		id, wsID, inv.OrgID, inv.InvitedBy, inv.Status, inv.CreatedAt, inv.ExpiresAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create workspace invitation: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves a workspace invitation by ID.
+func (r *WorkspaceInvitationRepository) Get(ctx context.Context, id string) (*workspace.WorkspaceInvitation, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid invitation ID: %w", err)
+	}
+
+	inv := &workspace.WorkspaceInvitation{}
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, workspace_id, org_id, invited_by, status, created_at, expires_at
+		 FROM workspace_invitations WHERE id = $1`,
+		uid,
+	).Scan(&inv.ID, &inv.WorkspaceID, &inv.OrgID, &inv.InvitedBy, &inv.Status, &inv.CreatedAt, &inv.ExpiresAt)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace invitation: %w", err)
+	}
+	return inv, nil
+}
+
+// FindPending finds a pending invitation by workspace and org ID.
+func (r *WorkspaceInvitationRepository) FindPending(ctx context.Context, workspaceID, orgID string) (*workspace.WorkspaceInvitation, error) {
+	wsID, err := uuid.Parse(workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid workspace ID: %w", err)
+	}
+
+	inv := &workspace.WorkspaceInvitation{}
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, workspace_id, org_id, invited_by, status, created_at, expires_at
+		 FROM workspace_invitations WHERE workspace_id = $1 AND org_id = $2 AND status = 'pending'
+		 ORDER BY created_at DESC LIMIT 1`,
+		wsID, orgID,
+	).Scan(&inv.ID, &inv.WorkspaceID, &inv.OrgID, &inv.InvitedBy, &inv.Status, &inv.CreatedAt, &inv.ExpiresAt)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to find pending invitation: %w", err)
+	}
+	return inv, nil
+}
+
+// Update updates a workspace invitation.
+func (r *WorkspaceInvitationRepository) Update(ctx context.Context, inv *workspace.WorkspaceInvitation) error {
+	id, err := uuid.Parse(inv.ID)
+	if err != nil {
+		return fmt.Errorf("invalid invitation ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE workspace_invitations SET status = $2 WHERE id = $1`,
+		id, inv.Status,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update workspace invitation: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}

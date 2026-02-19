@@ -44,20 +44,6 @@ type EvaluationResult struct {
 	EvalTimeMs int64
 }
 
-// Engine handles OPA policy evaluation.
-type Engine interface {
-	// Evaluate evaluates a policy against input.
-	Evaluate(ctx context.Context, input models.PolicyInput) (*EvaluationResult, error)
-	// EvaluateWithPolicy evaluates a specific policy.
-	EvaluateWithPolicy(ctx context.Context, policyID string, input models.PolicyInput) (*EvaluationResult, error)
-	// LoadPolicy loads a policy into the engine.
-	LoadPolicy(ctx context.Context, policy *models.Policy) error
-	// UnloadPolicy removes a policy from the engine.
-	UnloadPolicy(ctx context.Context, policyID string) error
-	// ValidateRego validates Rego syntax.
-	ValidateRego(rego string) error
-}
-
 // OPAClient defines the interface for OPA operations.
 type OPAClient interface {
 	// UploadPolicy uploads or updates a policy with the given ID.

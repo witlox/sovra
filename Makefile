@@ -16,10 +16,6 @@ build:
 build-bin:
 	mkdir -p bin
 	go build -o bin/api-gateway ./cmd/api-gateway
-	go build -o bin/audit-service ./cmd/audit-service
-	go build -o bin/federation-manager ./cmd/federation-manager
-	go build -o bin/key-lifecycle ./cmd/key-lifecycle
-	go build -o bin/policy-engine ./cmd/policy-engine
 	go build -o bin/sovra-cli ./cmd/sovra-cli
 
 # Install binaries to GOPATH/bin or /usr/local/bin

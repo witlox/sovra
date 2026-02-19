@@ -28,7 +28,7 @@ const (
 	kekKeyPrefix = "org-kek-"
 )
 
-// NewService creates a new workspace service with mock dependencies (for testing).
+// NewService creates a workspace service from mock-friendly dependencies (for testing).
 func NewService(repo Repository, keyMgr KeyManager, crypto CryptoService) Service {
 	return &serviceImpl{repo: repo, keyMgr: keyMgr, crypto: crypto}
 }
@@ -38,21 +38,24 @@ func NewWorkspaceService(
 	repo Repository,
 	vaultClient *vault.Client,
 	audit AuditService,
+	invitations InvitationRepository,
 ) Service {
 	return &productionService{
-		repo:    repo,
-		vault:   vaultClient,
-		transit: vaultClient.Transit(transitMountPath),
-		audit:   audit,
+		repo:        repo,
+		vault:       vaultClient,
+		transit:     vaultClient.Transit(transitMountPath),
+		audit:       audit,
+		invitations: invitations,
 	}
 }
 
 // productionService implements the production-ready workspace service.
 type productionService struct {
-	repo    Repository
-	vault   *vault.Client
-	transit *vault.TransitClient
-	audit   AuditService
+	repo        Repository
+	vault       *vault.Client
+	transit     *vault.TransitClient
+	audit       AuditService
+	invitations InvitationRepository
 }
 
 func (s *productionService) Create(ctx context.Context, req CreateRequest) (*models.Workspace, error) {
@@ -747,11 +750,11 @@ func (s *productionService) ExtendExpiration(ctx context.Context, workspaceID st
 	return nil
 }
 
-// Invitations storage (in-memory for now, would be a repository in production)
-var invitations = make(map[string]*WorkspaceInvitation)
-
 // InviteParticipant creates an invitation for a new participant.
 func (s *productionService) InviteParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) (*WorkspaceInvitation, error) {
+	if s.invitations == nil {
+		return nil, errors.NewValidationError("invitations", "invitation repository not configured")
+	}
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("get workspace: %w", err)
@@ -772,22 +775,19 @@ func (s *productionService) InviteParticipant(ctx context.Context, workspaceID, 
 		ExpiresAt:   time.Now().Add(7 * 24 * time.Hour), // 7 day expiry
 	}
 
-	invitations[invitation.ID] = invitation
+	if err := s.invitations.Create(ctx, invitation); err != nil {
+		return nil, fmt.Errorf("create invitation: %w", err)
+	}
 	return invitation, nil
 }
 
 // AcceptInvitation accepts a workspace invitation.
 func (s *productionService) AcceptInvitation(ctx context.Context, workspaceID, orgID string, signature []byte) error {
-	// Find the invitation
-	var invitation *WorkspaceInvitation
-	for _, inv := range invitations {
-		if inv.WorkspaceID == workspaceID && inv.OrgID == orgID && inv.Status == "pending" {
-			invitation = inv
-			break
-		}
+	if s.invitations == nil {
+		return errors.NewValidationError("invitations", "invitation repository not configured")
 	}
-
-	if invitation == nil {
+	invitation, err := s.invitations.FindPending(ctx, workspaceID, orgID)
+	if err != nil {
 		return errors.NewNotFoundError("invitation", "no pending invitation found")
 	}
 
@@ -814,9 +814,9 @@ func (s *productionService) AcceptInvitation(ctx context.Context, workspaceID, o
 	}
 
 	if dek != nil {
-		wrapped, err := s.wrapDEKForOrg(ctx, dek, orgID)
-		if err != nil {
-			return fmt.Errorf("wrap DEK for new participant: %w", err)
+		wrapped, wrapErr := s.wrapDEKForOrg(ctx, dek, orgID)
+		if wrapErr != nil {
+			return fmt.Errorf("wrap DEK for new participant: %w", wrapErr)
 		}
 		ws.DEKWrapped[orgID] = wrapped
 	}
@@ -827,18 +827,26 @@ func (s *productionService) AcceptInvitation(ctx context.Context, workspaceID, o
 	}
 
 	invitation.Status = "accepted"
+	if err := s.invitations.Update(ctx, invitation); err != nil {
+		return fmt.Errorf("update invitation: %w", err)
+	}
 	return nil
 }
 
 // DeclineInvitation declines a workspace invitation.
 func (s *productionService) DeclineInvitation(ctx context.Context, workspaceID, orgID string) error {
-	for _, inv := range invitations {
-		if inv.WorkspaceID == workspaceID && inv.OrgID == orgID && inv.Status == "pending" {
-			inv.Status = "declined"
-			return nil
-		}
+	if s.invitations == nil {
+		return errors.NewValidationError("invitations", "invitation repository not configured")
 	}
-	return errors.NewNotFoundError("invitation", "no pending invitation found")
+	invitation, err := s.invitations.FindPending(ctx, workspaceID, orgID)
+	if err != nil {
+		return errors.NewNotFoundError("invitation", "no pending invitation found")
+	}
+	invitation.Status = "declined"
+	if err := s.invitations.Update(ctx, invitation); err != nil {
+		return fmt.Errorf("update invitation: %w", err)
+	}
+	return nil
 }
 
 // checkExpiration checks if a workspace has expired.
@@ -895,7 +903,7 @@ func decryptAESGCM(key, ciphertext []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// serviceImpl is the legacy implementation for testing with mocks.
+// serviceImpl implements Service using injectable dependencies (for testing).
 type serviceImpl struct {
 	repo   Repository
 	keyMgr KeyManager

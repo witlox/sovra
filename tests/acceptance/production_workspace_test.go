@@ -92,7 +92,7 @@ func TestProductionWorkspaceCreation(t *testing.T) {
 			auditRepo := postgres.NewAuditRepository(db)
 			auditSvc := audit.NewService(auditRepo, &wsNoOpForwarder{}, &wsNoOpVerifier{})
 
-			service := workspace.NewWorkspaceService(wsRepo, vaultClient, auditSvc)
+			service := workspace.NewWorkspaceService(wsRepo, vaultClient, auditSvc, nil)
 
 			t.Run("Scenario: Create workspace for research collaboration", func(t *testing.T) {
 				var ws *models.Workspace
@@ -381,7 +381,7 @@ func TestProductionWorkspaceValidation(t *testing.T) {
 			require.NoError(t, err)
 
 			wsRepo := postgres.NewWorkspaceRepository(db)
-			service := workspace.NewWorkspaceService(wsRepo, vaultClient, nil)
+			service := workspace.NewWorkspaceService(wsRepo, vaultClient, nil, nil)
 
 			t.Run("Scenario: Reject workspace with no participants", func(t *testing.T) {
 				req := workspace.CreateRequest{

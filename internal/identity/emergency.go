@@ -39,6 +39,24 @@ type CRKProvider interface {
 	Verify(publicKey []byte, data []byte, signature []byte) (bool, error)
 }
 
+// CRKProviderAdapter adapts separate CRK lookup and verification functions into
+// a CRKProvider. This allows composing a provider from a CRK repository
+// (GetByOrgID) and a CRK manager (Verify) without circular dependencies.
+type CRKProviderAdapter struct {
+	GetByOrgIDFn func(ctx context.Context, orgID string) (*models.CRK, error)
+	VerifyFn     func(publicKey []byte, data []byte, signature []byte) (bool, error)
+}
+
+// GetActiveCRK delegates to the GetByOrgIDFn.
+func (a *CRKProviderAdapter) GetActiveCRK(ctx context.Context, orgID string) (*models.CRK, error) {
+	return a.GetByOrgIDFn(ctx, orgID)
+}
+
+// Verify delegates to the VerifyFn.
+func (a *CRKProviderAdapter) Verify(publicKey []byte, data []byte, signature []byte) (bool, error) {
+	return a.VerifyFn(publicKey, data, signature)
+}
+
 // TokenGenerator generates emergency access tokens.
 type TokenGenerator interface {
 	Generate(ctx context.Context, orgID, requestID string, ttl time.Duration) (string, error)

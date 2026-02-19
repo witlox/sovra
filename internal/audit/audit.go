@@ -22,6 +22,12 @@ import (
 
 // NewService creates a new audit service.
 func NewService(repo Repository, forwarder Forwarder, verifier Verifier) Service {
+	if forwarder == nil {
+		forwarder = &noopForwarder{}
+	}
+	if verifier == nil {
+		verifier = &chainVerifier{repo: repo}
+	}
 	return &serviceImpl{
 		repo:      repo,
 		forwarder: forwarder,

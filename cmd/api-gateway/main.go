@@ -14,12 +14,14 @@ import (
 
 	"github.com/witlox/sovra/internal/api"
 	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/compliance"
 	"github.com/witlox/sovra/internal/config"
 	"github.com/witlox/sovra/internal/crk"
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
 	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/internal/policy"
+	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
 	"github.com/witlox/sovra/pkg/postgres"
 	"github.com/witlox/sovra/pkg/telemetry"
@@ -95,8 +97,10 @@ func main() {
 
 	crkRepo := postgres.NewCRKRepository(db)
 
+	invitationRepo := postgres.NewWorkspaceInvitationRepository(db)
+
 	auditSvc := audit.NewService(auditRepo, nil, nil)
-	wsSvc := workspace.NewWorkspaceService(wsRepo, vaultClient, auditSvc)
+	wsSvc := workspace.NewWorkspaceService(wsRepo, vaultClient, auditSvc, invitationRepo)
 	fedSvc := federation.NewFederationService(fedRepo, vaultClient, auditSvc)
 	policySvc := policy.NewPolicyService(policyRepo, opaClient, auditSvc)
 	crkMgr := crk.NewManagerWithRepo(crkRepo)
@@ -116,15 +120,41 @@ func main() {
 	roleRepo := postgres.NewRoleRepository(db)
 	identityMgr := identity.NewManager(adminRepo, userRepo, serviceRepo, deviceRepo, groupRepo, roleRepo)
 
+	// PKI client for certificate management
+	pkiClient := vaultClient.PKI("")
+
+	// Emergency access and account recovery
+	emergencyRepo := postgres.NewEmergencyAccessRepository(db)
+	recoveryRepo := postgres.NewAccountRecoveryRepository(db)
+
+	crkProvider := &identity.CRKProviderAdapter{
+		GetByOrgIDFn: crkRepo.GetByOrgID,
+		VerifyFn:     crkMgr.Verify,
+	}
+	emergencyMgr := identity.NewEmergencyAccessManager(emergencyRepo, crkProvider, identity.NewSimpleTokenGenerator())
+	recoveryMgr := identity.NewAccountRecoveryManager(recoveryRepo, crkProvider)
+
+	// Compliance report generator
+	complianceGen := compliance.NewReportGenerator(auditSvc, wsSvc)
+
+	// Rotation policy scheduler
+	rotationScheduler := rotation.NewScheduler(wsSvc, time.Hour)
+	rotationScheduler.Start(ctx)
+
 	services := &api.Services{
-		Workspace:   wsSvc,
-		Federation:  fedSvc,
-		Policy:      policySvc,
-		Audit:       auditSvc,
-		Edge:        edgeSvc,
-		CRKManager:  crkMgr,
-		CRKCeremony: crkCeremony,
-		Identity:    identityMgr,
+		Workspace:         wsSvc,
+		Federation:        fedSvc,
+		Policy:            policySvc,
+		Audit:             auditSvc,
+		Edge:              edgeSvc,
+		CRKManager:        crkMgr,
+		CRKCeremony:       crkCeremony,
+		Identity:          identityMgr,
+		PKI:               pkiClient,
+		EmergencyAccess:   emergencyMgr,
+		AccountRecovery:   recoveryMgr,
+		Compliance:        complianceGen,
+		RotationScheduler: rotationScheduler,
 	}
 
 	routerCfg := api.DefaultRouterConfig()
@@ -185,6 +215,7 @@ func main() {
 	<-sigCh
 
 	logger.Info("shutting down...")
+	rotationScheduler.Stop()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 	_ = server.Shutdown(shutdownCtx)

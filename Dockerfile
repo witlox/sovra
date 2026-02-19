@@ -17,12 +17,8 @@ COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 COPY pkg/ ./pkg/
 
-# Build all binaries
+# Build binaries
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION}" -o /bin/api-gateway ./cmd/api-gateway
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION}" -o /bin/audit-service ./cmd/audit-service
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION}" -o /bin/federation-manager ./cmd/federation-manager
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION}" -o /bin/key-lifecycle ./cmd/key-lifecycle
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION}" -o /bin/policy-engine ./cmd/policy-engine
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION}" -o /bin/sovra-cli ./cmd/sovra-cli
 
 # Runtime stage - minimal image
@@ -38,10 +34,6 @@ WORKDIR /app
 
 # Copy binaries from builder
 COPY --from=builder /bin/api-gateway /app/
-COPY --from=builder /bin/audit-service /app/
-COPY --from=builder /bin/federation-manager /app/
-COPY --from=builder /bin/key-lifecycle /app/
-COPY --from=builder /bin/policy-engine /app/
 COPY --from=builder /bin/sovra-cli /app/
 
 USER sovra

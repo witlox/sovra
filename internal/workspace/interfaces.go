@@ -89,6 +89,18 @@ type WorkspaceInvitation struct {
 	ExpiresAt   time.Time `json:"expires_at"`
 }
 
+// InvitationRepository handles workspace invitation persistence.
+type InvitationRepository interface {
+	// Create persists a new invitation.
+	Create(ctx context.Context, inv *WorkspaceInvitation) error
+	// Get retrieves an invitation by ID.
+	Get(ctx context.Context, id string) (*WorkspaceInvitation, error)
+	// FindPending finds a pending invitation by workspace and org ID.
+	FindPending(ctx context.Context, workspaceID, orgID string) (*WorkspaceInvitation, error)
+	// Update updates an invitation.
+	Update(ctx context.Context, inv *WorkspaceInvitation) error
+}
+
 // UpdateRequest represents a workspace update request.
 type UpdateRequest struct {
 	Purpose        string

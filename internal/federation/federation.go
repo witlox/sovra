@@ -68,20 +68,20 @@ func newMTLSManager(vaultClient *vault.Client) *mtlsManager {
 	}
 }
 
-// NewService creates a new federation service with legacy interface compatibility.
+// NewService creates a federation service from mock-friendly dependencies (for testing).
 func NewService(repo Repository, certMgr CertificateManager, client MTLSClient) Service {
-	return &legacyServiceAdapter{repo: repo, certMgr: certMgr, client: client}
+	return &testableService{repo: repo, certMgr: certMgr, client: client}
 }
 
-// legacyServiceAdapter adapts the old interface for backwards compatibility.
-type legacyServiceAdapter struct {
+// testableService implements Service using injectable dependencies for testing.
+type testableService struct {
 	repo    Repository
 	certMgr CertificateManager
 	client  MTLSClient
 	orgID   string
 }
 
-func (s *legacyServiceAdapter) Init(ctx context.Context, req InitRequest) (*InitResponse, error) {
+func (s *testableService) Init(ctx context.Context, req InitRequest) (*InitResponse, error) {
 	s.orgID = req.OrgID
 	csr, err := s.certMgr.GenerateCSR(req.OrgID)
 	if err != nil {
@@ -101,14 +101,14 @@ func (s *legacyServiceAdapter) Init(ctx context.Context, req InitRequest) (*Init
 	}, nil
 }
 
-func (s *legacyServiceAdapter) ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, signature []byte) error {
+func (s *testableService) ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, signature []byte) error {
 	if _, err := s.certMgr.ValidateCertificate(cert); err != nil {
 		return fmt.Errorf("validate certificate: %w", err)
 	}
 	return nil
 }
 
-func (s *legacyServiceAdapter) Establish(ctx context.Context, req EstablishRequest) (*models.Federation, error) {
+func (s *testableService) Establish(ctx context.Context, req EstablishRequest) (*models.Federation, error) {
 	if err := s.client.Connect(ctx, req.PartnerURL, req.PartnerCert); err != nil {
 		return nil, errors.NewFederationError(req.PartnerOrgID, "connect", err)
 	}
@@ -131,7 +131,7 @@ func (s *legacyServiceAdapter) Establish(ctx context.Context, req EstablishReque
 	return fed, nil
 }
 
-func (s *legacyServiceAdapter) Status(ctx context.Context, partnerOrgID string) (*models.Federation, error) {
+func (s *testableService) Status(ctx context.Context, partnerOrgID string) (*models.Federation, error) {
 	fed, err := s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
 	if err != nil {
 		return nil, fmt.Errorf("get federation status: %w", err)
@@ -139,7 +139,7 @@ func (s *legacyServiceAdapter) Status(ctx context.Context, partnerOrgID string) 
 	return fed, nil
 }
 
-func (s *legacyServiceAdapter) List(ctx context.Context) ([]*models.Federation, error) {
+func (s *testableService) List(ctx context.Context) ([]*models.Federation, error) {
 	feds, err := s.repo.List(ctx, s.orgID)
 	if err != nil {
 		return nil, fmt.Errorf("list federations: %w", err)
@@ -147,7 +147,7 @@ func (s *legacyServiceAdapter) List(ctx context.Context) ([]*models.Federation, 
 	return feds, nil
 }
 
-func (s *legacyServiceAdapter) Revoke(ctx context.Context, req RevocationRequest) error {
+func (s *testableService) Revoke(ctx context.Context, req RevocationRequest) error {
 	fed, err := s.repo.GetByPartner(ctx, s.orgID, req.PartnerOrgID)
 	if err != nil {
 		return fmt.Errorf("get federation for revoke: %w", err)
@@ -164,7 +164,7 @@ func (s *legacyServiceAdapter) Revoke(ctx context.Context, req RevocationRequest
 	return nil
 }
 
-func (s *legacyServiceAdapter) HealthCheck(ctx context.Context) ([]HealthCheckResult, error) {
+func (s *testableService) HealthCheck(ctx context.Context) ([]HealthCheckResult, error) {
 	feds, err := s.repo.List(ctx, s.orgID)
 	if err != nil {
 		return nil, fmt.Errorf("list federations for health check: %w", err)
@@ -190,7 +190,7 @@ func (s *legacyServiceAdapter) HealthCheck(ctx context.Context) ([]HealthCheckRe
 	return results, nil
 }
 
-func (s *legacyServiceAdapter) RequestPublicKey(ctx context.Context, partnerOrgID string) ([]byte, error) {
+func (s *testableService) RequestPublicKey(ctx context.Context, partnerOrgID string) ([]byte, error) {
 	resp, err := s.client.Request(ctx, partnerOrgID, "GET", "/v1/public-key", nil)
 	if err != nil {
 		return nil, fmt.Errorf("request public key: %w", err)
@@ -198,13 +198,13 @@ func (s *legacyServiceAdapter) RequestPublicKey(ctx context.Context, partnerOrgI
 	return resp, nil
 }
 
-func (s *legacyServiceAdapter) StartHealthMonitor(ctx context.Context, interval time.Duration) error {
+func (s *testableService) StartHealthMonitor(ctx context.Context, interval time.Duration) error {
 	return nil
 }
 
-func (s *legacyServiceAdapter) StopHealthMonitor() {}
+func (s *testableService) StopHealthMonitor() {}
 
-func (s *legacyServiceAdapter) RotateCertificate(ctx context.Context, partnerOrgID string, signature []byte) ([]byte, error) {
+func (s *testableService) RotateCertificate(ctx context.Context, partnerOrgID string, signature []byte) ([]byte, error) {
 	cert, err := s.certMgr.RotateCertificate(partnerOrgID, signature)
 	if err != nil {
 		return nil, fmt.Errorf("rotate certificate: %w", err)

@@ -369,6 +369,27 @@ func Migrations() []Migration {
 				  CREATE INDEX IF NOT EXISTS idx_emergency_access_org ON emergency_access_requests(org_id);
 				  CREATE INDEX IF NOT EXISTS idx_account_recoveries_org ON account_recoveries(org_id)`,
 		},
+		{
+			Version:     26,
+			Description: "Add denied_by column to emergency_access_requests",
+			SQL:         `ALTER TABLE emergency_access_requests ADD COLUMN IF NOT EXISTS denied_by VARCHAR(255)`,
+		},
+		{
+			Version:     27,
+			Description: "Create workspace_invitations table",
+			SQL: `CREATE TABLE IF NOT EXISTS workspace_invitations (
+				id UUID PRIMARY KEY,
+				workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+				org_id VARCHAR(255) NOT NULL,
+				invited_by VARCHAR(255) NOT NULL,
+				status VARCHAR(50) NOT NULL DEFAULT 'pending',
+				created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+				expires_at TIMESTAMP NOT NULL,
+				CONSTRAINT chk_invitation_status CHECK (status IN ('pending', 'accepted', 'declined'))
+			);
+			CREATE INDEX IF NOT EXISTS idx_workspace_invitations_ws ON workspace_invitations(workspace_id);
+			CREATE INDEX IF NOT EXISTS idx_workspace_invitations_pending ON workspace_invitations(workspace_id, org_id) WHERE status = 'pending'`,
+		},
 	}
 }
 
