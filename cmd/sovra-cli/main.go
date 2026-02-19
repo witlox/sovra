@@ -122,6 +122,7 @@ func init() {
 	crkCeremonyCmd.AddCommand(crkCeremonyStartCmd)
 	crkCeremonyCmd.AddCommand(crkCeremonyAddShareCmd)
 	crkCeremonyCmd.AddCommand(crkCeremonyCompleteCmd)
+	crkCeremonyCmd.AddCommand(crkCeremonyCancelCmd)
 
 	crkCmd.AddCommand(crkGenerateCmd)
 	crkCmd.AddCommand(crkSignCmd)
@@ -409,6 +410,23 @@ var crkCeremonyCompleteCmd = &cobra.Command{
 	},
 }
 
+var crkCeremonyCancelCmd = &cobra.Command{
+	Use:   "cancel [ceremony-id]",
+	Short: "Cancel a CRK ceremony",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.CancelCRKCeremony(ctx, args[0]); err != nil {
+			return fmt.Errorf("cancel ceremony: %w", err)
+		}
+
+		fmt.Printf("Ceremony cancelled: %s\n", args[0])
+		return nil
+	},
+}
+
 // ============================================================================
 // Workspace Commands
 // ============================================================================
@@ -447,9 +465,21 @@ func init() {
 	workspaceListCmd.Flags().Int("limit", 50, "Maximum results")
 	workspaceListCmd.Flags().Int("offset", 0, "Result offset")
 
+	workspaceUpdateCmd.Flags().String("purpose", "", "New workspace purpose")
+	workspaceUpdateCmd.Flags().String("classification", "", "New data classification")
+	workspaceUpdateCmd.Flags().String("mode", "", "New workspace mode")
+
+	workspaceExtendCmd.Flags().String("expires-at", "", "New expiration time (RFC3339)")
+
+	workspaceInviteCmd.Flags().String("org-id", "", "Organization ID to invite")
+
 	workspaceCmd.AddCommand(workspaceCreateCmd)
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceGetCmd)
+	workspaceCmd.AddCommand(workspaceUpdateCmd)
+	workspaceCmd.AddCommand(workspaceRotateDEKCmd)
+	workspaceCmd.AddCommand(workspaceExtendCmd)
+	workspaceCmd.AddCommand(workspaceInviteCmd)
 }
 
 func runWorkspaceCreate(cmd *cobra.Command, args []string) error {
@@ -530,6 +560,119 @@ func runWorkspaceGet(cmd *cobra.Command, args []string) error {
 			ws.ID, ws.Name, ws.OwnerOrgID, ws.Status, ws.ParticipantOrgs)
 	}
 	return nil
+}
+
+var workspaceUpdateCmd = &cobra.Command{
+	Use:   "update [workspace-id]",
+	Short: "Update a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		purpose, _ := cmd.Flags().GetString("purpose")
+		classification, _ := cmd.Flags().GetString("classification")
+		mode, _ := cmd.Flags().GetString("mode")
+
+		req := client.UpdateWorkspaceRequest{}
+		if purpose != "" {
+			req.Purpose = purpose
+		}
+		if classification != "" {
+			req.Classification = models.Classification(classification)
+		}
+		if mode != "" {
+			req.Mode = models.WorkspaceMode(mode)
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		ws, err := c.UpdateWorkspace(ctx, args[0], req)
+		if err != nil {
+			return fmt.Errorf("update workspace: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(ws, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Workspace updated: %s (%s)\n", ws.Name, ws.ID)
+		}
+		return nil
+	},
+}
+
+var workspaceRotateDEKCmd = &cobra.Command{
+	Use:   "rotate-dek [workspace-id]",
+	Short: "Rotate the DEK for a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.RotateWorkspaceDEK(ctx, args[0], nil); err != nil {
+			return fmt.Errorf("rotate DEK: %w", err)
+		}
+
+		fmt.Printf("DEK rotated for workspace: %s\n", args[0])
+		return nil
+	},
+}
+
+var workspaceExtendCmd = &cobra.Command{
+	Use:   "extend [workspace-id]",
+	Short: "Extend workspace expiration",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		expiresAt, _ := cmd.Flags().GetString("expires-at")
+		if expiresAt == "" {
+			return fmt.Errorf("--expires-at is required (RFC3339 format)")
+		}
+
+		t, err := time.Parse(time.RFC3339, expiresAt)
+		if err != nil {
+			return fmt.Errorf("invalid --expires-at format (expected RFC3339): %w", err)
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.ExtendWorkspace(ctx, args[0], t, nil); err != nil {
+			return fmt.Errorf("extend workspace: %w", err)
+		}
+
+		fmt.Printf("Workspace %s extended to %s\n", args[0], t.Format(time.RFC3339))
+		return nil
+	},
+}
+
+var workspaceInviteCmd = &cobra.Command{
+	Use:   "invite [workspace-id]",
+	Short: "Invite an organization to a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Flags().GetString("org-id")
+		if orgID == "" {
+			return fmt.Errorf("--org-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		invitation, err := c.InviteParticipant(ctx, args[0], client.InviteParticipantRequest{OrgID: orgID})
+		if err != nil {
+			return fmt.Errorf("invite participant: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(invitation, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Invitation created: %s\nWorkspace: %s\nOrg: %s\nStatus: %s\nExpires: %s\n",
+				invitation.ID, invitation.WorkspaceID, invitation.OrgID, invitation.Status, invitation.ExpiresAt.Format(time.RFC3339))
+		}
+		return nil
+	},
 }
 
 // ============================================================================

@@ -199,6 +199,79 @@ func (c *Client) Decrypt(ctx context.Context, workspaceID string, ciphertext []b
 	return result.Data, nil
 }
 
+// UpdateWorkspaceRequest represents a workspace update request.
+type UpdateWorkspaceRequest struct {
+	Purpose        string                `json:"purpose,omitempty"`
+	Classification models.Classification `json:"classification,omitempty"`
+	Mode           models.WorkspaceMode  `json:"mode,omitempty"`
+}
+
+// UpdateWorkspace updates a workspace.
+func (c *Client) UpdateWorkspace(ctx context.Context, id string, req UpdateWorkspaceRequest) (*models.Workspace, error) {
+	var result models.Workspace
+	if err := c.request(ctx, http.MethodPut, "/api/v1/workspaces/"+id, req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RotateWorkspaceDEKRequest represents a DEK rotation request.
+type RotateWorkspaceDEKRequest struct {
+	Signature []byte `json:"signature,omitempty"`
+}
+
+// RotateWorkspaceDEK rotates the DEK for a workspace.
+func (c *Client) RotateWorkspaceDEK(ctx context.Context, workspaceID string, signature []byte) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/rotate-dek", RotateWorkspaceDEKRequest{Signature: signature}, nil)
+}
+
+// ExtendWorkspaceRequest represents a workspace expiration extension request.
+type ExtendWorkspaceRequest struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	Signature []byte    `json:"signature,omitempty"`
+}
+
+// ExtendWorkspace extends a workspace's expiration time.
+func (c *Client) ExtendWorkspace(ctx context.Context, workspaceID string, expiresAt time.Time, signature []byte) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/extend", ExtendWorkspaceRequest{ExpiresAt: expiresAt, Signature: signature}, nil)
+}
+
+// InviteParticipantRequest represents a participant invitation request.
+type InviteParticipantRequest struct {
+	OrgID     string `json:"org_id"`
+	Signature []byte `json:"signature,omitempty"`
+}
+
+// InviteParticipant invites an organization to join a workspace.
+func (c *Client) InviteParticipant(ctx context.Context, workspaceID string, req InviteParticipantRequest) (*models.WorkspaceInvitation, error) {
+	var result models.WorkspaceInvitation
+	if err := c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/invite", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// AcceptInvitationRequest represents an invitation acceptance request.
+type AcceptInvitationRequest struct {
+	OrgID     string `json:"org_id"`
+	Signature []byte `json:"signature,omitempty"`
+}
+
+// AcceptInvitation accepts a workspace invitation.
+func (c *Client) AcceptInvitation(ctx context.Context, workspaceID string, req AcceptInvitationRequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/accept-invitation", req, nil)
+}
+
+// DeclineInvitationRequest represents an invitation decline request.
+type DeclineInvitationRequest struct {
+	OrgID string `json:"org_id"`
+}
+
+// DeclineInvitation declines a workspace invitation.
+func (c *Client) DeclineInvitation(ctx context.Context, workspaceID string, req DeclineInvitationRequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/decline-invitation", req, nil)
+}
+
 // Federation API
 
 // ListFederations lists federation partners.
@@ -363,6 +436,11 @@ func (c *Client) CompleteCRKCeremony(ctx context.Context, ceremonyID string) (*C
 		return nil, err
 	}
 	return &result, nil
+}
+
+// CancelCRKCeremony cancels an ongoing CRK ceremony.
+func (c *Client) CancelCRKCeremony(ctx context.Context, ceremonyID string) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/crk/ceremony/"+ceremonyID, nil, nil)
 }
 
 // Health checks
