@@ -838,3 +838,25 @@ func TestVerifyEd25519Signature(t *testing.T) {
 		assert.False(t, valid)
 	})
 }
+
+func TestNewEmergencyAccessManagerWithAudit(t *testing.T) {
+	repo := newMockEmergencyAccessRepo()
+	crkProvider := newMockCRKProvider()
+	tokenGen := identity.NewSimpleTokenGenerator()
+
+	mgr := identity.NewEmergencyAccessManagerWithAudit(repo, crkProvider, tokenGen, nil)
+	assert.NotNil(t, mgr)
+
+	// Test that it works the same as without audit
+	ctx := context.Background()
+	req, err := mgr.RequestEmergencyAccess(ctx, "org-123", "admin-1", "system outage")
+	require.NoError(t, err)
+	assert.NotEmpty(t, req.ID)
+}
+
+func TestGenerateEmergencyAccessMessage(t *testing.T) {
+	ts := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
+	msg := identity.GenerateEmergencyAccessMessage("org-1", "req-1", "outage", ts)
+	expected := identity.GenerateSignatureMessage("org-1", "req-1", "outage", ts)
+	assert.Equal(t, expected, msg)
+}

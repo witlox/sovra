@@ -71,6 +71,27 @@ func TestPolicyError(t *testing.T) {
 	})
 }
 
+func TestAuthorizationError(t *testing.T) {
+	t.Run("creates authorization error", func(t *testing.T) {
+		err := pkgErrors.NewAuthorizationError("insufficient privileges")
+
+		assert.Equal(t, "insufficient privileges", err.Message)
+		assert.Contains(t, err.Error(), "authorization error")
+		assert.Contains(t, err.Error(), "insufficient privileges")
+	})
+}
+
+func TestNotFoundError(t *testing.T) {
+	t.Run("creates not found error", func(t *testing.T) {
+		err := pkgErrors.NewNotFoundError("workspace", "ws-123 does not exist")
+
+		assert.Equal(t, "workspace", err.Resource)
+		assert.Equal(t, "ws-123 does not exist", err.Message)
+		assert.Contains(t, err.Error(), "workspace")
+		assert.Contains(t, err.Error(), "not found")
+	})
+}
+
 func TestSentinelErrors(t *testing.T) {
 	t.Run("sentinel errors are defined", func(t *testing.T) {
 		require.Error(t, pkgErrors.ErrNotFound)

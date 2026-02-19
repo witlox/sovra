@@ -860,6 +860,508 @@ func TestPostgresRepositoriesIntegration(t *testing.T) {
 			})
 		})
 
+		t.Run("admin_identity_repository", func(t *testing.T) {
+			orgRepo := postgres.NewOrganizationRepository(db)
+			org := &models.Organization{
+				ID:        uuid.New().String(),
+				Name:      "Identity Admin Test Org",
+				PublicKey: []byte("key"),
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			require.NoError(t, orgRepo.Create(ctx, org))
+
+			repo := postgres.NewAdminIdentityRepository(db)
+
+			var adminID string
+			t.Run("create admin identity", func(t *testing.T) {
+				admin := &models.AdminIdentity{
+					ID:        uuid.New().String(),
+					OrgID:     org.ID,
+					Email:     "admin@test.com",
+					Name:      "Test Admin",
+					Role:      models.AdminRoleSuperAdmin,
+					Active:    true,
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				}
+				err := repo.Create(ctx, admin)
+				require.NoError(t, err)
+				adminID = admin.ID
+			})
+
+			t.Run("get admin identity", func(t *testing.T) {
+				admin, err := repo.Get(ctx, adminID)
+				require.NoError(t, err)
+				assert.Equal(t, "admin@test.com", admin.Email)
+				assert.Equal(t, models.AdminRoleSuperAdmin, admin.Role)
+			})
+
+			t.Run("get admin by email", func(t *testing.T) {
+				admin, err := repo.GetByEmail(ctx, org.ID, "admin@test.com")
+				require.NoError(t, err)
+				assert.Equal(t, adminID, admin.ID)
+			})
+
+			t.Run("list admin identities", func(t *testing.T) {
+				admins, err := repo.List(ctx, org.ID)
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(admins), 1)
+			})
+
+			t.Run("update admin identity", func(t *testing.T) {
+				admin, err := repo.Get(ctx, adminID)
+				require.NoError(t, err)
+				admin.Name = "Updated Admin"
+				admin.MFAEnabled = true
+				admin.MFASecret = "JBSWY3DPEHPK3PXP"
+				err = repo.Update(ctx, admin)
+				require.NoError(t, err)
+
+				updated, err := repo.Get(ctx, adminID)
+				require.NoError(t, err)
+				assert.Equal(t, "Updated Admin", updated.Name)
+				assert.True(t, updated.MFAEnabled)
+			})
+
+			t.Run("delete admin identity", func(t *testing.T) {
+				err := repo.Delete(ctx, adminID)
+				require.NoError(t, err)
+			})
+		})
+
+		t.Run("user_identity_repository", func(t *testing.T) {
+			orgRepo := postgres.NewOrganizationRepository(db)
+			org := &models.Organization{
+				ID:        uuid.New().String(),
+				Name:      "Identity User Test Org",
+				PublicKey: []byte("key"),
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			require.NoError(t, orgRepo.Create(ctx, org))
+
+			repo := postgres.NewUserIdentityRepository(db)
+
+			var userID string
+			t.Run("create user identity", func(t *testing.T) {
+				user := &models.UserIdentity{
+					ID:          uuid.New().String(),
+					OrgID:       org.ID,
+					Email:       "user@test.com",
+					Name:        "Test User",
+					SSOProvider: models.SSOProviderOkta,
+					SSOSubject:  "okta|12345",
+					Groups:      []string{"engineers"},
+					Active:      true,
+					CreatedAt:   time.Now(),
+					UpdatedAt:   time.Now(),
+				}
+				err := repo.Create(ctx, user)
+				require.NoError(t, err)
+				userID = user.ID
+			})
+
+			t.Run("get user identity", func(t *testing.T) {
+				user, err := repo.Get(ctx, userID)
+				require.NoError(t, err)
+				assert.Equal(t, "user@test.com", user.Email)
+			})
+
+			t.Run("get user by email", func(t *testing.T) {
+				user, err := repo.GetByEmail(ctx, org.ID, "user@test.com")
+				require.NoError(t, err)
+				assert.Equal(t, userID, user.ID)
+			})
+
+			t.Run("get user by SSO subject", func(t *testing.T) {
+				user, err := repo.GetBySSOSubject(ctx, models.SSOProviderOkta, "okta|12345")
+				require.NoError(t, err)
+				assert.Equal(t, userID, user.ID)
+			})
+
+			t.Run("list user identities", func(t *testing.T) {
+				users, err := repo.List(ctx, org.ID)
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(users), 1)
+			})
+
+			t.Run("update user identity", func(t *testing.T) {
+				user, err := repo.Get(ctx, userID)
+				require.NoError(t, err)
+				user.Name = "Updated User"
+				user.Groups = []string{"engineers", "admins"}
+				err = repo.Update(ctx, user)
+				require.NoError(t, err)
+
+				updated, err := repo.Get(ctx, userID)
+				require.NoError(t, err)
+				assert.Equal(t, "Updated User", updated.Name)
+			})
+
+			t.Run("delete user identity", func(t *testing.T) {
+				err := repo.Delete(ctx, userID)
+				require.NoError(t, err)
+			})
+		})
+
+		t.Run("service_identity_repository", func(t *testing.T) {
+			orgRepo := postgres.NewOrganizationRepository(db)
+			org := &models.Organization{
+				ID:        uuid.New().String(),
+				Name:      "Identity Service Test Org",
+				PublicKey: []byte("key"),
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			require.NoError(t, orgRepo.Create(ctx, org))
+
+			repo := postgres.NewServiceIdentityRepository(db)
+
+			var svcID string
+			t.Run("create service identity", func(t *testing.T) {
+				svc := &models.ServiceIdentity{
+					ID:          uuid.New().String(),
+					OrgID:       org.ID,
+					Name:        "my-service",
+					Description: "A test service",
+					AuthMethod:  models.AuthMethodAppRole,
+					VaultRole:   "my-service-role",
+					Namespace:   "default",
+					ServiceAcct: "my-service-sa",
+					Active:      true,
+					CreatedAt:   time.Now(),
+					UpdatedAt:   time.Now(),
+				}
+				err := repo.Create(ctx, svc)
+				require.NoError(t, err)
+				svcID = svc.ID
+			})
+
+			t.Run("get service identity", func(t *testing.T) {
+				svc, err := repo.Get(ctx, svcID)
+				require.NoError(t, err)
+				assert.Equal(t, "my-service", svc.Name)
+			})
+
+			t.Run("get service by name", func(t *testing.T) {
+				svc, err := repo.GetByName(ctx, org.ID, "my-service")
+				require.NoError(t, err)
+				assert.Equal(t, svcID, svc.ID)
+			})
+
+			t.Run("list service identities", func(t *testing.T) {
+				svcs, err := repo.List(ctx, org.ID)
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(svcs), 1)
+			})
+
+			t.Run("update service identity", func(t *testing.T) {
+				svc, err := repo.Get(ctx, svcID)
+				require.NoError(t, err)
+				svc.Description = "Updated description"
+				err = repo.Update(ctx, svc)
+				require.NoError(t, err)
+
+				updated, err := repo.Get(ctx, svcID)
+				require.NoError(t, err)
+				assert.Equal(t, "Updated description", updated.Description)
+			})
+
+			t.Run("delete service identity", func(t *testing.T) {
+				err := repo.Delete(ctx, svcID)
+				require.NoError(t, err)
+			})
+		})
+
+		t.Run("device_identity_repository", func(t *testing.T) {
+			orgRepo := postgres.NewOrganizationRepository(db)
+			org := &models.Organization{
+				ID:        uuid.New().String(),
+				Name:      "Identity Device Test Org",
+				PublicKey: []byte("key"),
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			require.NoError(t, orgRepo.Create(ctx, org))
+
+			repo := postgres.NewDeviceIdentityRepository(db)
+
+			var deviceID string
+			t.Run("create device identity", func(t *testing.T) {
+				device := &models.DeviceIdentity{
+					ID:                uuid.New().String(),
+					OrgID:             org.ID,
+					DeviceName:        "sensor-001",
+					DeviceType:        "temperature_sensor",
+					CertificateSerial: "AB:CD:EF:12:34",
+					CertificateExpiry: time.Now().Add(365 * 24 * time.Hour),
+					Status:            models.DeviceStatusActive,
+					EnrolledAt:        time.Now(),
+					Metadata:          map[string]any{"location": "building-a"},
+				}
+				err := repo.Create(ctx, device)
+				require.NoError(t, err)
+				deviceID = device.ID
+			})
+
+			t.Run("get device identity", func(t *testing.T) {
+				device, err := repo.Get(ctx, deviceID)
+				require.NoError(t, err)
+				assert.Equal(t, "sensor-001", device.DeviceName)
+			})
+
+			t.Run("get device by cert serial", func(t *testing.T) {
+				device, err := repo.GetByCertSerial(ctx, "AB:CD:EF:12:34")
+				require.NoError(t, err)
+				assert.Equal(t, deviceID, device.ID)
+			})
+
+			t.Run("list device identities", func(t *testing.T) {
+				devices, err := repo.List(ctx, org.ID)
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(devices), 1)
+			})
+
+			t.Run("update device identity", func(t *testing.T) {
+				device, err := repo.Get(ctx, deviceID)
+				require.NoError(t, err)
+				device.Status = models.DeviceStatusRevoked
+				device.Metadata = map[string]any{"location": "building-b", "revoked_reason": "decommissioned"}
+				err = repo.Update(ctx, device)
+				require.NoError(t, err)
+
+				updated, err := repo.Get(ctx, deviceID)
+				require.NoError(t, err)
+				assert.Equal(t, models.DeviceStatusRevoked, updated.Status)
+			})
+
+			t.Run("delete device identity", func(t *testing.T) {
+				err := repo.Delete(ctx, deviceID)
+				require.NoError(t, err)
+			})
+		})
+
+		t.Run("identity_group_repository", func(t *testing.T) {
+			orgRepo := postgres.NewOrganizationRepository(db)
+			org := &models.Organization{
+				ID:        uuid.New().String(),
+				Name:      "Identity Group Test Org",
+				PublicKey: []byte("key"),
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			require.NoError(t, orgRepo.Create(ctx, org))
+
+			repo := postgres.NewIdentityGroupRepository(db)
+			adminRepo := postgres.NewAdminIdentityRepository(db)
+
+			// Create an admin to use as group member
+			admin := &models.AdminIdentity{
+				ID:        uuid.New().String(),
+				OrgID:     org.ID,
+				Email:     "group-member@test.com",
+				Name:      "Group Member",
+				Role:      models.AdminRoleAuditor,
+				Active:    true,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			require.NoError(t, adminRepo.Create(ctx, admin))
+
+			var groupID string
+			t.Run("create identity group", func(t *testing.T) {
+				group := &models.IdentityGroup{
+					ID:            uuid.New().String(),
+					OrgID:         org.ID,
+					Name:          "engineers",
+					Description:   "Engineering team",
+					VaultPolicies: []string{"read-secrets", "deploy"},
+					CreatedAt:     time.Now(),
+					UpdatedAt:     time.Now(),
+				}
+				err := repo.Create(ctx, group)
+				require.NoError(t, err)
+				groupID = group.ID
+			})
+
+			t.Run("get identity group", func(t *testing.T) {
+				group, err := repo.Get(ctx, groupID)
+				require.NoError(t, err)
+				assert.Equal(t, "engineers", group.Name)
+			})
+
+			t.Run("get group by name", func(t *testing.T) {
+				group, err := repo.GetByName(ctx, org.ID, "engineers")
+				require.NoError(t, err)
+				assert.Equal(t, groupID, group.ID)
+			})
+
+			t.Run("list identity groups", func(t *testing.T) {
+				groups, err := repo.List(ctx, org.ID)
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(groups), 1)
+			})
+
+			t.Run("update identity group", func(t *testing.T) {
+				group, err := repo.Get(ctx, groupID)
+				require.NoError(t, err)
+				group.Description = "Updated description"
+				err = repo.Update(ctx, group)
+				require.NoError(t, err)
+
+				updated, err := repo.Get(ctx, groupID)
+				require.NoError(t, err)
+				assert.Equal(t, "Updated description", updated.Description)
+			})
+
+			t.Run("add member to group", func(t *testing.T) {
+				membership := &models.GroupMembership{
+					ID:           uuid.New().String(),
+					GroupID:      groupID,
+					IdentityID:   admin.ID,
+					IdentityType: models.IdentityTypeAdmin,
+					JoinedAt:     time.Now(),
+				}
+				err := repo.AddMember(ctx, membership)
+				require.NoError(t, err)
+			})
+
+			t.Run("get group members", func(t *testing.T) {
+				members, err := repo.GetMembers(ctx, groupID)
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(members), 1)
+			})
+
+			t.Run("get groups for identity", func(t *testing.T) {
+				groups, err := repo.GetGroupsForIdentity(ctx, admin.ID)
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(groups), 1)
+			})
+
+			t.Run("remove member from group", func(t *testing.T) {
+				err := repo.RemoveMember(ctx, groupID, admin.ID)
+				require.NoError(t, err)
+			})
+
+			t.Run("delete identity group", func(t *testing.T) {
+				err := repo.Delete(ctx, groupID)
+				require.NoError(t, err)
+			})
+		})
+
+		t.Run("role_repository", func(t *testing.T) {
+			orgRepo := postgres.NewOrganizationRepository(db)
+			org := &models.Organization{
+				ID:        uuid.New().String(),
+				Name:      "Identity Role Test Org",
+				PublicKey: []byte("key"),
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			require.NoError(t, orgRepo.Create(ctx, org))
+
+			repo := postgres.NewRoleRepository(db)
+			adminRepo := postgres.NewAdminIdentityRepository(db)
+
+			// Create an admin to assign role to
+			admin := &models.AdminIdentity{
+				ID:        uuid.New().String(),
+				OrgID:     org.ID,
+				Email:     "role-test@test.com",
+				Name:      "Role Test Admin",
+				Role:      models.AdminRoleSecurityAdmin,
+				Active:    true,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			require.NoError(t, adminRepo.Create(ctx, admin))
+
+			var roleID string
+			t.Run("create role", func(t *testing.T) {
+				role := &models.Role{
+					ID:          uuid.New().String(),
+					OrgID:       org.ID,
+					Name:        "editor",
+					Description: "Can edit resources",
+					Permissions: []models.Permission{{Resource: "workspaces", Actions: []string{"read", "write"}}},
+					CreatedAt:   time.Now(),
+					UpdatedAt:   time.Now(),
+				}
+				err := repo.Create(ctx, role)
+				require.NoError(t, err)
+				roleID = role.ID
+			})
+
+			t.Run("get role", func(t *testing.T) {
+				role, err := repo.Get(ctx, roleID)
+				require.NoError(t, err)
+				assert.Equal(t, "editor", role.Name)
+			})
+
+			t.Run("get role by name", func(t *testing.T) {
+				role, err := repo.GetByName(ctx, org.ID, "editor")
+				require.NoError(t, err)
+				assert.Equal(t, roleID, role.ID)
+			})
+
+			t.Run("list roles", func(t *testing.T) {
+				roles, err := repo.List(ctx, org.ID)
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(roles), 1)
+			})
+
+			t.Run("update role", func(t *testing.T) {
+				role, err := repo.Get(ctx, roleID)
+				require.NoError(t, err)
+				role.Description = "Updated editor role"
+				role.Permissions = []models.Permission{
+					{Resource: "workspaces", Actions: []string{"read", "write", "delete"}},
+				}
+				err = repo.Update(ctx, role)
+				require.NoError(t, err)
+
+				updated, err := repo.Get(ctx, roleID)
+				require.NoError(t, err)
+				assert.Equal(t, "Updated editor role", updated.Description)
+			})
+
+			t.Run("assign role", func(t *testing.T) {
+				assignment := &models.RoleAssignment{
+					ID:           uuid.New().String(),
+					RoleID:       roleID,
+					IdentityID:   admin.ID,
+					IdentityType: models.IdentityTypeAdmin,
+					AssignedAt:   time.Now(),
+					AssignedBy:   "system",
+				}
+				err := repo.Assign(ctx, assignment)
+				require.NoError(t, err)
+			})
+
+			t.Run("get role assignments", func(t *testing.T) {
+				assignments, err := repo.GetAssignments(ctx, roleID)
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(assignments), 1)
+			})
+
+			t.Run("get roles for identity", func(t *testing.T) {
+				roles, err := repo.GetRolesForIdentity(ctx, admin.ID)
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(roles), 1)
+			})
+
+			t.Run("unassign role", func(t *testing.T) {
+				err := repo.Unassign(ctx, roleID, admin.ID)
+				require.NoError(t, err)
+			})
+
+			t.Run("delete role", func(t *testing.T) {
+				err := repo.Delete(ctx, roleID)
+				require.NoError(t, err)
+			})
+		})
+
 		t.Run("db_additional_methods", func(t *testing.T) {
 			t.Run("health check", func(t *testing.T) {
 				err := db.HealthCheck(ctx)

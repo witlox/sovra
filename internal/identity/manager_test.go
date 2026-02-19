@@ -975,7 +975,7 @@ func TestShareEncryptor(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("encrypted shares are different each time", func(t *testing.T) {
+	t.Run("encrypted shares are different each time (OAEP random padding)", func(t *testing.T) {
 		encryptor := identity.NewShareEncryptor()
 
 		privKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -998,5 +998,79 @@ func TestShareEncryptor(t *testing.T) {
 
 		// OAEP encryption should produce different ciphertexts (due to random padding)
 		assert.NotEqual(t, encrypted1, encrypted2)
+	})
+}
+
+func TestVerifyMFA(t *testing.T) {
+	t.Run("fails when MFA not enabled", func(t *testing.T) {
+		mgr := createManager()
+		ctx := context.Background()
+
+		admin, err := mgr.CreateAdmin(ctx, "org-123", "admin@test.com", "Admin", models.AdminRoleSuperAdmin)
+		require.NoError(t, err)
+
+		err = mgr.VerifyMFA(ctx, admin.ID, "123456")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "MFA not enabled")
+	})
+
+	t.Run("fails with invalid admin ID", func(t *testing.T) {
+		mgr := createManager()
+		ctx := context.Background()
+
+		err := mgr.VerifyMFA(ctx, "nonexistent", "123456")
+		assert.Error(t, err)
+	})
+}
+
+func TestGetGroupMembers(t *testing.T) {
+	t.Run("returns members of a group", func(t *testing.T) {
+		mgr := createManager()
+		ctx := context.Background()
+
+		group, err := mgr.CreateGroup(ctx, "org-123", "engineers", "Engineering team", []string{"read"})
+		require.NoError(t, err)
+
+		admin, err := mgr.CreateAdmin(ctx, "org-123", "member@test.com", "Member", models.AdminRoleSuperAdmin)
+		require.NoError(t, err)
+
+		err = mgr.AddToGroup(ctx, group.ID, admin.ID, models.IdentityTypeAdmin)
+		require.NoError(t, err)
+
+		members, err := mgr.GetGroupMembers(ctx, group.ID)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(members), 1)
+	})
+
+	t.Run("returns empty for group with no members", func(t *testing.T) {
+		mgr := createManager()
+		ctx := context.Background()
+
+		group, err := mgr.CreateGroup(ctx, "org-123", "empty-group", "Empty", nil)
+		require.NoError(t, err)
+
+		members, err := mgr.GetGroupMembers(ctx, group.ID)
+		require.NoError(t, err)
+		assert.Empty(t, members)
+	})
+}
+
+func TestGetRoleAssignments(t *testing.T) {
+	t.Run("returns assignments for a role", func(t *testing.T) {
+		mgr := createManager()
+		ctx := context.Background()
+
+		role, err := mgr.CreateRole(ctx, "org-123", "editor", "Editor role", []models.Permission{{Resource: "workspaces", Actions: []string{"read", "write"}}})
+		require.NoError(t, err)
+
+		admin, err := mgr.CreateAdmin(ctx, "org-123", "assignee@test.com", "Assignee", models.AdminRoleSuperAdmin)
+		require.NoError(t, err)
+
+		err = mgr.AssignRole(ctx, role.ID, admin.ID, models.IdentityTypeAdmin, "system")
+		require.NoError(t, err)
+
+		assignments, err := mgr.GetRoleAssignments(ctx, role.ID)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(assignments), 1)
 	})
 }

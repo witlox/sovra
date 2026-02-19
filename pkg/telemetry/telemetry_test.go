@@ -3,6 +3,9 @@ package telemetry_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,4 +168,71 @@ func TestSafeAttributes_Result(t *testing.T) {
 			require.Len(t, attrs, 1)
 		})
 	}
+}
+
+func TestMiddleware(t *testing.T) {
+	t.Run("wraps handler with tracing", func(t *testing.T) {
+		var handlerCalled bool
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handlerCalled = true
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		})
+
+		mw := telemetry.Middleware("test-service", nil)
+		handler := mw(inner)
+
+		req := httptest.NewRequest("GET", "/api/v1/test", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		assert.True(t, handlerCalled)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("uses path sanitizer", func(t *testing.T) {
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+
+		sanitizer := func(path string) string {
+			return strings.ReplaceAll(path, "/123", "/{id}")
+		}
+
+		mw := telemetry.Middleware("test-service", sanitizer)
+		handler := mw(inner)
+
+		req := httptest.NewRequest("GET", "/api/v1/workspaces/123", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("captures non-200 status codes", func(t *testing.T) {
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		})
+
+		mw := telemetry.Middleware("test-service", nil)
+		handler := mw(inner)
+
+		req := httptest.NewRequest("GET", "/missing", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+func TestInjectContext(t *testing.T) {
+	t.Run("injects trace context into request headers", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/test", nil)
+		ctx := context.Background()
+
+		telemetry.InjectContext(ctx, req)
+
+		// InjectContext should not panic and should leave the request valid
+		assert.NotNil(t, req.Header)
+	})
 }

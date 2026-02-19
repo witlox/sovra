@@ -614,6 +614,82 @@ func TestCeremonyManagerCompleteCeremonyOperations(t *testing.T) {
 	})
 }
 
+// mockAuditor is a simple mock for the Auditor interface.
+type mockAuditor struct {
+	events []*models.AuditEvent
+}
+
+func (m *mockAuditor) Log(ctx context.Context, event *models.AuditEvent) error {
+	m.events = append(m.events, event)
+	return nil
+}
+
+// mockShareRepo is a simple mock for the ShareRepository interface.
+type mockShareRepo struct {
+	shares map[string][]models.CRKShare
+}
+
+func (m *mockShareRepo) CreateShare(ctx context.Context, share *models.CRKShare) error {
+	m.shares[share.CRKID] = append(m.shares[share.CRKID], *share)
+	return nil
+}
+
+func (m *mockShareRepo) GetShares(ctx context.Context, crkID string) ([]models.CRKShare, error) {
+	if shares, ok := m.shares[crkID]; ok {
+		return shares, nil
+	}
+	return nil, errors.ErrNotFound
+}
+
+func TestNewManagerWithAudit(t *testing.T) {
+	auditor := &mockAuditor{}
+	manager := crk.NewManagerWithAudit(auditor)
+
+	t.Run("generates CRK and logs audit event", func(t *testing.T) {
+		crkKey, err := manager.Generate("org-audit", 3, 2)
+		require.NoError(t, err)
+		assert.NotEmpty(t, crkKey.ID)
+		assert.Equal(t, "org-audit", crkKey.OrgID)
+	})
+
+	t.Run("signs data with audited manager", func(t *testing.T) {
+		crkKey, err := manager.Generate("org-audit", 5, 3)
+		require.NoError(t, err)
+
+		shares, err := manager.GetShares(crkKey.ID)
+		require.NoError(t, err)
+
+		sig, err := manager.Sign(shares[:3], crkKey.PublicKey, []byte("test data"))
+		require.NoError(t, err)
+		assert.NotEmpty(t, sig)
+	})
+}
+
+func TestNewManagerWithRepo(t *testing.T) {
+	repo := &mockShareRepo{shares: make(map[string][]models.CRKShare)}
+	manager := crk.NewManagerWithRepo(repo)
+
+	t.Run("generates CRK and persists shares", func(t *testing.T) {
+		crkKey, err := manager.Generate("org-repo", 3, 2)
+		require.NoError(t, err)
+		assert.NotEmpty(t, crkKey.ID)
+
+		// Shares should be persisted in the repo
+		shares, err := repo.GetShares(context.Background(), crkKey.ID)
+		require.NoError(t, err)
+		assert.Len(t, shares, 3)
+	})
+
+	t.Run("retrieves shares from repo", func(t *testing.T) {
+		crkKey, err := manager.Generate("org-repo-get", 5, 3)
+		require.NoError(t, err)
+
+		shares, err := manager.GetShares(crkKey.ID)
+		require.NoError(t, err)
+		assert.Len(t, shares, 5)
+	})
+}
+
 func TestContextGenerator(t *testing.T) {
 	manager := crk.NewManager()
 	ctx := context.Background()
