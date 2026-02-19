@@ -8,20 +8,92 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/witlox/sovra/internal/api"
+	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/crk"
+	"github.com/witlox/sovra/internal/edge"
+	"github.com/witlox/sovra/internal/federation"
+	"github.com/witlox/sovra/internal/identity"
+	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/workspace"
 	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/tests/mocks"
 	"github.com/witlox/sovra/tests/testutil/inmemory"
 )
 
+// --- Helpers to create REAL services backed by in-memory repos ---
+
+func newRealWorkspaceService() workspace.Service {
+	return workspace.NewService(
+		inmemory.NewWorkspaceRepository(),
+		inmemory.NewWorkspaceKeyManager(),
+		inmemory.NewWorkspaceCryptoService(),
+	)
+}
+
+func newRealEdgeService() edge.Service {
+	return edge.NewService(
+		inmemory.NewEdgeRepository(),
+		inmemory.NewVaultClient(),
+		inmemory.NewHealthChecker(),
+		inmemory.NewSyncManager(),
+	)
+}
+
+func newRealFederationService() federation.Service {
+	repo := inmemory.NewFederationRepository()
+	certMgr := inmemory.NewFederationCertManager()
+	mtlsClient := inmemory.NewFederationMTLSClient()
+	svc := federation.NewService(repo, certMgr, mtlsClient)
+	// Initialize with a default org so federation operations work
+	_, _ = svc.Init(context.Background(), federation.InitRequest{OrgID: "test-org"})
+	return svc
+}
+
+func newRealPolicyService() policy.Service {
+	return policy.NewPolicyService(
+		inmemory.NewPolicyRepository(),
+		inmemory.NewOPAClient(),
+		nil,
+	)
+}
+
+func newRealAuditService() audit.Service {
+	return audit.NewService(
+		inmemory.NewAuditRepository(),
+		inmemory.NewAuditForwarder(),
+		inmemory.NewAuditVerifier(),
+	)
+}
+
+func newRealCRKManager() crk.Manager {
+	return crk.NewManager()
+}
+
+func withOrgID(r *http.Request, orgID string) *http.Request {
+	ctx := context.WithValue(r.Context(), api.ContextKeyOrgID, orgID)
+	return r.WithContext(ctx)
+}
+
+func newRealIdentityManager() *identity.Manager {
+	return identity.NewManager(
+		mocks.NewAdminIdentityRepository(),
+		mocks.NewUserIdentityRepository(),
+		mocks.NewServiceIdentityRepository(),
+		mocks.NewDeviceIdentityRepository(),
+		mocks.NewIdentityGroupRepository(),
+		mocks.NewRoleRepository(),
+	)
+}
+
 // TestWorkspaceHandlerCreate tests the workspace Create handler.
 func TestWorkspaceHandlerCreate(t *testing.T) {
-	// Create a mock workspace service
-	wsSvc := inmemory.NewWorkspaceService()
+	wsSvc := newRealWorkspaceService()
 	handler := api.NewWorkspaceHandler(wsSvc)
 
 	t.Run("creates workspace with valid request", func(t *testing.T) {
@@ -75,12 +147,12 @@ func TestWorkspaceHandlerCreate(t *testing.T) {
 
 // TestWorkspaceHandlerList tests the workspace List handler.
 func TestWorkspaceHandlerList(t *testing.T) {
-	wsSvc := inmemory.NewWorkspaceService()
+	wsSvc := newRealWorkspaceService()
 	handler := api.NewWorkspaceHandler(wsSvc)
 
 	// Create some workspaces
-	_, _ = wsSvc.Create(context.Background(), workspace.CreateRequest{Name: "ws1"})
-	_, _ = wsSvc.Create(context.Background(), workspace.CreateRequest{Name: "ws2"})
+	_, _ = wsSvc.Create(context.Background(), workspace.CreateRequest{Name: "ws1", Participants: []string{"org1"}})
+	_, _ = wsSvc.Create(context.Background(), workspace.CreateRequest{Name: "ws2", Participants: []string{"org1"}})
 
 	t.Run("lists workspaces", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/v1/workspaces", nil)
@@ -107,11 +179,11 @@ func TestWorkspaceHandlerList(t *testing.T) {
 
 // TestWorkspaceHandlerGet tests the workspace Get handler.
 func TestWorkspaceHandlerGet(t *testing.T) {
-	wsSvc := inmemory.NewWorkspaceService()
+	wsSvc := newRealWorkspaceService()
 	handler := api.NewWorkspaceHandler(wsSvc)
 
 	// Create a workspace
-	ws, _ := wsSvc.Create(context.Background(), workspace.CreateRequest{Name: "test-ws"})
+	ws, _ := wsSvc.Create(context.Background(), workspace.CreateRequest{Name: "test-ws", Participants: []string{"org1"}})
 
 	t.Run("gets workspace by ID", func(t *testing.T) {
 		// Create a chi router context with URL param
@@ -151,11 +223,11 @@ func TestWorkspaceHandlerGet(t *testing.T) {
 
 // TestWorkspaceHandlerEncrypt tests the workspace Encrypt handler.
 func TestWorkspaceHandlerEncrypt(t *testing.T) {
-	wsSvc := inmemory.NewWorkspaceService()
+	wsSvc := newRealWorkspaceService()
 	handler := api.NewWorkspaceHandler(wsSvc)
 
 	// Create a workspace
-	ws, _ := wsSvc.Create(context.Background(), workspace.CreateRequest{Name: "encrypt-ws"})
+	ws, _ := wsSvc.Create(context.Background(), workspace.CreateRequest{Name: "encrypt-ws", Participants: []string{"org1"}})
 
 	t.Run("encrypts data", func(t *testing.T) {
 		r := chi.NewRouter()
@@ -194,11 +266,11 @@ func TestWorkspaceHandlerEncrypt(t *testing.T) {
 
 // TestWorkspaceHandlerDecrypt tests the workspace Decrypt handler.
 func TestWorkspaceHandlerDecrypt(t *testing.T) {
-	wsSvc := inmemory.NewWorkspaceService()
+	wsSvc := newRealWorkspaceService()
 	handler := api.NewWorkspaceHandler(wsSvc)
 
 	// Create a workspace and encrypt some data
-	ws, _ := wsSvc.Create(context.Background(), workspace.CreateRequest{Name: "decrypt-ws"})
+	ws, _ := wsSvc.Create(context.Background(), workspace.CreateRequest{Name: "decrypt-ws", Participants: []string{"org1"}})
 	ciphertext, _ := wsSvc.Encrypt(context.Background(), ws.ID, []byte("test data"))
 
 	t.Run("decrypts data", func(t *testing.T) {
@@ -238,7 +310,7 @@ func TestWorkspaceHandlerDecrypt(t *testing.T) {
 
 // TestPolicyHandlerCreate tests the policy Create handler.
 func TestPolicyHandlerCreate(t *testing.T) {
-	policySvc := inmemory.NewPolicyService()
+	policySvc := newRealPolicyService()
 	handler := api.NewPolicyHandler(policySvc)
 
 	t.Run("creates policy with valid rego", func(t *testing.T) {
@@ -287,7 +359,7 @@ func TestPolicyHandlerCreate(t *testing.T) {
 
 // TestPolicyHandlerGet tests the policy Get handler.
 func TestPolicyHandlerGet(t *testing.T) {
-	policySvc := inmemory.NewPolicyService()
+	policySvc := newRealPolicyService()
 	handler := api.NewPolicyHandler(policySvc)
 
 	t.Run("returns 400 for missing ID", func(t *testing.T) {
@@ -302,7 +374,7 @@ func TestPolicyHandlerGet(t *testing.T) {
 
 // TestPolicyHandlerEvaluate tests the policy Evaluate handler.
 func TestPolicyHandlerEvaluate(t *testing.T) {
-	policySvc := inmemory.NewPolicyService()
+	policySvc := newRealPolicyService()
 	handler := api.NewPolicyHandler(policySvc)
 
 	t.Run("evaluates policy", func(t *testing.T) {
@@ -341,7 +413,7 @@ func TestPolicyHandlerEvaluate(t *testing.T) {
 
 // TestPolicyHandlerValidate tests the policy Validate handler.
 func TestPolicyHandlerValidate(t *testing.T) {
-	policySvc := inmemory.NewPolicyService()
+	policySvc := newRealPolicyService()
 	handler := api.NewPolicyHandler(policySvc)
 
 	t.Run("validates valid rego", func(t *testing.T) {
@@ -375,7 +447,7 @@ func TestPolicyHandlerValidate(t *testing.T) {
 
 // TestAuditHandlerQuery tests the audit Query handler.
 func TestAuditHandlerQuery(t *testing.T) {
-	auditSvc := inmemory.NewAuditService()
+	auditSvc := newRealAuditService()
 	handler := api.NewAuditHandler(auditSvc)
 
 	t.Run("queries audit events", func(t *testing.T) {
@@ -400,7 +472,7 @@ func TestAuditHandlerQuery(t *testing.T) {
 
 // TestAuditHandlerGet tests the audit Get handler.
 func TestAuditHandlerGet(t *testing.T) {
-	auditSvc := inmemory.NewAuditService()
+	auditSvc := newRealAuditService()
 	handler := api.NewAuditHandler(auditSvc)
 
 	t.Run("returns 400 for missing ID", func(t *testing.T) {
@@ -415,7 +487,7 @@ func TestAuditHandlerGet(t *testing.T) {
 
 // TestEdgeHandlerRegister tests the edge Register handler.
 func TestEdgeHandlerRegister(t *testing.T) {
-	edgeSvc := inmemory.NewEdgeService()
+	edgeSvc := newRealEdgeService()
 	handler := api.NewEdgeHandler(edgeSvc)
 
 	t.Run("registers edge node", func(t *testing.T) {
@@ -463,7 +535,7 @@ func TestEdgeHandlerRegister(t *testing.T) {
 
 // TestEdgeHandlerList tests the edge List handler.
 func TestEdgeHandlerList(t *testing.T) {
-	edgeSvc := inmemory.NewEdgeService()
+	edgeSvc := newRealEdgeService()
 	handler := api.NewEdgeHandler(edgeSvc)
 
 	t.Run("lists edge nodes", func(t *testing.T) {
@@ -478,7 +550,7 @@ func TestEdgeHandlerList(t *testing.T) {
 
 // TestEdgeHandlerGet tests the edge Get handler.
 func TestEdgeHandlerGet(t *testing.T) {
-	edgeSvc := inmemory.NewEdgeService()
+	edgeSvc := newRealEdgeService()
 	handler := api.NewEdgeHandler(edgeSvc)
 
 	t.Run("returns 400 for missing ID", func(t *testing.T) {
@@ -493,8 +565,8 @@ func TestEdgeHandlerGet(t *testing.T) {
 
 // TestCRKHandlerGenerate tests the CRK Generate handler.
 func TestCRKHandlerGenerate(t *testing.T) {
-	crkSvc := inmemory.NewCRKService()
-	handler := api.NewCRKHandler(crkSvc.Manager(), crkSvc)
+	crkMgr := newRealCRKManager()
+	handler := api.NewCRKHandler(crkMgr, crk.NewCeremonyManager(crkMgr))
 
 	t.Run("generates CRK", func(t *testing.T) {
 		reqBody := map[string]any{
@@ -541,8 +613,8 @@ func TestCRKHandlerGenerate(t *testing.T) {
 
 // TestCRKHandlerSign tests the CRK Sign handler.
 func TestCRKHandlerSign(t *testing.T) {
-	crkSvc := inmemory.NewCRKService()
-	handler := api.NewCRKHandler(crkSvc.Manager(), crkSvc)
+	crkMgr := newRealCRKManager()
+	handler := api.NewCRKHandler(crkMgr, crk.NewCeremonyManager(crkMgr))
 
 	t.Run("returns 400 for empty shares", func(t *testing.T) {
 		reqBody := map[string]any{
@@ -579,7 +651,7 @@ func TestCRKHandlerSign(t *testing.T) {
 
 // TestFederationHandlerInit tests the federation Init handler.
 func TestFederationHandlerInit(t *testing.T) {
-	fedSvc := inmemory.NewFederationService()
+	fedSvc := newRealFederationService()
 	handler := api.NewFederationHandler(fedSvc)
 
 	t.Run("initializes federation", func(t *testing.T) {
@@ -624,7 +696,7 @@ func TestFederationHandlerInit(t *testing.T) {
 
 // TestFederationHandlerList tests the federation List handler.
 func TestFederationHandlerList(t *testing.T) {
-	fedSvc := inmemory.NewFederationService()
+	fedSvc := newRealFederationService()
 	handler := api.NewFederationHandler(fedSvc)
 
 	t.Run("lists federations", func(t *testing.T) {
@@ -639,13 +711,14 @@ func TestFederationHandlerList(t *testing.T) {
 
 // TestWorkspaceHandlerUpdate tests the workspace Update handler.
 func TestWorkspaceHandlerUpdate(t *testing.T) {
-	wsSvc := inmemory.NewWorkspaceService()
+	wsSvc := newRealWorkspaceService()
 	handler := api.NewWorkspaceHandler(wsSvc)
 
 	// First create a workspace to update
 	ctx := context.Background()
 	ws, _ := wsSvc.Create(ctx, workspace.CreateRequest{
 		Name:           "to-update",
+		Participants:   []string{"org1"},
 		Classification: models.ClassificationConfidential,
 	})
 
@@ -671,13 +744,14 @@ func TestWorkspaceHandlerUpdate(t *testing.T) {
 
 // TestWorkspaceHandlerDelete tests the workspace Delete handler.
 func TestWorkspaceHandlerDelete(t *testing.T) {
-	wsSvc := inmemory.NewWorkspaceService()
+	wsSvc := newRealWorkspaceService()
 	handler := api.NewWorkspaceHandler(wsSvc)
 
 	// First create a workspace to delete
 	ctx := context.Background()
 	ws, _ := wsSvc.Create(ctx, workspace.CreateRequest{
 		Name:           "to-delete",
+		Participants:   []string{"org1"},
 		Classification: models.ClassificationConfidential,
 	})
 
@@ -724,12 +798,13 @@ func TestWorkspaceHandlerDelete(t *testing.T) {
 
 // TestWorkspaceHandlerAddParticipant tests adding participants.
 func TestWorkspaceHandlerAddParticipant(t *testing.T) {
-	wsSvc := inmemory.NewWorkspaceService()
+	wsSvc := newRealWorkspaceService()
 	handler := api.NewWorkspaceHandler(wsSvc)
 
 	ctx := context.Background()
 	ws, _ := wsSvc.Create(ctx, workspace.CreateRequest{
 		Name:           "ws-with-participants",
+		Participants:   []string{"org1"},
 		Classification: models.ClassificationConfidential,
 	})
 
@@ -769,7 +844,7 @@ func TestWorkspaceHandlerAddParticipant(t *testing.T) {
 
 // TestWorkspaceHandlerRemoveParticipant tests removing participants.
 func TestWorkspaceHandlerRemoveParticipant(t *testing.T) {
-	wsSvc := inmemory.NewWorkspaceService()
+	wsSvc := newRealWorkspaceService()
 	handler := api.NewWorkspaceHandler(wsSvc)
 
 	ctx := context.Background()
@@ -799,12 +874,13 @@ func TestWorkspaceHandlerRemoveParticipant(t *testing.T) {
 
 // TestWorkspaceHandlerArchive tests workspace archiving.
 func TestWorkspaceHandlerArchive(t *testing.T) {
-	wsSvc := inmemory.NewWorkspaceService()
+	wsSvc := newRealWorkspaceService()
 	handler := api.NewWorkspaceHandler(wsSvc)
 
 	ctx := context.Background()
 	ws, _ := wsSvc.Create(ctx, workspace.CreateRequest{
 		Name:           "ws-to-archive",
+		Participants:   []string{"org1"},
 		Classification: models.ClassificationConfidential,
 	})
 
@@ -847,7 +923,7 @@ func TestWorkspaceHandlerArchive(t *testing.T) {
 
 // TestFederationHandlerEstablish tests establishing federation.
 func TestFederationHandlerEstablish(t *testing.T) {
-	fedSvc := inmemory.NewFederationService()
+	fedSvc := newRealFederationService()
 	handler := api.NewFederationHandler(fedSvc)
 
 	t.Run("establishes federation with valid request", func(t *testing.T) {
@@ -879,7 +955,7 @@ func TestFederationHandlerEstablish(t *testing.T) {
 
 // TestFederationHandlerStatus tests federation status.
 func TestFederationHandlerStatus(t *testing.T) {
-	fedSvc := inmemory.NewFederationService()
+	fedSvc := newRealFederationService()
 	handler := api.NewFederationHandler(fedSvc)
 
 	t.Run("gets federation status", func(t *testing.T) {
@@ -898,7 +974,7 @@ func TestFederationHandlerStatus(t *testing.T) {
 
 // TestFederationHandlerRevoke tests revoking federation.
 func TestFederationHandlerRevoke(t *testing.T) {
-	fedSvc := inmemory.NewFederationService()
+	fedSvc := newRealFederationService()
 	handler := api.NewFederationHandler(fedSvc)
 
 	t.Run("revokes federation", func(t *testing.T) {
@@ -923,7 +999,7 @@ func TestFederationHandlerRevoke(t *testing.T) {
 
 // TestFederationHandlerHealthCheck tests federation health checks.
 func TestFederationHandlerHealthCheck(t *testing.T) {
-	fedSvc := inmemory.NewFederationService()
+	fedSvc := newRealFederationService()
 	handler := api.NewFederationHandler(fedSvc)
 
 	t.Run("performs health check", func(t *testing.T) {
@@ -941,7 +1017,7 @@ func TestFederationHandlerHealthCheck(t *testing.T) {
 
 // TestFederationHandlerImportCertificate tests certificate import.
 func TestFederationHandlerImportCertificate(t *testing.T) {
-	fedSvc := inmemory.NewFederationService()
+	fedSvc := newRealFederationService()
 	handler := api.NewFederationHandler(fedSvc)
 
 	t.Run("imports certificate", func(t *testing.T) {
@@ -974,7 +1050,7 @@ func TestFederationHandlerImportCertificate(t *testing.T) {
 
 // TestPolicyHandlerUpdate tests policy update.
 func TestPolicyHandlerUpdate(t *testing.T) {
-	policySvc := inmemory.NewPolicyService()
+	policySvc := newRealPolicyService()
 	handler := api.NewPolicyHandler(policySvc)
 
 	t.Run("updates policy", func(t *testing.T) {
@@ -1013,7 +1089,7 @@ func TestPolicyHandlerUpdate(t *testing.T) {
 
 // TestPolicyHandlerDelete tests policy deletion.
 func TestPolicyHandlerDelete(t *testing.T) {
-	policySvc := inmemory.NewPolicyService()
+	policySvc := newRealPolicyService()
 	handler := api.NewPolicyHandler(policySvc)
 
 	t.Run("deletes policy", func(t *testing.T) {
@@ -1038,7 +1114,7 @@ func TestPolicyHandlerDelete(t *testing.T) {
 
 // TestPolicyHandlerGetForWorkspace tests getting policies for a workspace.
 func TestPolicyHandlerGetForWorkspace(t *testing.T) {
-	policySvc := inmemory.NewPolicyService()
+	policySvc := newRealPolicyService()
 	handler := api.NewPolicyHandler(policySvc)
 
 	t.Run("gets policies for workspace", func(t *testing.T) {
@@ -1056,7 +1132,7 @@ func TestPolicyHandlerGetForWorkspace(t *testing.T) {
 
 // TestAuditHandlerExport tests audit export.
 func TestAuditHandlerExport(t *testing.T) {
-	auditSvc := inmemory.NewAuditService()
+	auditSvc := newRealAuditService()
 	handler := api.NewAuditHandler(auditSvc)
 
 	t.Run("exports audit events", func(t *testing.T) {
@@ -1089,7 +1165,7 @@ func TestAuditHandlerExport(t *testing.T) {
 
 // TestAuditHandlerGetStats tests audit statistics.
 func TestAuditHandlerGetStats(t *testing.T) {
-	auditSvc := inmemory.NewAuditService()
+	auditSvc := newRealAuditService()
 	handler := api.NewAuditHandler(auditSvc)
 
 	t.Run("gets audit statistics", func(t *testing.T) {
@@ -1104,7 +1180,7 @@ func TestAuditHandlerGetStats(t *testing.T) {
 
 // TestAuditHandlerVerifyIntegrity tests audit integrity verification.
 func TestAuditHandlerVerifyIntegrity(t *testing.T) {
-	auditSvc := inmemory.NewAuditService()
+	auditSvc := newRealAuditService()
 	handler := api.NewAuditHandler(auditSvc)
 
 	t.Run("verifies audit integrity", func(t *testing.T) {
@@ -1136,7 +1212,7 @@ func TestAuditHandlerVerifyIntegrity(t *testing.T) {
 
 // TestEdgeHandlerUnregister tests edge node unregistration.
 func TestEdgeHandlerUnregister(t *testing.T) {
-	edgeSvc := inmemory.NewEdgeService()
+	edgeSvc := newRealEdgeService()
 	handler := api.NewEdgeHandler(edgeSvc)
 
 	t.Run("unregisters edge node", func(t *testing.T) {
@@ -1155,7 +1231,7 @@ func TestEdgeHandlerUnregister(t *testing.T) {
 
 // TestEdgeHandlerHealthCheck tests edge node health checks.
 func TestEdgeHandlerHealthCheck(t *testing.T) {
-	edgeSvc := inmemory.NewEdgeService()
+	edgeSvc := newRealEdgeService()
 	handler := api.NewEdgeHandler(edgeSvc)
 
 	t.Run("checks edge node health", func(t *testing.T) {
@@ -1173,7 +1249,7 @@ func TestEdgeHandlerHealthCheck(t *testing.T) {
 
 // TestEdgeHandlerSyncPolicies tests edge node policy sync.
 func TestEdgeHandlerSyncPolicies(t *testing.T) {
-	edgeSvc := inmemory.NewEdgeService()
+	edgeSvc := newRealEdgeService()
 	handler := api.NewEdgeHandler(edgeSvc)
 
 	t.Run("syncs policies to edge node", func(t *testing.T) {
@@ -1212,7 +1288,7 @@ func TestEdgeHandlerSyncPolicies(t *testing.T) {
 
 // TestEdgeHandlerSyncWorkspaceKeys tests edge node workspace key sync.
 func TestEdgeHandlerSyncWorkspaceKeys(t *testing.T) {
-	edgeSvc := inmemory.NewEdgeService()
+	edgeSvc := newRealEdgeService()
 	handler := api.NewEdgeHandler(edgeSvc)
 
 	t.Run("syncs workspace keys to edge node", func(t *testing.T) {
@@ -1236,7 +1312,7 @@ func TestEdgeHandlerSyncWorkspaceKeys(t *testing.T) {
 
 // TestEdgeHandlerGetSyncStatus tests edge node sync status.
 func TestEdgeHandlerGetSyncStatus(t *testing.T) {
-	edgeSvc := inmemory.NewEdgeService()
+	edgeSvc := newRealEdgeService()
 	handler := api.NewEdgeHandler(edgeSvc)
 
 	t.Run("gets edge node sync status", func(t *testing.T) {
@@ -1254,8 +1330,8 @@ func TestEdgeHandlerGetSyncStatus(t *testing.T) {
 
 // TestCRKHandlerVerify tests CRK signature verification.
 func TestCRKHandlerVerify(t *testing.T) {
-	crkMgr := inmemory.NewCRKService()
-	handler := api.NewCRKHandler(crkMgr, crkMgr)
+	crkMgr := newRealCRKManager()
+	handler := api.NewCRKHandler(crkMgr, crk.NewCeremonyManager(crkMgr))
 
 	t.Run("verifies signature", func(t *testing.T) {
 		reqBody := map[string]any{
@@ -1288,8 +1364,8 @@ func TestCRKHandlerVerify(t *testing.T) {
 
 // TestCRKHandlerStartCeremony tests starting CRK ceremony.
 func TestCRKHandlerStartCeremony(t *testing.T) {
-	crkMgr := inmemory.NewCRKService()
-	handler := api.NewCRKHandler(crkMgr, crkMgr)
+	crkMgr := newRealCRKManager()
+	handler := api.NewCRKHandler(crkMgr, crk.NewCeremonyManager(crkMgr))
 
 	t.Run("starts ceremony", func(t *testing.T) {
 		reqBody := map[string]any{
@@ -1321,8 +1397,8 @@ func TestCRKHandlerStartCeremony(t *testing.T) {
 
 // TestCRKHandlerAddShare tests adding share to ceremony.
 func TestCRKHandlerAddShare(t *testing.T) {
-	crkMgr := inmemory.NewCRKService()
-	handler := api.NewCRKHandler(crkMgr, crkMgr)
+	crkMgr := newRealCRKManager()
+	handler := api.NewCRKHandler(crkMgr, crk.NewCeremonyManager(crkMgr))
 
 	t.Run("adds share to ceremony", func(t *testing.T) {
 		reqBody := map[string]any{
@@ -1357,8 +1433,8 @@ func TestCRKHandlerAddShare(t *testing.T) {
 
 // TestCRKHandlerCompleteCeremony tests completing ceremony.
 func TestCRKHandlerCompleteCeremony(t *testing.T) {
-	crkMgr := inmemory.NewCRKService()
-	handler := api.NewCRKHandler(crkMgr, crkMgr)
+	crkMgr := newRealCRKManager()
+	handler := api.NewCRKHandler(crkMgr, crk.NewCeremonyManager(crkMgr))
 
 	t.Run("completes ceremony", func(t *testing.T) {
 		reqBody := map[string]any{
@@ -1390,8 +1466,8 @@ func TestCRKHandlerCompleteCeremony(t *testing.T) {
 
 // TestCRKHandlerCancelCeremony tests canceling ceremony.
 func TestCRKHandlerCancelCeremony(t *testing.T) {
-	crkMgr := inmemory.NewCRKService()
-	handler := api.NewCRKHandler(crkMgr, crkMgr)
+	crkMgr := newRealCRKManager()
+	handler := api.NewCRKHandler(crkMgr, crk.NewCeremonyManager(crkMgr))
 
 	t.Run("cancels ceremony", func(t *testing.T) {
 		reqBody := map[string]any{
@@ -1417,5 +1493,1212 @@ func TestCRKHandlerCancelCeremony(t *testing.T) {
 		handler.CancelCeremony(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// =============================================================================
+// Workspace Endpoint Tests (RotateDEK, ExtendExpiration, Invite, Accept, Decline)
+// =============================================================================
+
+func TestWorkspaceHandlerRotateDEK(t *testing.T) {
+	wsSvc := newRealWorkspaceService()
+	handler := api.NewWorkspaceHandler(wsSvc)
+
+	ws, err := wsSvc.Create(context.Background(), workspace.CreateRequest{
+		Name:         "rotate-dek-ws",
+		Participants: []string{"org1"},
+	})
+	require.NoError(t, err)
+
+	t.Run("rotates DEK successfully", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/rotate-dek", handler.RotateDEK)
+
+		reqBody := map[string]any{"signature": []byte("sig")}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/rotate-dek", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("returns 400 for missing id", func(t *testing.T) {
+		reqBody := map[string]any{"signature": []byte("sig")}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces//rotate-dek", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.RotateDEK(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/rotate-dek", handler.RotateDEK)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/rotate-dek", bytes.NewReader([]byte("bad")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestWorkspaceHandlerExtendExpiration(t *testing.T) {
+	wsSvc := newRealWorkspaceService()
+	handler := api.NewWorkspaceHandler(wsSvc)
+
+	ws, err := wsSvc.Create(context.Background(), workspace.CreateRequest{
+		Name:         "extend-ws",
+		Participants: []string{"org1"},
+	})
+	require.NoError(t, err)
+
+	t.Run("extends expiration successfully", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/extend", handler.ExtendExpiration)
+
+		future := time.Now().Add(30 * 24 * time.Hour)
+		reqBody := map[string]any{
+			"expires_at": future.Format(time.RFC3339),
+			"signature":  []byte("sig"),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/extend", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("returns 400 for zero expires_at", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/extend", handler.ExtendExpiration)
+
+		reqBody := map[string]any{
+			"signature": []byte("sig"),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/extend", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/extend", handler.ExtendExpiration)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/extend", bytes.NewReader([]byte("bad")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestWorkspaceHandlerInviteParticipant(t *testing.T) {
+	wsSvc := newRealWorkspaceService()
+	handler := api.NewWorkspaceHandler(wsSvc)
+
+	ws, err := wsSvc.Create(context.Background(), workspace.CreateRequest{
+		Name:         "invite-ws",
+		Participants: []string{"org1"},
+	})
+	require.NoError(t, err)
+
+	t.Run("invites participant successfully", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/invite", handler.InviteParticipant)
+
+		reqBody := map[string]any{
+			"org_id":    "org2",
+			"signature": []byte("sig"),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/invite", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+	})
+
+	t.Run("returns 400 for missing org_id", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/invite", handler.InviteParticipant)
+
+		reqBody := map[string]any{
+			"signature": []byte("sig"),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/invite", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestWorkspaceHandlerAcceptInvitation(t *testing.T) {
+	wsSvc := newRealWorkspaceService()
+	handler := api.NewWorkspaceHandler(wsSvc)
+
+	ws, err := wsSvc.Create(context.Background(), workspace.CreateRequest{
+		Name:         "accept-ws",
+		Participants: []string{"org1"},
+	})
+	require.NoError(t, err)
+
+	t.Run("accepts invitation successfully", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/accept-invitation", handler.AcceptInvitation)
+
+		reqBody := map[string]any{
+			"org_id":    "org2",
+			"signature": []byte("sig"),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/accept-invitation", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("returns 400 for missing org_id", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/accept-invitation", handler.AcceptInvitation)
+
+		reqBody := map[string]any{}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/accept-invitation", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestWorkspaceHandlerDeclineInvitation(t *testing.T) {
+	wsSvc := newRealWorkspaceService()
+	handler := api.NewWorkspaceHandler(wsSvc)
+
+	ws, err := wsSvc.Create(context.Background(), workspace.CreateRequest{
+		Name:         "decline-ws",
+		Participants: []string{"org1"},
+	})
+	require.NoError(t, err)
+
+	t.Run("declines invitation successfully", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/decline-invitation", handler.DeclineInvitation)
+
+		reqBody := map[string]any{
+			"org_id": "org2",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/decline-invitation", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("returns 400 for missing org_id", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/decline-invitation", handler.DeclineInvitation)
+
+		reqBody := map[string]any{}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/decline-invitation", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// =============================================================================
+// CRK Handler Tests (RotateCRK, Verify, full ceremony flow)
+// =============================================================================
+
+func TestCRKHandlerRotateCRK(t *testing.T) {
+	crkMgr := newRealCRKManager()
+	handler := api.NewCRKHandler(crkMgr, crk.NewCeremonyManager(crkMgr))
+
+	t.Run("starts rotation ceremony", func(t *testing.T) {
+		reqBody := map[string]any{
+			"org_id":    "org1",
+			"threshold": 2,
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/crk/rotate", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.RotateCRK(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+	})
+
+	t.Run("returns 400 for invalid threshold", func(t *testing.T) {
+		reqBody := map[string]any{
+			"org_id":    "org1",
+			"threshold": 0,
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/crk/rotate", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.RotateCRK(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/crk/rotate", bytes.NewReader([]byte("bad")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.RotateCRK(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestCRKHandlerVerifyValidation(t *testing.T) {
+	crkMgr := newRealCRKManager()
+	handler := api.NewCRKHandler(crkMgr, crk.NewCeremonyManager(crkMgr))
+
+	t.Run("returns 400 for missing fields", func(t *testing.T) {
+		reqBody := map[string]any{
+			"data": []byte("test"),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/crk/verify", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Verify(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/crk/verify", bytes.NewReader([]byte("bad")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Verify(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestCRKCeremonyFlow(t *testing.T) {
+	crkMgr := newRealCRKManager()
+	ceremonyMgr := crk.NewCeremonyManager(crkMgr)
+	handler := api.NewCRKHandler(crkMgr, ceremonyMgr)
+
+	// Generate a CRK to get shares for ceremony
+	crkResult, err := crkMgr.Generate("org1", 3, 2)
+	require.NoError(t, err)
+
+	// Get the shares from the manager
+	shares, err := crkMgr.GetShares(crkResult.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, shares)
+
+	t.Run("full ceremony: start, add shares, complete", func(t *testing.T) {
+		// Start ceremony with generic operation (sign/generate/rotate need pendingCRKs)
+		startBody, _ := json.Marshal(map[string]any{
+			"org_id":    "org1",
+			"operation": "verify",
+			"threshold": 2,
+		})
+		req := httptest.NewRequest("POST", "/api/v1/crk/ceremony/start", bytes.NewReader(startBody))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.StartCeremony(w, req)
+		require.Equal(t, http.StatusCreated, w.Code)
+
+		var ceremonyResp crk.Ceremony
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ceremonyResp))
+		require.NotEmpty(t, ceremonyResp.ID)
+
+		// Add shares via chi router
+		r := chi.NewRouter()
+		r.Post("/api/v1/crk/ceremony/{id}/share", handler.AddShare)
+
+		for i := 0; i < 2; i++ {
+			shareBody, _ := json.Marshal(map[string]any{
+				"share": shares[i],
+			})
+			req := httptest.NewRequest("POST", "/api/v1/crk/ceremony/"+ceremonyResp.ID+"/share", bytes.NewReader(shareBody))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusNoContent, w.Code)
+		}
+
+		// Complete ceremony
+		r2 := chi.NewRouter()
+		r2.Post("/api/v1/crk/ceremony/{id}/complete", handler.CompleteCeremony)
+
+		completeBody, _ := json.Marshal(map[string]any{
+			"witness": "test-witness",
+		})
+		req = httptest.NewRequest("POST", "/api/v1/crk/ceremony/"+ceremonyResp.ID+"/complete", bytes.NewReader(completeBody))
+		req.Header.Set("Content-Type", "application/json")
+		w = httptest.NewRecorder()
+		r2.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("cancel ceremony", func(t *testing.T) {
+		// Start a ceremony
+		startBody, _ := json.Marshal(map[string]any{
+			"org_id":    "org1",
+			"operation": "sign",
+			"threshold": 2,
+		})
+		req := httptest.NewRequest("POST", "/api/v1/crk/ceremony/start", bytes.NewReader(startBody))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.StartCeremony(w, req)
+		require.Equal(t, http.StatusCreated, w.Code)
+
+		var ceremonyResp crk.Ceremony
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ceremonyResp))
+		require.NotEmpty(t, ceremonyResp.ID)
+
+		// Cancel it
+		r := chi.NewRouter()
+		r.Delete("/api/v1/crk/ceremony/{id}", handler.CancelCeremony)
+
+		req = httptest.NewRequest("DELETE", "/api/v1/crk/ceremony/"+ceremonyResp.ID, nil)
+		w = httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+// =============================================================================
+// Identity Handler Tests
+// =============================================================================
+
+func TestIdentityHandlerAdminCRUD(t *testing.T) {
+	mgr := newRealIdentityManager()
+	handler := api.NewIdentityHandler(mgr)
+
+	var adminID string
+
+	t.Run("creates admin", func(t *testing.T) {
+		reqBody := map[string]any{
+			"email": "admin@test.com",
+			"name":  "Test Admin",
+			"role":  "super_admin",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/identities/admins", bytes.NewReader(body)), "org1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateAdmin(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.AdminIdentity
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "admin@test.com", resp.Email)
+		assert.Equal(t, "Test Admin", resp.Name)
+		assert.True(t, resp.Active)
+		adminID = resp.ID
+	})
+
+	t.Run("returns 400 for missing email", func(t *testing.T) {
+		reqBody := map[string]any{
+			"name": "No Email",
+			"role": "admin",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/admins", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateAdmin(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing name", func(t *testing.T) {
+		reqBody := map[string]any{
+			"email": "test@test.com",
+			"role":  "admin",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/admins", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateAdmin(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("gets admin by ID", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/identities/admins/{id}", handler.GetAdmin)
+
+		req := httptest.NewRequest("GET", "/api/v1/identities/admins/"+adminID, nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp models.AdminIdentity
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, adminID, resp.ID)
+	})
+
+	t.Run("returns 400 for missing admin ID", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/identities/admins/", nil)
+		w := httptest.NewRecorder()
+
+		handler.GetAdmin(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("lists admins", func(t *testing.T) {
+		req := withOrgID(httptest.NewRequest("GET", "/api/v1/identities/admins", nil), "org1")
+		w := httptest.NewRecorder()
+
+		handler.ListAdmins(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "admins")
+		assert.Contains(t, resp, "count")
+	})
+
+	t.Run("updates admin", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Put("/api/v1/identities/admins/{id}", handler.UpdateAdmin)
+
+		active := false
+		reqBody := map[string]any{
+			"name":   "Updated Admin",
+			"active": active,
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("PUT", "/api/v1/identities/admins/"+adminID, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp models.AdminIdentity
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "Updated Admin", resp.Name)
+		assert.False(t, resp.Active)
+	})
+
+	t.Run("deletes admin", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Delete("/api/v1/identities/admins/{id}", handler.DeleteAdmin)
+
+		req := httptest.NewRequest("DELETE", "/api/v1/identities/admins/"+adminID, nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+func TestIdentityHandlerMFA(t *testing.T) {
+	mgr := newRealIdentityManager()
+	handler := api.NewIdentityHandler(mgr)
+
+	// Create admin for MFA tests
+	admin, err := mgr.CreateAdmin(context.Background(), "org1", "mfa@test.com", "MFA Admin", "super_admin")
+	require.NoError(t, err)
+
+	t.Run("enables MFA", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/admins/{id}/mfa/enable", handler.EnableMFA)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/admins/"+admin.ID+"/mfa/enable", nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "provisioning_url")
+	})
+
+	t.Run("returns 400 for missing admin ID on verify", func(t *testing.T) {
+		reqBody := map[string]any{"totp_code": "123456"}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/admins//mfa/verify", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.VerifyMFA(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing totp_code", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/admins/{id}/mfa/verify", handler.VerifyMFA)
+
+		reqBody := map[string]any{}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/admins/"+admin.ID+"/mfa/verify", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestIdentityHandlerUserCRUD(t *testing.T) {
+	mgr := newRealIdentityManager()
+	handler := api.NewIdentityHandler(mgr)
+
+	var userID string
+
+	t.Run("creates user from SSO", func(t *testing.T) {
+		reqBody := map[string]any{
+			"provider": "google",
+			"subject":  "google-12345",
+			"email":    "user@test.com",
+			"name":     "Test User",
+			"groups":   []string{"engineers"},
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/identities/users/sso", bytes.NewReader(body)), "org1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateUserFromSSO(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.UserIdentity
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "user@test.com", resp.Email)
+		userID = resp.ID
+	})
+
+	t.Run("returns 400 for missing provider", func(t *testing.T) {
+		reqBody := map[string]any{
+			"subject": "sub",
+			"email":   "a@b.com",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/users/sso", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateUserFromSSO(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing subject", func(t *testing.T) {
+		reqBody := map[string]any{
+			"provider": "google",
+			"email":    "a@b.com",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/users/sso", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateUserFromSSO(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing email", func(t *testing.T) {
+		reqBody := map[string]any{
+			"provider": "google",
+			"subject":  "sub",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/users/sso", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateUserFromSSO(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("gets user by ID", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/identities/users/{id}", handler.GetUser)
+
+		req := httptest.NewRequest("GET", "/api/v1/identities/users/"+userID, nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("lists users", func(t *testing.T) {
+		req := withOrgID(httptest.NewRequest("GET", "/api/v1/identities/users", nil), "org1")
+		w := httptest.NewRecorder()
+
+		handler.ListUsers(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "users")
+	})
+
+	t.Run("deletes user", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Delete("/api/v1/identities/users/{id}", handler.DeleteUser)
+
+		req := httptest.NewRequest("DELETE", "/api/v1/identities/users/"+userID, nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+func TestIdentityHandlerServiceCRUD(t *testing.T) {
+	mgr := newRealIdentityManager()
+	handler := api.NewIdentityHandler(mgr)
+
+	var serviceID string
+
+	t.Run("creates service", func(t *testing.T) {
+		reqBody := map[string]any{
+			"name":        "payment-service",
+			"description": "Handles payments",
+			"auth_method": "mtls",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/identities/services", bytes.NewReader(body)), "org12345678")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateService(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.ServiceIdentity
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "payment-service", resp.Name)
+		serviceID = resp.ID
+	})
+
+	t.Run("returns 400 for missing name", func(t *testing.T) {
+		reqBody := map[string]any{
+			"auth_method": "mtls",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/services", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateService(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("gets service by ID", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/identities/services/{id}", handler.GetService)
+
+		req := httptest.NewRequest("GET", "/api/v1/identities/services/"+serviceID, nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("lists services", func(t *testing.T) {
+		req := withOrgID(httptest.NewRequest("GET", "/api/v1/identities/services", nil), "org12345678")
+		w := httptest.NewRecorder()
+
+		handler.ListServices(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "services")
+	})
+
+	t.Run("deletes service", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Delete("/api/v1/identities/services/{id}", handler.DeleteService)
+
+		req := httptest.NewRequest("DELETE", "/api/v1/identities/services/"+serviceID, nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+func TestIdentityHandlerDeviceCRUD(t *testing.T) {
+	mgr := newRealIdentityManager()
+	handler := api.NewIdentityHandler(mgr)
+
+	var deviceID string
+
+	t.Run("enrolls device", func(t *testing.T) {
+		reqBody := map[string]any{
+			"device_name": "edge-hsm-01",
+			"device_type": "hsm",
+			"cert_serial": "AA:BB:CC:DD:EE:FF",
+			"cert_expiry": time.Now().Add(365 * 24 * time.Hour).Format(time.RFC3339),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/identities/devices", bytes.NewReader(body)), "org1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.EnrollDevice(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.DeviceIdentity
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "edge-hsm-01", resp.DeviceName)
+		deviceID = resp.ID
+	})
+
+	t.Run("returns 400 for missing device_name", func(t *testing.T) {
+		reqBody := map[string]any{
+			"cert_serial": "AA:BB:CC",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/devices", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.EnrollDevice(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing cert_serial", func(t *testing.T) {
+		reqBody := map[string]any{
+			"device_name": "dev1",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/devices", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.EnrollDevice(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("gets device by ID", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/identities/devices/{id}", handler.GetDevice)
+
+		req := httptest.NewRequest("GET", "/api/v1/identities/devices/"+deviceID, nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("lists devices", func(t *testing.T) {
+		req := withOrgID(httptest.NewRequest("GET", "/api/v1/identities/devices", nil), "org1")
+		w := httptest.NewRecorder()
+
+		handler.ListDevices(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "devices")
+	})
+
+	t.Run("revokes device", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/devices/{id}/revoke", handler.RevokeDevice)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/devices/"+deviceID+"/revoke", nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+func TestIdentityHandlerGroupCRUD(t *testing.T) {
+	mgr := newRealIdentityManager()
+	handler := api.NewIdentityHandler(mgr)
+
+	var groupID string
+
+	t.Run("creates group", func(t *testing.T) {
+		reqBody := map[string]any{
+			"name":           "platform-team",
+			"description":    "Platform engineering team",
+			"vault_policies": []string{"read-secrets", "write-config"},
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/identities/groups", bytes.NewReader(body)), "org1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateGroup(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.IdentityGroup
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "platform-team", resp.Name)
+		groupID = resp.ID
+	})
+
+	t.Run("returns 400 for missing name", func(t *testing.T) {
+		reqBody := map[string]any{
+			"description": "no name",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/groups", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateGroup(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("gets group by ID", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/identities/groups/{id}", handler.GetGroup)
+
+		req := httptest.NewRequest("GET", "/api/v1/identities/groups/"+groupID, nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("lists groups", func(t *testing.T) {
+		req := withOrgID(httptest.NewRequest("GET", "/api/v1/identities/groups", nil), "org1")
+		w := httptest.NewRecorder()
+
+		handler.ListGroups(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "groups")
+	})
+
+	t.Run("adds group member", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/groups/{id}/members", handler.AddGroupMember)
+
+		reqBody := map[string]any{
+			"identity_id":   "admin-123",
+			"identity_type": "admin",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/groups/"+groupID+"/members", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("returns 400 for missing identity_id on add member", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/groups/{id}/members", handler.AddGroupMember)
+
+		reqBody := map[string]any{
+			"identity_type": "admin",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/groups/"+groupID+"/members", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing identity_type on add member", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/groups/{id}/members", handler.AddGroupMember)
+
+		reqBody := map[string]any{
+			"identity_id": "admin-123",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/groups/"+groupID+"/members", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("removes group member", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Delete("/api/v1/identities/groups/{id}/members/{identityId}", handler.RemoveGroupMember)
+
+		req := httptest.NewRequest("DELETE", "/api/v1/identities/groups/"+groupID+"/members/admin-123", nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+func TestIdentityHandlerRoleCRUD(t *testing.T) {
+	mgr := newRealIdentityManager()
+	handler := api.NewIdentityHandler(mgr)
+
+	var roleID string
+
+	t.Run("creates role", func(t *testing.T) {
+		reqBody := map[string]any{
+			"name":        "key-rotator",
+			"description": "Can rotate keys",
+			"permissions": []map[string]any{
+				{
+					"resource": "keys",
+					"actions":  []string{"rotate", "read"},
+				},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/identities/roles", bytes.NewReader(body)), "org1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateRole(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.Role
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "key-rotator", resp.Name)
+		roleID = resp.ID
+	})
+
+	t.Run("returns 400 for missing name", func(t *testing.T) {
+		reqBody := map[string]any{
+			"description": "no name",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/roles", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateRole(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("gets role by ID", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/identities/roles/{id}", handler.GetRole)
+
+		req := httptest.NewRequest("GET", "/api/v1/identities/roles/"+roleID, nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("lists roles", func(t *testing.T) {
+		req := withOrgID(httptest.NewRequest("GET", "/api/v1/identities/roles", nil), "org1")
+		w := httptest.NewRecorder()
+
+		handler.ListRoles(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "roles")
+	})
+
+	t.Run("assigns role", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/roles/{id}/assign", handler.AssignRole)
+
+		reqBody := map[string]any{
+			"identity_id":   "admin-123",
+			"identity_type": "admin",
+			"assigned_by":   "super-admin",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/roles/"+roleID+"/assign", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("returns 400 for missing identity_id on assign", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/roles/{id}/assign", handler.AssignRole)
+
+		reqBody := map[string]any{
+			"identity_type": "admin",
+			"assigned_by":   "super-admin",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/roles/"+roleID+"/assign", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing identity_type on assign", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/roles/{id}/assign", handler.AssignRole)
+
+		reqBody := map[string]any{
+			"identity_id": "admin-123",
+			"assigned_by": "super-admin",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/roles/"+roleID+"/assign", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing assigned_by on assign", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/roles/{id}/assign", handler.AssignRole)
+
+		reqBody := map[string]any{
+			"identity_id":   "admin-123",
+			"identity_type": "admin",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/roles/"+roleID+"/assign", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("unassigns role", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Delete("/api/v1/identities/roles/{id}/assignments/{identityId}", handler.UnassignRole)
+
+		req := httptest.NewRequest("DELETE", "/api/v1/identities/roles/"+roleID+"/assignments/admin-123", nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
 }
