@@ -1333,7 +1333,7 @@ func TestPostgresRepositoriesIntegration(t *testing.T) {
 					IdentityID:   admin.ID,
 					IdentityType: models.IdentityTypeAdmin,
 					AssignedAt:   time.Now(),
-					AssignedBy:   "system",
+					AssignedBy:   admin.ID,
 				}
 				err := repo.Assign(ctx, assignment)
 				require.NoError(t, err)
