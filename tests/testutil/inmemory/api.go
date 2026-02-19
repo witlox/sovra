@@ -311,10 +311,10 @@ func (m *Gateway) Health(ctx context.Context) (*api.GatewayHealth, error) {
 		RequestsHandled: m.requestCount,
 		ErrorRate:       0.001,
 		Services: map[string]bool{
-			"policy-engine":      true,
-			"audit-service":      true,
-			"key-lifecycle":      true,
-			"federation-manager": true,
+			"api-gateway": true,
+			"database":    true,
+			"vault":       true,
+			"opa":         true,
 		},
 	}, nil
 }

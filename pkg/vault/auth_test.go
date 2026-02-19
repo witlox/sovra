@@ -326,19 +326,19 @@ func TestAppRoleRoleConfig_FullConfiguration(t *testing.T) {
 	t.Parallel()
 
 	cfg := &AppRoleRoleConfig{
-		Name:               "audit-service",
+		Name:               "api-gateway",
 		BindSecretID:       true,
 		SecretIDBoundCIDRs: []string{"10.0.0.0/8", "172.16.0.0/12"},
 		SecretIDNumUses:    1, // One-time secret
 		SecretIDTTL:        "10m",
-		TokenPolicies:      []string{"audit-service-policy"},
+		TokenPolicies:      []string{"api-gateway-policy"},
 		TokenTTL:           "15m",
 		TokenMaxTTL:        "1h",
 		TokenBoundCIDRs:    []string{"10.0.0.0/8"},
 		TokenNumUses:       0, // Unlimited
 	}
 
-	assert.Equal(t, "audit-service", cfg.Name)
+	assert.Equal(t, "api-gateway", cfg.Name)
 	assert.Len(t, cfg.SecretIDBoundCIDRs, 2)
 	assert.Equal(t, 1, cfg.SecretIDNumUses)
 	assert.Equal(t, 0, cfg.TokenNumUses)

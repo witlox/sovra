@@ -4,7 +4,7 @@ metadata:
   name: opa
   labels:
     app.kubernetes.io/name: opa
-    app.kubernetes.io/component: policy-engine
+    app.kubernetes.io/component: policy
     app.kubernetes.io/part-of: sovra
 spec:
   replicas: 2
@@ -15,7 +15,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: opa
-        app.kubernetes.io/component: policy-engine
+        app.kubernetes.io/component: policy
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8181"

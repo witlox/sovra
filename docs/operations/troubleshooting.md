@@ -114,8 +114,8 @@ kubectl top pods -n sovra
 # Check database performance
 psql -U sovra -c "SELECT * FROM pg_stat_activity;"
 
-# Check policy engine
-kubectl logs -n sovra -l app=sovra-policy-engine
+# Check API gateway logs for policy evaluation
+kubectl logs -n sovra -l app=sovra-api-gateway --tail=50
 ```
 
 **Solutions:**
@@ -141,7 +141,7 @@ psql -U sovra sovra < scripts/optimize-db.sql
 3. **Policy evaluation slow:**
 ```bash
 # Increase policy cache
-kubectl set env deployment/sovra-policy-engine \
+kubectl set env deployment/sovra-api-gateway \
   POLICY_CACHE_SIZE=1000 \
   -n sovra
 ```
@@ -269,7 +269,7 @@ curl -k https://partner-sovra.example.org/health
 sovra-cli federation cert-verify org-b
 
 # Check logs
-kubectl logs -n sovra -l app=sovra-federation-manager
+kubectl logs -n sovra -l app=sovra-api-gateway --tail=50
 ```
 
 **Solutions:**

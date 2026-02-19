@@ -30,7 +30,7 @@ title: Installation
 - kubectl 1.29+
 - Terraform 1.7+ (for infrastructure provisioning)
 - PostgreSQL 15+ (managed or self-hosted)
-- Go 1.22+ (for building from source)
+- Go 1.25+ (for building from source)
 
 ---
 

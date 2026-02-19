@@ -89,11 +89,11 @@ attribute.Int64("duration_ms", 42)
 ```
 Trace: 4b3a9c2d-1e5f-4a8b-9c2d-1e5f4a8b9c2d
 ├── sovra-api-gateway: POST /v1/workspace/{workspace}/encrypt (42ms)
-│   ├── sovra-policy-engine: evaluate-policy (5ms)
+│   ├── policy: evaluate-policy (5ms)
 │   │   └── opa: query (3ms)
-│   ├── sovra-edge-agent: encrypt (30ms)
+│   ├── edge-agent: encrypt (30ms)
 │   │   └── vault: transit/encrypt (25ms)
-│   └── sovra-audit: record-event (2ms)
+│   └── audit: record-event (2ms)
 │       └── postgresql: INSERT (1ms)
 ```
 
@@ -101,7 +101,7 @@ Trace: 4b3a9c2d-1e5f-4a8b-9c2d-1e5f4a8b9c2d
 
 ### Prometheus Endpoints
 
-Each Sovra service exposes metrics at `/metrics`:
+The Sovra API gateway exposes metrics at `/metrics`:
 
 ```bash
 # Control plane metrics
@@ -129,7 +129,7 @@ sovra_api_active_connections
 sovra_api_errors_total{type="policy_violation"}
 ```
 
-#### Policy Engine
+#### Policy (via API Gateway)
 
 ```prometheus
 # Policy evaluations
@@ -143,7 +143,7 @@ sovra_policy_cache_hits_total
 sovra_policy_cache_misses_total
 ```
 
-#### Audit Service
+#### Audit (via API Gateway)
 
 ```prometheus
 # Audit events

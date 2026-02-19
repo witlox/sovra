@@ -235,7 +235,7 @@ sovra-cli decrypt \
   --output /tmp/samples.json
 
 # Process data
-python process_samples.py /tmp/samples.json /tmp/results.json
+./process_samples /tmp/samples.json /tmp/results.json
 
 # Encrypt output
 sovra-cli encrypt \

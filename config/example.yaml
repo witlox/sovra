@@ -5,7 +5,6 @@
 # For example, to override the database host, set the SOVRA_DATABASE_HOST environment variable.
 
 # Service identification
-# service: api-gateway, audit-service, etc.
 service: "api-gateway"
 org_id: "org-a"
 log_level: "info"

@@ -127,10 +127,10 @@ Fixes #456
 #### Code Review Process
 
 1. **Automated checks** must pass:
-   - Linting (golangci-lint, ruff)
+   - Linting (golangci-lint)
    - Unit tests
    - Integration tests
-   - Security scanning (gosec, bandit)
+   - Security scanning (gosec)
    - Code coverage (>80% for new code)
 
 2. **Human review** by at least one maintainer:
@@ -148,11 +148,8 @@ Fixes #456
 ### Prerequisites
 
 ```bash
-# Go 1.22+
+# Go 1.25+
 go version
-
-# Python 3.12+
-python --version
 
 # Docker 24+
 docker --version

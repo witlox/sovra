@@ -132,11 +132,11 @@ terraform apply
 ### Register Edge Node
 
 ```bash
-#Note that this may not be the latest version, docs are more static than build
-
 # Install CLI
-curl -LO https://github.com/witlox/sovra/releases/download/2026.3.71/sovra_2026.3.71_linux_amd64.tar.gz
-tar xzf sovra_2026.3.71_linux_amd64.tar.gz
+curl -s https://api.github.com/repos/witlox/sovra/releases/latest \
+  | grep "browser_download_url.*linux_amd64.tar.gz" \
+  | cut -d '"' -f 4 | xargs curl -LO
+tar xzf sovra_*_linux_amd64.tar.gz
 chmod +x sovra
 sudo mv sovra /usr/local/bin/sovra-cli
 

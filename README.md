@@ -68,15 +68,17 @@ docker run -d --name sovra-api ghcr.io/witlox/sovra:latest /app/api-gateway
 Download the latest release for your platform from [GitHub Releases](https://github.com/witlox/sovra/releases).
 
 ```bash
-# Note that this may not be the latest version, docs are more static than build!
-
 # Linux (amd64)
-curl -LO https://github.com/witlox/sovra/releases/download/2026.3.71/sovra_2026.3.71_linux_amd64.tar.gz
-tar xzf sovra_2026.3.71_linux_amd64.tar.gz
+curl -s https://api.github.com/repos/witlox/sovra/releases/latest \
+  | grep "browser_download_url.*linux_amd64.tar.gz" \
+  | cut -d '"' -f 4 | xargs curl -LO
+tar xzf sovra_*_linux_amd64.tar.gz
 
 # macOS (arm64)
-curl -LO https://github.com/witlox/sovra/releases/download/2026.3.71/sovra_2026.3.71_darwin_arm64.tar.gz
-tar xzf sovra_2026.3.71_darwin_arm64.tar.gz
+curl -s https://api.github.com/repos/witlox/sovra/releases/latest \
+  | grep "browser_download_url.*darwin_arm64.tar.gz" \
+  | cut -d '"' -f 4 | xargs curl -LO
+tar xzf sovra_*_darwin_arm64.tar.gz
 
 # Add to PATH
 sudo mv sovra /usr/local/bin/sovra-cli
@@ -137,7 +139,7 @@ See [Github Pages](https://witlox.github.io/sovra)
 
 ## Technology
 
-- **Services:** Go 1.22+
+- **Services:** Go 1.25+
 - **Database:** PostgreSQL 15+
 - **Secrets:** HashiCorp Vault 1.16+
 - **Policy:** OPA 0.61+

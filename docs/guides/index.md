@@ -14,6 +14,10 @@ title: Operations
 - [Control Plane](../control-plane) - Deploying the control plane
 - [Installation](../installation) - Setup and installation
 
+# Reference
+- [CLI Reference](../reference/cli) - Complete CLI command reference
+- [API Reference](../reference/api) - REST API endpoint reference
+
 # Critical Concepts
 - [CRK Management](../concepts/crk-management) - Customer Root Key lifecycle
 - [Identity Management](../concepts/identity-management) - Users, roles, and permissions

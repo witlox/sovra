@@ -129,7 +129,7 @@ Control plane never sees:
 
 ## Technology
 
-- Go 1.22+ (services)
+- Go 1.25+ (services)
 - PostgreSQL 15+ (data)
 - Vault 1.16+ (secrets)
 - OPA 0.61+ (policy)

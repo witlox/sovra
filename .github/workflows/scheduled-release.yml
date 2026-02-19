@@ -23,8 +23,8 @@ jobs:
       - name: Check for updates since last release
         id: check
         run: |
-          # Get the latest tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          # Get the latest versioned tag (exclude the 'latest' symlink tag)
+          LATEST_TAG=$(git tag --sort=-creatordate | grep -v '^latest$' | head -1)
           
           if [ -z "$LATEST_TAG" ]; then
             echo "No previous tag found, will create release"
@@ -98,6 +98,34 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ steps.version.outputs.version }}
+
+      - name: Update latest release
+        if: steps.check_release.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Move the 'latest' git tag to current commit
+          git tag -f latest
+          git push origin latest --force
+
+          # Delete existing 'latest' GitHub Release if present
+          gh release delete latest --yes 2>/dev/null || true
+
+          # Download all artifacts from the versioned release
+          mkdir -p /tmp/release-assets
+          gh release download "${VERSION}" --dir /tmp/release-assets
+
+          # Create 'latest' release and upload the same artifacts
+          gh release create latest \
+            --title "Latest Release (${VERSION})" \
+            --notes "This release always tracks the most recent version.
+          Current version: [${VERSION}](https://github.com/${{ github.repository }}/releases/tag/${VERSION})
+
+          Container: \`docker pull ghcr.io/${{ github.repository }}:latest\`" \
+            --latest \
+            /tmp/release-assets/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   container:
     needs: release

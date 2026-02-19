@@ -78,9 +78,6 @@ scrape_configs:
         regex: ([^:]+)(?::\d+)?;(\d+)
         replacement: $1:$2
 
-  - job_name: 'sovra-policy-engine'
-    # ... similar config
-
   - job_name: 'vault'
     static_configs:
       - targets:
@@ -335,7 +332,7 @@ kubectl apply -f infrastructure/kubernetes/monitoring/promtail/
 {app="sovra-api-gateway"} |= "error"
 
 # Audit events
-{app="sovra-audit-service"} | json | event_type="workspace.access"
+{app="sovra-api-gateway"} | json | event_type="workspace.access"
 
 # Failed authentication
 {app="sovra-api-gateway"} | json | status_code="401"
@@ -381,8 +378,7 @@ kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"sovra-.*"}
 kubectl top pods -n sovra
 
 # Check metrics
-# API gateway high CPU usually means high request rate
-# Policy engine high CPU means complex policy evaluation
+# High CPU usually means high request rate or complex policy evaluation
 ```
 
 ### High Memory Usage

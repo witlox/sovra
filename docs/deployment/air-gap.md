@@ -66,21 +66,13 @@ All software must be transferred offline:
 mkdir -p /tmp/sovra-airgap/{images,manifests,binaries,certs}
 
 # Pull container images
-docker pull ghcr.io/witlox/sovra-api-gateway:v0.5.0
-docker pull ghcr.io/witlox/sovra-policy-engine:v0.5.0
-docker pull ghcr.io/witlox/sovra-key-lifecycle:v0.5.0
-docker pull ghcr.io/witlox/sovra-audit-service:v0.5.0
-docker pull ghcr.io/witlox/sovra-federation-manager:v0.5.0
+docker pull ghcr.io/witlox/sovra:v0.5.0
 docker pull vault:1.16.0
 docker pull postgres:15.4
 
 # Save images to tarball
 docker save -o /tmp/sovra-airgap/images/sovra-images.tar \
-  ghcr.io/witlox/sovra-api-gateway:v0.5.0 \
-  ghcr.io/witlox/sovra-policy-engine:v0.5.0 \
-  ghcr.io/witlox/sovra-key-lifecycle:v0.5.0 \
-  ghcr.io/witlox/sovra-audit-service:v0.5.0 \
-  ghcr.io/witlox/sovra-federation-manager:v0.5.0 \
+  ghcr.io/witlox/sovra:v0.5.0 \
   vault:1.16.0 \
   postgres:15.4
 ```
@@ -105,12 +97,10 @@ cd /tmp/sovra-airgap/certs
 openssl genrsa -out ca-key.pem 4096
 openssl req -new -x509 -days 3650 -key ca-key.pem -out ca.crt
 
-# Control plane certificates (valid for 1 year)
-for i in api-gateway policy-engine key-lifecycle audit-service federation-manager; do
-  openssl genrsa -out ${i}-key.pem 2048
-  openssl req -new -key ${i}-key.pem -out ${i}.csr
-  openssl x509 -req -in ${i}.csr -CA ca.crt -CAkey ca-key.pem -CAcreateserial -out ${i}.crt -days 365
-done
+# Control plane certificate (valid for 1 year)
+openssl genrsa -out api-gateway-key.pem 2048
+openssl req -new -key api-gateway-key.pem -out api-gateway.csr
+openssl x509 -req -in api-gateway.csr -CA ca.crt -CAkey ca-key.pem -CAcreateserial -out api-gateway.crt -days 365
 
 # Edge node certificates (100 pre-generated)
 for i in {1..100}; do
@@ -160,14 +150,14 @@ cd sovra-airgap
 docker load < images/sovra-images.tar
 
 # Tag for local registry
-docker tag ghcr.io/witlox/sovra-api-gateway:v0.5.0 localhost:5000/sovra/api-gateway:v0.5.0
-docker tag ghcr.io/witlox/sovra-policy-engine:v0.5.0 localhost:5000/sovra/policy-engine:v0.5.0
-# ... (repeat for all images)
+docker tag ghcr.io/witlox/sovra:v0.5.0 localhost:5000/sovra/sovra:v0.5.0
+docker tag vault:1.16.0 localhost:5000/sovra/vault:1.16.0
+docker tag postgres:15.4 localhost:5000/sovra/postgres:15.4
 
 # Push to local registry
-docker push localhost:5000/sovra/api-gateway:v0.5.0
-docker push localhost:5000/sovra/policy-engine:v0.5.0
-# ... (repeat for all images)
+docker push localhost:5000/sovra/sovra:v0.5.0
+docker push localhost:5000/sovra/vault:1.16.0
+docker push localhost:5000/sovra/postgres:15.4
 ```
 
 ### Step 3: Deploy PostgreSQL
@@ -209,7 +199,7 @@ kubectl create secret generic sovra-ca \
 
 ```bash
 # Update image references in manifests to use local registry
-sed -i 's|ghcr.io/witlox/sovra-|localhost:5000/sovra/|g' manifests/*.yaml
+sed -i 's|ghcr.io/witlox/sovra|localhost:5000/sovra/sovra|g' manifests/*.yaml
 
 # Deploy
 kubectl apply -k manifests/

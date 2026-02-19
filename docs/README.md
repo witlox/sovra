@@ -29,6 +29,10 @@ Welcome to Sovra! This guide will help you get started with deploying and using 
 ### For Users and Admins
 - **[Guides](guides/)** - User and administrator workflows
 
+### Reference
+- **[CLI Reference](reference/cli)** - Complete CLI command reference
+- **[API Reference](reference/api)** - REST API endpoint reference
+
 ### Security
 - **[Security Overview](security/)** - Authentication, authorization, and best practices
 
