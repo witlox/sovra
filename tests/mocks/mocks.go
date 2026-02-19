@@ -2028,3 +2028,126 @@ func (m *RoleRepository) GetRolesForIdentity(ctx context.Context, identityID str
 	}
 	return result, nil
 }
+
+// =============================================================================
+// Emergency Access Mocks
+// =============================================================================
+
+// EmergencyAccessRepository mock for emergency access persistence.
+type EmergencyAccessRepository struct {
+	mu       sync.RWMutex
+	requests map[string]*models.EmergencyAccessRequest
+}
+
+func NewEmergencyAccessRepository() *EmergencyAccessRepository {
+	return &EmergencyAccessRepository{
+		requests: make(map[string]*models.EmergencyAccessRequest),
+	}
+}
+
+func (m *EmergencyAccessRepository) Create(ctx context.Context, req *models.EmergencyAccessRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requests[req.ID] = req
+	return nil
+}
+
+func (m *EmergencyAccessRepository) Get(ctx context.Context, id string) (*models.EmergencyAccessRequest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if req, ok := m.requests[id]; ok {
+		return req, nil
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *EmergencyAccessRepository) List(ctx context.Context, orgID string) ([]*models.EmergencyAccessRequest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.EmergencyAccessRequest
+	for _, req := range m.requests {
+		if req.OrgID == orgID {
+			result = append(result, req)
+		}
+	}
+	return result, nil
+}
+
+func (m *EmergencyAccessRepository) ListPending(ctx context.Context, orgID string) ([]*models.EmergencyAccessRequest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.EmergencyAccessRequest
+	for _, req := range m.requests {
+		if req.OrgID == orgID && req.Status == models.EmergencyAccessPending {
+			result = append(result, req)
+		}
+	}
+	return result, nil
+}
+
+func (m *EmergencyAccessRepository) Update(ctx context.Context, req *models.EmergencyAccessRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requests[req.ID] = req
+	return nil
+}
+
+// AccountRecoveryRepository mock for account recovery persistence.
+type AccountRecoveryRepository struct {
+	mu         sync.RWMutex
+	recoveries map[string]*models.AccountRecovery
+}
+
+func NewAccountRecoveryRepository() *AccountRecoveryRepository {
+	return &AccountRecoveryRepository{
+		recoveries: make(map[string]*models.AccountRecovery),
+	}
+}
+
+func (m *AccountRecoveryRepository) Create(ctx context.Context, req *models.AccountRecovery) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recoveries[req.ID] = req
+	return nil
+}
+
+func (m *AccountRecoveryRepository) Get(ctx context.Context, id string) (*models.AccountRecovery, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if rec, ok := m.recoveries[id]; ok {
+		return rec, nil
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *AccountRecoveryRepository) List(ctx context.Context, orgID string) ([]*models.AccountRecovery, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.AccountRecovery
+	for _, rec := range m.recoveries {
+		if rec.OrgID == orgID {
+			result = append(result, rec)
+		}
+	}
+	return result, nil
+}
+
+func (m *AccountRecoveryRepository) Update(ctx context.Context, req *models.AccountRecovery) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recoveries[req.ID] = req
+	return nil
+}
+
+// MockCRKProvider is a mock CRK provider for testing.
+type MockCRKProvider struct{}
+
+func NewMockCRKProvider() *MockCRKProvider { return &MockCRKProvider{} }
+
+func (m *MockCRKProvider) GetActiveCRK(ctx context.Context, orgID string) (*models.CRK, error) {
+	return &models.CRK{ID: "crk-1", OrgID: orgID, Status: models.CRKStatusActive}, nil
+}
+
+func (m *MockCRKProvider) Verify(publicKey []byte, data []byte, signature []byte) (bool, error) {
+	return true, nil
+}

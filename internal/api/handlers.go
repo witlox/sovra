@@ -13,14 +13,17 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/compliance"
 	"github.com/witlox/sovra/internal/crk"
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
 	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/internal/policy"
+	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
 	apierrors "github.com/witlox/sovra/pkg/errors"
 	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/vault"
 )
 
 // =============================================================================
@@ -2353,4 +2356,662 @@ func (h *IdentityHandler) UnassignRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// RotateServiceCredentials handles POST /api/v1/identities/services/{id}/rotate.
+func (h *IdentityHandler) RotateServiceCredentials(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "service id is required")
+		return
+	}
+
+	svc, err := h.manager.RotateServiceCredentials(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, svc)
+}
+
+// =============================================================================
+// Workspace Export/Import Handlers
+// =============================================================================
+
+// Export handles POST /api/v1/workspaces/{id}/export.
+func (h *WorkspaceHandler) Export(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+		return
+	}
+
+	bundle, err := h.service.ExportWorkspace(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, bundle)
+}
+
+// Import handles POST /api/v1/workspaces/import.
+func (h *WorkspaceHandler) Import(w http.ResponseWriter, r *http.Request) {
+	var bundle workspace.WorkspaceBundle
+	if err := readJSON(r, &bundle); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	ws, err := h.service.ImportWorkspace(r.Context(), &bundle)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, ws)
+}
+
+// =============================================================================
+// Certificate Handler
+// =============================================================================
+
+// CertificateHandler handles certificate management API requests.
+type CertificateHandler struct {
+	pki *vault.PKIClient
+}
+
+// NewCertificateHandler creates a new certificate handler.
+func NewCertificateHandler(pki *vault.PKIClient) *CertificateHandler {
+	return &CertificateHandler{pki: pki}
+}
+
+// IssueCertificateRequest represents a certificate issuance request.
+type IssueCertificateRequest struct {
+	CommonName string   `json:"common_name"`
+	AltNames   []string `json:"alt_names,omitempty"`
+	TTL        string   `json:"ttl,omitempty"`
+}
+
+// Issue handles POST /api/v1/certificates/issue.
+func (h *CertificateHandler) Issue(w http.ResponseWriter, r *http.Request) {
+	role := r.URL.Query().Get("role")
+	if role == "" {
+		role = "default"
+	}
+
+	var req IssueCertificateRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.CommonName == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "common_name is required")
+		return
+	}
+
+	certReq := &vault.CertificateRequest{
+		CommonName: req.CommonName,
+		AltNames:   req.AltNames,
+	}
+	if req.TTL != "" {
+		if d, err := time.ParseDuration(req.TTL); err == nil {
+			certReq.TTL = d
+		}
+	}
+
+	cert, err := h.pki.IssueCertificate(r.Context(), role, certReq)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, cert)
+}
+
+// RevokeCertificateRequest represents a certificate revocation request.
+type RevokeCertificateRequest struct {
+	SerialNumber string `json:"serial_number"`
+}
+
+// Revoke handles POST /api/v1/certificates/revoke.
+func (h *CertificateHandler) Revoke(w http.ResponseWriter, r *http.Request) {
+	var req RevokeCertificateRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.SerialNumber == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "serial_number is required")
+		return
+	}
+
+	if err := h.pki.RevokeCertificate(r.Context(), req.SerialNumber); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Read handles GET /api/v1/certificates/{serial}.
+func (h *CertificateHandler) Read(w http.ResponseWriter, r *http.Request) {
+	serial := chi.URLParam(r, "serial")
+	if serial == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "serial is required")
+		return
+	}
+
+	cert, err := h.pki.ReadCertificate(r.Context(), serial)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, cert)
+}
+
+// List handles GET /api/v1/certificates.
+func (h *CertificateHandler) List(w http.ResponseWriter, r *http.Request) {
+	serials, err := h.pki.ListCertificates(r.Context())
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"certificates": serials,
+		"count":        len(serials),
+	})
+}
+
+// GetCAChain handles GET /api/v1/certificates/ca-chain.
+func (h *CertificateHandler) GetCAChain(w http.ResponseWriter, r *http.Request) {
+	chain, err := h.pki.GetCAChain(r.Context())
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ca_chain": chain,
+	})
+}
+
+// TidyCertificatesRequest represents a tidy certificates request.
+type TidyCertificatesRequest struct {
+	SafetyBuffer string `json:"safety_buffer,omitempty"`
+}
+
+// Tidy handles POST /api/v1/certificates/tidy.
+func (h *CertificateHandler) Tidy(w http.ResponseWriter, r *http.Request) {
+	var req TidyCertificatesRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	var safetyBuffer time.Duration
+	if req.SafetyBuffer != "" {
+		if d, err := time.ParseDuration(req.SafetyBuffer); err == nil {
+			safetyBuffer = d
+		}
+	}
+
+	if err := h.pki.TidyCertificates(r.Context(), true, true, safetyBuffer); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"message": "tidy operation started",
+	})
+}
+
+// =============================================================================
+// Emergency Access Handler
+// =============================================================================
+
+// EmergencyAccessHandler handles emergency access API requests.
+type EmergencyAccessHandler struct {
+	mgr *identity.EmergencyAccessManager
+}
+
+// NewEmergencyAccessHandler creates a new emergency access handler.
+func NewEmergencyAccessHandler(mgr *identity.EmergencyAccessManager) *EmergencyAccessHandler {
+	return &EmergencyAccessHandler{mgr: mgr}
+}
+
+// EmergencyAccessRequestPayload represents an emergency access request payload.
+type EmergencyAccessRequestPayload struct {
+	OrgID  string `json:"org_id"`
+	Reason string `json:"reason"`
+}
+
+// Request handles POST /api/v1/emergency-access/request.
+func (h *EmergencyAccessHandler) Request(w http.ResponseWriter, r *http.Request) {
+	var req EmergencyAccessRequestPayload
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	orgID := req.OrgID
+	if orgID == "" {
+		orgID = getOrgID(r)
+	}
+
+	if req.Reason == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "reason is required")
+		return
+	}
+
+	result, err := h.mgr.RequestEmergencyAccess(r.Context(), orgID, getOrgID(r), req.Reason)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// Approve handles POST /api/v1/emergency-access/{id}/approve.
+func (h *EmergencyAccessHandler) Approve(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "request id is required")
+		return
+	}
+
+	approverID := getOrgID(r)
+	if err := h.mgr.ApproveEmergencyAccess(r.Context(), id, approverID); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Deny handles POST /api/v1/emergency-access/{id}/deny.
+func (h *EmergencyAccessHandler) Deny(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "request id is required")
+		return
+	}
+
+	deniedBy := getOrgID(r)
+	if err := h.mgr.DenyEmergencyAccess(r.Context(), id, deniedBy); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Complete handles POST /api/v1/emergency-access/{id}/complete.
+func (h *EmergencyAccessHandler) Complete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "request id is required")
+		return
+	}
+
+	if err := h.mgr.CompleteEmergencyAccess(r.Context(), id); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// VerifyEmergencyAccessRequest represents a CRK verification request for emergency access.
+type VerifyEmergencyAccessRequest struct {
+	Signature []byte `json:"signature"`
+}
+
+// Verify handles POST /api/v1/emergency-access/{id}/verify.
+func (h *EmergencyAccessHandler) Verify(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "request id is required")
+		return
+	}
+
+	var req VerifyEmergencyAccessRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if len(req.Signature) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "signature is required")
+		return
+	}
+
+	if err := h.mgr.VerifyEmergencyAccessWithCRK(r.Context(), id, req.Signature); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListEmergencyAccess handles GET /api/v1/emergency-access.
+func (h *EmergencyAccessHandler) ListEmergencyAccess(w http.ResponseWriter, r *http.Request) {
+	orgID := r.URL.Query().Get("org_id")
+	if orgID == "" {
+		orgID = getOrgID(r)
+	}
+
+	requests, err := h.mgr.ListRequests(r.Context(), orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"requests": requests,
+		"count":    len(requests),
+	})
+}
+
+// GetEmergencyAccess handles GET /api/v1/emergency-access/{id}.
+func (h *EmergencyAccessHandler) GetEmergencyAccess(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "request id is required")
+		return
+	}
+
+	req, err := h.mgr.GetRequest(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, req)
+}
+
+// =============================================================================
+// Account Recovery Handler
+// =============================================================================
+
+// AccountRecoveryHandler handles account recovery API requests.
+type AccountRecoveryHandler struct {
+	mgr *identity.AccountRecoveryManager
+}
+
+// NewAccountRecoveryHandler creates a new account recovery handler.
+func NewAccountRecoveryHandler(mgr *identity.AccountRecoveryManager) *AccountRecoveryHandler {
+	return &AccountRecoveryHandler{mgr: mgr}
+}
+
+// InitiateRecoveryRequest represents an account recovery initiation request.
+type InitiateRecoveryRequest struct {
+	AdminID      string `json:"admin_id"`
+	RecoveryType string `json:"recovery_type"`
+	Reason       string `json:"reason"`
+}
+
+// Initiate handles POST /api/v1/account-recovery/initiate.
+func (h *AccountRecoveryHandler) Initiate(w http.ResponseWriter, r *http.Request) {
+	var req InitiateRecoveryRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	orgID := getOrgID(r)
+	recovery, err := h.mgr.InitiateRecovery(r.Context(), orgID, req.AdminID, req.RecoveryType, req.Reason)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, recovery)
+}
+
+// CollectShare handles POST /api/v1/account-recovery/{id}/share.
+func (h *AccountRecoveryHandler) CollectShare(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "recovery id is required")
+		return
+	}
+
+	if err := h.mgr.CollectShare(r.Context(), id); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// CompleteRecovery handles POST /api/v1/account-recovery/{id}/complete.
+func (h *AccountRecoveryHandler) CompleteRecovery(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "recovery id is required")
+		return
+	}
+
+	if err := h.mgr.CompleteRecovery(r.Context(), id); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Compliance Handler
+// =============================================================================
+
+// ComplianceHandler handles compliance report API requests.
+type ComplianceHandler struct {
+	gen *compliance.ReportGenerator
+}
+
+// NewComplianceHandler creates a new compliance handler.
+func NewComplianceHandler(gen *compliance.ReportGenerator) *ComplianceHandler {
+	return &ComplianceHandler{gen: gen}
+}
+
+// ComplianceReportRequest represents a compliance report generation request.
+type ComplianceReportRequest struct {
+	OrgID string `json:"org_id,omitempty"`
+	Since string `json:"since,omitempty"`
+	Until string `json:"until,omitempty"`
+}
+
+// GenerateSummary handles POST /api/v1/compliance/reports/summary.
+func (h *ComplianceHandler) GenerateSummary(w http.ResponseWriter, r *http.Request) {
+	var req ComplianceReportRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	orgID := req.OrgID
+	if orgID == "" {
+		orgID = getOrgID(r)
+	}
+
+	period := parsePeriod(req.Since, req.Until)
+	report, err := h.gen.GenerateSummary(r.Context(), orgID, period)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, report)
+}
+
+// DSARRequest represents a GDPR DSAR request.
+type DSARRequest struct {
+	OrgID     string `json:"org_id,omitempty"`
+	SubjectID string `json:"subject_id"`
+}
+
+// GenerateDSAR handles POST /api/v1/compliance/reports/gdpr-dsar.
+func (h *ComplianceHandler) GenerateDSAR(w http.ResponseWriter, r *http.Request) {
+	var req DSARRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.SubjectID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "subject_id is required")
+		return
+	}
+
+	orgID := req.OrgID
+	if orgID == "" {
+		orgID = getOrgID(r)
+	}
+
+	report, err := h.gen.GenerateGDPRDSAR(r.Context(), orgID, req.SubjectID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, report)
+}
+
+// GenerateAccessReview handles POST /api/v1/compliance/reports/access-review.
+func (h *ComplianceHandler) GenerateAccessReview(w http.ResponseWriter, r *http.Request) {
+	var req ComplianceReportRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	orgID := req.OrgID
+	if orgID == "" {
+		orgID = getOrgID(r)
+	}
+
+	period := parsePeriod(req.Since, req.Until)
+	report, err := h.gen.GenerateAccessReview(r.Context(), orgID, period)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, report)
+}
+
+func parsePeriod(since, until string) compliance.ReportPeriod {
+	var period compliance.ReportPeriod
+	if since != "" {
+		if t, err := time.Parse(time.RFC3339, since); err == nil {
+			period.Since = t
+		}
+	}
+	if until != "" {
+		if t, err := time.Parse(time.RFC3339, until); err == nil {
+			period.Until = t
+		}
+	}
+	if period.Since.IsZero() {
+		period.Since = time.Now().Add(-30 * 24 * time.Hour)
+	}
+	if period.Until.IsZero() {
+		period.Until = time.Now()
+	}
+	return period
+}
+
+// =============================================================================
+// Rotation Policy Handler
+// =============================================================================
+
+// RotationPolicyHandler handles rotation policy API requests.
+type RotationPolicyHandler struct {
+	sched *rotation.Scheduler
+}
+
+// NewRotationPolicyHandler creates a new rotation policy handler.
+func NewRotationPolicyHandler(sched *rotation.Scheduler) *RotationPolicyHandler {
+	return &RotationPolicyHandler{sched: sched}
+}
+
+// SetRotationPolicyRequest represents a rotation policy set request.
+type SetRotationPolicyRequest struct {
+	MaxAge  string `json:"max_age"`
+	Enabled bool   `json:"enabled"`
+}
+
+// Set handles PUT /api/v1/workspaces/{id}/rotation-policy.
+func (h *RotationPolicyHandler) Set(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+		return
+	}
+
+	var req SetRotationPolicyRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	maxAge, err := time.ParseDuration(req.MaxAge)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid max_age duration")
+		return
+	}
+
+	policy := &rotation.Policy{
+		WorkspaceID: id,
+		MaxAge:      maxAge,
+		Enabled:     req.Enabled,
+	}
+
+	h.sched.SetPolicy(id, policy)
+	writeJSON(w, http.StatusOK, policy)
+}
+
+// Get handles GET /api/v1/workspaces/{id}/rotation-policy.
+func (h *RotationPolicyHandler) Get(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+		return
+	}
+
+	policy := h.sched.GetPolicy(id)
+	if policy == nil {
+		writeJSONError(w, http.StatusNotFound, "NOT_FOUND", "no rotation policy for workspace")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, policy)
+}
+
+// Delete handles DELETE /api/v1/workspaces/{id}/rotation-policy.
+func (h *RotationPolicyHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+		return
+	}
+
+	h.sched.RemovePolicy(id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListPolicies handles GET /api/v1/rotation-policies.
+func (h *RotationPolicyHandler) ListPolicies(w http.ResponseWriter, r *http.Request) {
+	policies := h.sched.ListPolicies()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"policies": policies,
+		"count":    len(policies),
+	})
 }

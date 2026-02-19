@@ -839,6 +839,70 @@ func TestVerifyEd25519Signature(t *testing.T) {
 	})
 }
 
+func TestListRequests(t *testing.T) {
+	t.Run("lists requests for organization", func(t *testing.T) {
+		repo := newMockEmergencyAccessRepo()
+		crkProvider := newMockCRKProvider()
+		tokenGen := identity.NewSimpleTokenGenerator()
+		mgr := identity.NewEmergencyAccessManager(repo, crkProvider, tokenGen)
+		ctx := context.Background()
+
+		// Create some requests
+		_, err := mgr.RequestEmergencyAccess(ctx, "org-1", "admin-1", "reason 1")
+		require.NoError(t, err)
+		_, err = mgr.RequestEmergencyAccess(ctx, "org-1", "admin-2", "reason 2")
+		require.NoError(t, err)
+		_, err = mgr.RequestEmergencyAccess(ctx, "org-2", "admin-3", "reason 3")
+		require.NoError(t, err)
+
+		requests, err := mgr.ListRequests(ctx, "org-1")
+		require.NoError(t, err)
+		assert.Len(t, requests, 2)
+	})
+
+	t.Run("returns empty for organization with no requests", func(t *testing.T) {
+		repo := newMockEmergencyAccessRepo()
+		crkProvider := newMockCRKProvider()
+		tokenGen := identity.NewSimpleTokenGenerator()
+		mgr := identity.NewEmergencyAccessManager(repo, crkProvider, tokenGen)
+		ctx := context.Background()
+
+		requests, err := mgr.ListRequests(ctx, "empty-org")
+		require.NoError(t, err)
+		assert.Empty(t, requests)
+	})
+}
+
+func TestGetRequest(t *testing.T) {
+	t.Run("returns request by ID", func(t *testing.T) {
+		repo := newMockEmergencyAccessRepo()
+		crkProvider := newMockCRKProvider()
+		tokenGen := identity.NewSimpleTokenGenerator()
+		mgr := identity.NewEmergencyAccessManager(repo, crkProvider, tokenGen)
+		ctx := context.Background()
+
+		created, err := mgr.RequestEmergencyAccess(ctx, "org-1", "admin-1", "urgent")
+		require.NoError(t, err)
+
+		fetched, err := mgr.GetRequest(ctx, created.ID)
+		require.NoError(t, err)
+		assert.Equal(t, created.ID, fetched.ID)
+		assert.Equal(t, "urgent", fetched.Reason)
+		assert.Equal(t, models.EmergencyAccessPending, fetched.Status)
+	})
+
+	t.Run("fails for non-existent request", func(t *testing.T) {
+		repo := newMockEmergencyAccessRepo()
+		crkProvider := newMockCRKProvider()
+		tokenGen := identity.NewSimpleTokenGenerator()
+		mgr := identity.NewEmergencyAccessManager(repo, crkProvider, tokenGen)
+		ctx := context.Background()
+
+		_, err := mgr.GetRequest(ctx, "nonexistent")
+		assert.Error(t, err)
+	})
+}
+
 func TestNewEmergencyAccessManagerWithAudit(t *testing.T) {
 	repo := newMockEmergencyAccessRepo()
 	crkProvider := newMockCRKProvider()

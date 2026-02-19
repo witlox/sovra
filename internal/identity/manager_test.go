@@ -1074,3 +1074,29 @@ func TestGetRoleAssignments(t *testing.T) {
 		assert.GreaterOrEqual(t, len(assignments), 1)
 	})
 }
+
+func TestRotateServiceCredentials(t *testing.T) {
+	t.Run("rotates credentials for existing service", func(t *testing.T) {
+		mgr := createManager()
+		ctx := context.Background()
+
+		svc, err := mgr.CreateService(ctx, "org-12345", "my-api", "API service", models.AuthMethodAppRole)
+		require.NoError(t, err)
+		originalRole := svc.VaultRole
+
+		rotated, err := mgr.RotateServiceCredentials(ctx, svc.ID)
+		require.NoError(t, err)
+		assert.Equal(t, svc.ID, rotated.ID)
+		assert.NotEqual(t, originalRole, rotated.VaultRole)
+		assert.Contains(t, rotated.VaultRole, "my-api")
+		assert.True(t, rotated.UpdatedAt.After(svc.CreatedAt) || rotated.UpdatedAt.Equal(svc.CreatedAt))
+	})
+
+	t.Run("fails for non-existent service", func(t *testing.T) {
+		mgr := createManager()
+		ctx := context.Background()
+
+		_, err := mgr.RotateServiceCredentials(ctx, "nonexistent")
+		assert.Error(t, err)
+	})
+}

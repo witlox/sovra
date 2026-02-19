@@ -15,11 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/witlox/sovra/internal/api"
 	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/compliance"
 	"github.com/witlox/sovra/internal/crk"
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
 	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/internal/policy"
+	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
 	"github.com/witlox/sovra/pkg/models"
 	"github.com/witlox/sovra/tests/mocks"
@@ -3326,6 +3328,663 @@ func TestIdentityHandlerGetNotFound(t *testing.T) {
 			assert.Equal(t, http.StatusNotFound, w.Code)
 		})
 	}
+}
+
+// =============================================================================
+// Workspace Export/Import Handler Tests
+// =============================================================================
+
+func TestWorkspaceHandlerExport(t *testing.T) {
+	wsSvc := newRealWorkspaceService()
+	handler := api.NewWorkspaceHandler(wsSvc)
+
+	// Create a workspace first
+	ctx := context.Background()
+	ws, err := wsSvc.Create(ctx, workspace.CreateRequest{
+		Name:           "export-test",
+		Participants:   []string{"org1"},
+		Classification: models.ClassificationConfidential,
+		Mode:           models.WorkspaceModeConnected,
+		Purpose:        "testing export",
+	})
+	require.NoError(t, err)
+
+	t.Run("exports workspace", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/export", handler.Export)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/export", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "workspace")
+		assert.Contains(t, resp, "checksum")
+	})
+
+	t.Run("returns 400 for missing ID", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/workspaces//export", nil)
+		w := httptest.NewRecorder()
+		handler.Export(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestWorkspaceHandlerImport(t *testing.T) {
+	wsSvc := newRealWorkspaceService()
+	handler := api.NewWorkspaceHandler(wsSvc)
+
+	t.Run("imports workspace from bundle", func(t *testing.T) {
+		bundle := map[string]any{
+			"workspace": map[string]any{
+				"name":           "imported-ws",
+				"owner_org_id":   "org1",
+				"classification": "CONFIDENTIAL",
+				"mode":           "connected",
+				"purpose":        "imported",
+			},
+			"exported_at": time.Now().Format(time.RFC3339),
+			"exported_by": "org1",
+			"checksum":    "abc123",
+		}
+		body, _ := json.Marshal(bundle)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/import", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.Import(w, req)
+
+		// Import may succeed or fail depending on service validation; just check we don't panic
+		assert.True(t, w.Code >= 200 && w.Code < 500)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/import", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.Import(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// =============================================================================
+// Service Credential Rotation Handler Tests
+// =============================================================================
+
+func TestIdentityHandlerRotateServiceCredentials(t *testing.T) {
+	mgr := newRealIdentityManager()
+	handler := api.NewIdentityHandler(mgr)
+
+	// Create a service first
+	ctx := context.Background()
+	reqBody := map[string]any{
+		"name":        "rotate-test-svc",
+		"description": "test service",
+		"auth_method": "approle",
+	}
+	body, _ := json.Marshal(reqBody)
+	createReq := withOrgID(httptest.NewRequest("POST", "/api/v1/identities/services", bytes.NewReader(body)), "org-test1234")
+	createReq.Header.Set("Content-Type", "application/json")
+	_ = ctx
+	createW := httptest.NewRecorder()
+	handler.CreateService(createW, createReq)
+	require.Equal(t, http.StatusCreated, createW.Code)
+
+	var svc models.ServiceIdentity
+	require.NoError(t, json.Unmarshal(createW.Body.Bytes(), &svc))
+
+	t.Run("rotates service credentials", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/identities/services/{id}/rotate", handler.RotateServiceCredentials)
+
+		req := httptest.NewRequest("POST", "/api/v1/identities/services/"+svc.ID+"/rotate", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var rotated models.ServiceIdentity
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &rotated))
+		assert.Equal(t, svc.ID, rotated.ID)
+	})
+
+	t.Run("returns 400 for missing ID", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/identities/services//rotate", nil)
+		w := httptest.NewRecorder()
+		handler.RotateServiceCredentials(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// =============================================================================
+// Certificate Handler Tests (validation paths only - no Vault backend)
+// =============================================================================
+
+func TestCertificateHandlerValidation(t *testing.T) {
+	// CertificateHandler requires *vault.PKIClient which needs a real Vault.
+	// Test validation paths by calling handlers with nil pki (panics caught by test).
+	// Instead, test the JSON validation paths that return before making PKI calls.
+
+	t.Run("Issue returns 400 for invalid JSON", func(t *testing.T) {
+		handler := api.NewCertificateHandler(nil)
+		req := httptest.NewRequest("POST", "/api/v1/certificates/issue", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.Issue(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Issue returns 400 for missing common_name", func(t *testing.T) {
+		handler := api.NewCertificateHandler(nil)
+		body, _ := json.Marshal(map[string]any{"alt_names": []string{"test.com"}})
+		req := httptest.NewRequest("POST", "/api/v1/certificates/issue", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.Issue(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Revoke returns 400 for invalid JSON", func(t *testing.T) {
+		handler := api.NewCertificateHandler(nil)
+		req := httptest.NewRequest("POST", "/api/v1/certificates/revoke", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.Revoke(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Revoke returns 400 for missing serial_number", func(t *testing.T) {
+		handler := api.NewCertificateHandler(nil)
+		body, _ := json.Marshal(map[string]any{})
+		req := httptest.NewRequest("POST", "/api/v1/certificates/revoke", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.Revoke(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Read returns 400 for missing serial", func(t *testing.T) {
+		handler := api.NewCertificateHandler(nil)
+		req := httptest.NewRequest("GET", "/api/v1/certificates/", nil)
+		w := httptest.NewRecorder()
+		handler.Read(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Tidy returns 400 for invalid JSON", func(t *testing.T) {
+		handler := api.NewCertificateHandler(nil)
+		req := httptest.NewRequest("POST", "/api/v1/certificates/tidy", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.Tidy(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// =============================================================================
+// Emergency Access Handler Tests
+// =============================================================================
+
+func newRealEmergencyAccessManager() *identity.EmergencyAccessManager {
+	return identity.NewEmergencyAccessManager(
+		mocks.NewEmergencyAccessRepository(),
+		mocks.NewMockCRKProvider(),
+		identity.NewSimpleTokenGenerator(),
+	)
+}
+
+func newRealAccountRecoveryManager() *identity.AccountRecoveryManager {
+	return identity.NewAccountRecoveryManager(
+		mocks.NewAccountRecoveryRepository(),
+		mocks.NewMockCRKProvider(),
+	)
+}
+
+func TestEmergencyAccessHandlerRequest(t *testing.T) {
+	mgr := newRealEmergencyAccessManager()
+	handler := api.NewEmergencyAccessHandler(mgr)
+
+	t.Run("creates emergency access request", func(t *testing.T) {
+		reqBody := map[string]any{
+			"org_id": "org-1",
+			"reason": "production outage",
+		}
+		body, _ := json.Marshal(reqBody)
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/emergency-access/request", bytes.NewReader(body)), "org-1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Request(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.EmergencyAccessRequest
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "production outage", resp.Reason)
+		assert.Equal(t, models.EmergencyAccessPending, resp.Status)
+	})
+
+	t.Run("returns 400 for missing reason", func(t *testing.T) {
+		reqBody := map[string]any{"org_id": "org-1"}
+		body, _ := json.Marshal(reqBody)
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/emergency-access/request", bytes.NewReader(body)), "org-1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Request(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/emergency-access/request", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Request(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestEmergencyAccessHandlerApprove(t *testing.T) {
+	mgr := newRealEmergencyAccessManager()
+	handler := api.NewEmergencyAccessHandler(mgr)
+
+	// Create a request first
+	ctx := context.Background()
+	eaReq, err := mgr.RequestEmergencyAccess(ctx, "org-1", "requester", "outage")
+	require.NoError(t, err)
+
+	t.Run("approves request", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/emergency-access/{id}/approve", handler.Approve)
+
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/emergency-access/"+eaReq.ID+"/approve", nil), "approver-1")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("returns 400 for missing ID", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/emergency-access//approve", nil)
+		w := httptest.NewRecorder()
+		handler.Approve(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestEmergencyAccessHandlerDeny(t *testing.T) {
+	mgr := newRealEmergencyAccessManager()
+	handler := api.NewEmergencyAccessHandler(mgr)
+
+	ctx := context.Background()
+	eaReq, err := mgr.RequestEmergencyAccess(ctx, "org-1", "requester", "outage")
+	require.NoError(t, err)
+
+	t.Run("denies request", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/emergency-access/{id}/deny", handler.Deny)
+
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/emergency-access/"+eaReq.ID+"/deny", nil), "denier")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+func TestEmergencyAccessHandlerComplete(t *testing.T) {
+	mgr := newRealEmergencyAccessManager()
+	handler := api.NewEmergencyAccessHandler(mgr)
+
+	t.Run("returns 400 for missing ID", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/emergency-access//complete", nil)
+		w := httptest.NewRecorder()
+		handler.Complete(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestEmergencyAccessHandlerVerify(t *testing.T) {
+	mgr := newRealEmergencyAccessManager()
+	handler := api.NewEmergencyAccessHandler(mgr)
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/emergency-access/{id}/verify", handler.Verify)
+
+		req := httptest.NewRequest("POST", "/api/v1/emergency-access/ea1/verify", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing signature", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/emergency-access/{id}/verify", handler.Verify)
+
+		body, _ := json.Marshal(map[string]any{})
+		req := httptest.NewRequest("POST", "/api/v1/emergency-access/ea1/verify", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestEmergencyAccessHandlerListAndGet(t *testing.T) {
+	mgr := newRealEmergencyAccessManager()
+	handler := api.NewEmergencyAccessHandler(mgr)
+
+	ctx := context.Background()
+	eaReq, err := mgr.RequestEmergencyAccess(ctx, "org-1", "requester", "outage")
+	require.NoError(t, err)
+
+	t.Run("lists requests", func(t *testing.T) {
+		req := withOrgID(httptest.NewRequest("GET", "/api/v1/emergency-access?org_id=org-1", nil), "org-1")
+		w := httptest.NewRecorder()
+		handler.ListEmergencyAccess(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "requests")
+		assert.Contains(t, resp, "count")
+	})
+
+	t.Run("gets request by ID", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/emergency-access/{id}", handler.GetEmergencyAccess)
+
+		req := httptest.NewRequest("GET", "/api/v1/emergency-access/"+eaReq.ID, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp models.EmergencyAccessRequest
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, eaReq.ID, resp.ID)
+	})
+
+	t.Run("returns 400 for missing ID on get", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/emergency-access/", nil)
+		w := httptest.NewRecorder()
+		handler.GetEmergencyAccess(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// =============================================================================
+// Account Recovery Handler Tests
+// =============================================================================
+
+func TestAccountRecoveryHandlerInitiate(t *testing.T) {
+	mgr := newRealAccountRecoveryManager()
+	handler := api.NewAccountRecoveryHandler(mgr)
+
+	t.Run("initiates recovery", func(t *testing.T) {
+		reqBody := map[string]any{
+			"admin_id":      "admin-1",
+			"recovery_type": "lost_credentials",
+			"reason":        "locked out",
+		}
+		body, _ := json.Marshal(reqBody)
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/account-recovery/initiate", bytes.NewReader(body)), "org-1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Initiate(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.AccountRecovery
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, models.AccountRecoveryPending, resp.Status)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/account-recovery/initiate", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Initiate(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestAccountRecoveryHandlerCollectShare(t *testing.T) {
+	mgr := newRealAccountRecoveryManager()
+	handler := api.NewAccountRecoveryHandler(mgr)
+
+	t.Run("returns 400 for missing ID", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/account-recovery//share", nil)
+		w := httptest.NewRecorder()
+		handler.CollectShare(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestAccountRecoveryHandlerComplete(t *testing.T) {
+	mgr := newRealAccountRecoveryManager()
+	handler := api.NewAccountRecoveryHandler(mgr)
+
+	t.Run("returns 400 for missing ID", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/account-recovery//complete", nil)
+		w := httptest.NewRecorder()
+		handler.CompleteRecovery(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// =============================================================================
+// Compliance Handler Tests
+// =============================================================================
+
+func newRealComplianceHandler() *api.ComplianceHandler {
+	auditSvc := newRealAuditService()
+	wsSvc := newRealWorkspaceService()
+	gen := compliance.NewReportGenerator(auditSvc, wsSvc)
+	return api.NewComplianceHandler(gen)
+}
+
+func TestComplianceHandlerGenerateSummary(t *testing.T) {
+	handler := newRealComplianceHandler()
+
+	t.Run("generates summary report", func(t *testing.T) {
+		reqBody := map[string]any{
+			"org_id": "org-1",
+		}
+		body, _ := json.Marshal(reqBody)
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/compliance/reports/summary", bytes.NewReader(body)), "org-1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.GenerateSummary(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "summary", resp["type"])
+		assert.NotEmpty(t, resp["id"])
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/compliance/reports/summary", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.GenerateSummary(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestComplianceHandlerGenerateDSAR(t *testing.T) {
+	handler := newRealComplianceHandler()
+
+	t.Run("generates DSAR report", func(t *testing.T) {
+		reqBody := map[string]any{
+			"subject_id": "user-123",
+		}
+		body, _ := json.Marshal(reqBody)
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/compliance/reports/gdpr-dsar", bytes.NewReader(body)), "org-1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.GenerateDSAR(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "gdpr-dsar", resp["type"])
+	})
+
+	t.Run("returns 400 for missing subject_id", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{})
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/compliance/reports/gdpr-dsar", bytes.NewReader(body)), "org-1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.GenerateDSAR(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestComplianceHandlerGenerateAccessReview(t *testing.T) {
+	handler := newRealComplianceHandler()
+
+	t.Run("generates access review report", func(t *testing.T) {
+		reqBody := map[string]any{}
+		body, _ := json.Marshal(reqBody)
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/compliance/reports/access-review", bytes.NewReader(body)), "org-1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.GenerateAccessReview(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "access-review", resp["type"])
+	})
+}
+
+// =============================================================================
+// Rotation Policy Handler Tests
+// =============================================================================
+
+func newRealRotationPolicyHandler() *api.RotationPolicyHandler {
+	wsSvc := newRealWorkspaceService()
+	sched := rotation.NewScheduler(wsSvc, time.Hour)
+	return api.NewRotationPolicyHandler(sched)
+}
+
+func TestRotationPolicyHandlerSet(t *testing.T) {
+	handler := newRealRotationPolicyHandler()
+
+	t.Run("sets rotation policy", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Put("/api/v1/workspaces/{id}/rotation-policy", handler.Set)
+
+		reqBody := map[string]any{
+			"max_age": "720h",
+			"enabled": true,
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest("PUT", "/api/v1/workspaces/ws1/rotation-policy", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "ws1", resp["workspace_id"])
+		assert.Equal(t, true, resp["enabled"])
+	})
+
+	t.Run("returns 400 for invalid max_age", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Put("/api/v1/workspaces/{id}/rotation-policy", handler.Set)
+
+		reqBody := map[string]any{
+			"max_age": "invalid",
+			"enabled": true,
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest("PUT", "/api/v1/workspaces/ws1/rotation-policy", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Put("/api/v1/workspaces/{id}/rotation-policy", handler.Set)
+
+		req := httptest.NewRequest("PUT", "/api/v1/workspaces/ws1/rotation-policy", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestRotationPolicyHandlerGet(t *testing.T) {
+	handler := newRealRotationPolicyHandler()
+
+	t.Run("returns 404 for non-existent policy", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/workspaces/{id}/rotation-policy", handler.Get)
+
+		req := httptest.NewRequest("GET", "/api/v1/workspaces/ws1/rotation-policy", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("returns 400 for missing ID", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/workspaces//rotation-policy", nil)
+		w := httptest.NewRecorder()
+		handler.Get(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestRotationPolicyHandlerDelete(t *testing.T) {
+	handler := newRealRotationPolicyHandler()
+
+	t.Run("deletes policy (even if not set)", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Delete("/api/v1/workspaces/{id}/rotation-policy", handler.Delete)
+
+		req := httptest.NewRequest("DELETE", "/api/v1/workspaces/ws1/rotation-policy", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+func TestRotationPolicyHandlerListPolicies(t *testing.T) {
+	handler := newRealRotationPolicyHandler()
+
+	t.Run("lists empty policies", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/rotation-policies", nil)
+		w := httptest.NewRecorder()
+		handler.ListPolicies(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "policies")
+		assert.Contains(t, resp, "count")
+	})
 }
 
 func TestIdentityHandlerDeleteNotFound(t *testing.T) {

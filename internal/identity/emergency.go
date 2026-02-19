@@ -93,6 +93,24 @@ func NewEmergencyAccessManagerWithAudit(
 	}
 }
 
+// ListRequests returns all emergency access requests for an organization.
+func (m *EmergencyAccessManager) ListRequests(ctx context.Context, orgID string) ([]*models.EmergencyAccessRequest, error) {
+	requests, err := m.repo.List(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list emergency access requests: %w", err)
+	}
+	return requests, nil
+}
+
+// GetRequest returns a single emergency access request by ID.
+func (m *EmergencyAccessManager) GetRequest(ctx context.Context, id string) (*models.EmergencyAccessRequest, error) {
+	req, err := m.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get emergency access request: %w", err)
+	}
+	return req, nil
+}
+
 // RequestEmergencyAccess initiates a break-glass access request.
 func (m *EmergencyAccessManager) RequestEmergencyAccess(ctx context.Context, orgID, requestedBy, reason string) (*models.EmergencyAccessRequest, error) {
 	if reason == "" {

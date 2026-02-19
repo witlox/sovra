@@ -2196,6 +2196,103 @@ func init() {
 	identityCmd.AddCommand(identityMFACmd)
 	identityCmd.AddCommand(identityGroupCmd)
 	identityCmd.AddCommand(identityRoleCmd)
+	identityCmd.AddCommand(identityAdminCmd)
+	identityCmd.AddCommand(identityServiceCmd)
+}
+
+// Admin enable/disable subcommands
+
+var identityAdminCmd = &cobra.Command{
+	Use:   "admin",
+	Short: "Admin identity operations",
+}
+
+var identityAdminDisableCmd = &cobra.Command{
+	Use:   "disable [admin-id]",
+	Short: "Disable an admin identity",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		active := false
+		admin, err := c.UpdateAdmin(ctx, args[0], client.UpdateAdminRequest{Active: &active})
+		if err != nil {
+			return fmt.Errorf("disable admin: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(admin, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Admin disabled: %s (%s)\n", admin.Name, admin.ID)
+		}
+		return nil
+	},
+}
+
+var identityAdminEnableCmd = &cobra.Command{
+	Use:   "enable [admin-id]",
+	Short: "Enable an admin identity",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		active := true
+		admin, err := c.UpdateAdmin(ctx, args[0], client.UpdateAdminRequest{Active: &active})
+		if err != nil {
+			return fmt.Errorf("enable admin: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(admin, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Admin enabled: %s (%s)\n", admin.Name, admin.ID)
+		}
+		return nil
+	},
+}
+
+// Service identity subcommands
+
+var identityServiceCmd = &cobra.Command{
+	Use:   "service",
+	Short: "Service identity operations",
+}
+
+var identityServiceRotateCmd = &cobra.Command{
+	Use:   "rotate [service-id]",
+	Short: "Rotate credentials for a service identity",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		svc, err := c.RotateServiceCredentials(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("rotate service credentials: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(svc, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Service credentials rotated: %s (%s)\n", svc.Name, svc.ID)
+		}
+		return nil
+	},
+}
+
+func init() {
+	identityAdminCmd.AddCommand(identityAdminDisableCmd)
+	identityAdminCmd.AddCommand(identityAdminEnableCmd)
+
+	identityServiceCmd.AddCommand(identityServiceRotateCmd)
 }
 
 // ============================================================================
@@ -2652,6 +2749,74 @@ func init() {
 	rootCmd.AddCommand(decryptCmd)
 	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(metricsCmd)
+	rootCmd.AddCommand(activityCmd)
+}
+
+// ============================================================================
+// Metrics Command
+// ============================================================================
+
+var metricsCmd = &cobra.Command{
+	Use:   "metrics",
+	Short: "Retrieve Prometheus metrics",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		data, err := c.GetMetrics(ctx)
+		if err != nil {
+			return fmt.Errorf("get metrics: %w", err)
+		}
+
+		fmt.Print(data)
+		return nil
+	},
+}
+
+// ============================================================================
+// Activity Log Command
+// ============================================================================
+
+var activityCmd = &cobra.Command{
+	Use:   "activity [actor-id]",
+	Short: "View activity log for an actor",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		since, _ := cmd.Flags().GetString("since")
+		until, _ := cmd.Flags().GetString("until")
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		events, err := c.GetActivityLog(ctx, args[0], client.AuditQueryParams{
+			Since: since,
+			Until: until,
+			Limit: limit,
+		})
+		if err != nil {
+			return fmt.Errorf("get activity log: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(events, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			for _, ev := range events {
+				fmt.Printf("%s  %s  %s  %s\n",
+					ev.Timestamp.Format(time.RFC3339), ev.EventType, ev.Result, ev.Workspace)
+			}
+		}
+		return nil
+	},
+}
+
+func init() {
+	activityCmd.Flags().String("since", "", "Start time (RFC3339)")
+	activityCmd.Flags().String("until", "", "End time (RFC3339)")
+	activityCmd.Flags().Int("limit", 100, "Maximum results")
 }
 
 // ============================================================================
@@ -2836,6 +3001,768 @@ var identityCreateUserSSOCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// ============================================================================
+// Certificate Commands
+// ============================================================================
+
+var certCmd = &cobra.Command{
+	Use:   "cert",
+	Short: "Certificate management",
+	Long:  `Manage certificates issued by the Vault PKI engine.`,
+}
+
+var certIssueCmd = &cobra.Command{
+	Use:   "issue",
+	Short: "Issue a new certificate",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		commonName, _ := cmd.Flags().GetString("common-name")
+		role, _ := cmd.Flags().GetString("role")
+		ttl, _ := cmd.Flags().GetString("ttl")
+		altNames, _ := cmd.Flags().GetStringSlice("alt-names")
+
+		if commonName == "" {
+			return fmt.Errorf("--common-name is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		cert, err := c.IssueCertificate(ctx, role, client.IssueCertificateRequest{
+			CommonName: commonName,
+			AltNames:   altNames,
+			TTL:        ttl,
+		})
+		if err != nil {
+			return fmt.Errorf("issue certificate: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(cert, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Certificate issued:\n  Serial: %s\n  Common Name: %s\n", cert.SerialNumber, commonName)
+			if cert.Certificate != "" {
+				fmt.Printf("  Certificate:\n%s\n", cert.Certificate)
+			}
+		}
+		return nil
+	},
+}
+
+var certRevokeCmd = &cobra.Command{
+	Use:   "revoke [serial]",
+	Short: "Revoke a certificate",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.RevokeCertificate(ctx, args[0]); err != nil {
+			return fmt.Errorf("revoke certificate: %w", err)
+		}
+
+		fmt.Printf("Certificate revoked: %s\n", args[0])
+		return nil
+	},
+}
+
+var certGetCmd = &cobra.Command{
+	Use:   "get [serial]",
+	Short: "Get a certificate by serial number",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		cert, err := c.ReadCertificate(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("get certificate: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(cert, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Serial: %s\n", cert.SerialNumber)
+			if cert.Certificate != "" {
+				fmt.Printf("Certificate:\n%s\n", cert.Certificate)
+			}
+		}
+		return nil
+	},
+}
+
+var certListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all certificates",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		result, err := c.ListCertificates(ctx)
+		if err != nil {
+			return fmt.Errorf("list certificates: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Certificates (%d):\n", result.Count)
+			for _, serial := range result.Certificates {
+				fmt.Printf("  %s\n", serial)
+			}
+		}
+		return nil
+	},
+}
+
+var certCAChainCmd = &cobra.Command{
+	Use:   "ca-chain",
+	Short: "Get the CA certificate chain",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		result, err := c.GetCAChain(ctx)
+		if err != nil {
+			return fmt.Errorf("get CA chain: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Println(result.CAChain)
+		}
+		return nil
+	},
+}
+
+var certTidyCmd = &cobra.Command{
+	Use:   "tidy",
+	Short: "Tidy the certificate store",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		safetyBuffer, _ := cmd.Flags().GetString("safety-buffer")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.TidyCertificates(ctx, safetyBuffer); err != nil {
+			return fmt.Errorf("tidy certificates: %w", err)
+		}
+
+		fmt.Println("Tidy operation started")
+		return nil
+	},
+}
+
+func init() {
+	certIssueCmd.Flags().String("common-name", "", "Common name for the certificate")
+	certIssueCmd.Flags().String("role", "default", "PKI role to use")
+	certIssueCmd.Flags().String("ttl", "", "TTL for the certificate (e.g. 8760h)")
+	certIssueCmd.Flags().StringSlice("alt-names", nil, "Subject alternative names")
+
+	certTidyCmd.Flags().String("safety-buffer", "", "Safety buffer duration (e.g. 72h)")
+
+	certCmd.AddCommand(certIssueCmd)
+	certCmd.AddCommand(certRevokeCmd)
+	certCmd.AddCommand(certGetCmd)
+	certCmd.AddCommand(certListCmd)
+	certCmd.AddCommand(certCAChainCmd)
+	certCmd.AddCommand(certTidyCmd)
+
+	rootCmd.AddCommand(certCmd)
+}
+
+// ============================================================================
+// Workspace Export/Import Commands
+// ============================================================================
+
+var workspaceExportCmd = &cobra.Command{
+	Use:   "export [workspace-id]",
+	Short: "Export a workspace as a bundle",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		output, _ := cmd.Flags().GetString("output")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		bundle, err := c.ExportWorkspace(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("export workspace: %w", err)
+		}
+
+		data, _ := json.MarshalIndent(bundle, "", "  ")
+
+		if output != "" {
+			if err := os.WriteFile(output, data, 0644); err != nil {
+				return fmt.Errorf("write output: %w", err)
+			}
+			fmt.Printf("Workspace exported to %s\n", output)
+		} else {
+			fmt.Println(string(data))
+		}
+		return nil
+	},
+}
+
+var workspaceImportCmd = &cobra.Command{
+	Use:   "import",
+	Short: "Import a workspace from a bundle",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		input, _ := cmd.Flags().GetString("input")
+		if input == "" {
+			return fmt.Errorf("--input is required")
+		}
+
+		data, err := os.ReadFile(input)
+		if err != nil {
+			return fmt.Errorf("read input: %w", err)
+		}
+
+		var bundle client.WorkspaceBundleResponse
+		if err := json.Unmarshal(data, &bundle); err != nil {
+			return fmt.Errorf("parse bundle: %w", err)
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		ws, err := c.ImportWorkspace(ctx, &bundle)
+		if err != nil {
+			return fmt.Errorf("import workspace: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			out, _ := json.MarshalIndent(ws, "", "  ")
+			fmt.Println(string(out))
+		} else {
+			fmt.Printf("Workspace imported: %s (%s)\n", ws.Name, ws.ID)
+		}
+		return nil
+	},
+}
+
+func init() {
+	workspaceExportCmd.Flags().String("output", "", "Output file path")
+	workspaceImportCmd.Flags().String("input", "", "Input file path")
+
+	workspaceCmd.AddCommand(workspaceExportCmd)
+	workspaceCmd.AddCommand(workspaceImportCmd)
+}
+
+// ============================================================================
+// Emergency Access Commands
+// ============================================================================
+
+var emergencyAccessCmd = &cobra.Command{
+	Use:   "emergency-access",
+	Short: "Emergency access management",
+	Long:  `Manage break-glass emergency access requests.`,
+}
+
+var emergencyAccessRequestCmd = &cobra.Command{
+	Use:   "request",
+	Short: "Request emergency access",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Flags().GetString("org-id")
+		reason, _ := cmd.Flags().GetString("reason")
+
+		if reason == "" {
+			return fmt.Errorf("--reason is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		req, err := c.RequestEmergencyAccess(ctx, client.EmergencyAccessRequestPayload{
+			OrgID:  orgID,
+			Reason: reason,
+		})
+		if err != nil {
+			return fmt.Errorf("request emergency access: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(req, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Emergency access requested: %s (status: %s)\n", req.ID, req.Status)
+		}
+		return nil
+	},
+}
+
+var emergencyAccessApproveCmd = &cobra.Command{
+	Use:   "approve [request-id]",
+	Short: "Approve an emergency access request",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.ApproveEmergencyAccess(ctx, args[0]); err != nil {
+			return fmt.Errorf("approve emergency access: %w", err)
+		}
+
+		fmt.Printf("Emergency access approved: %s\n", args[0])
+		return nil
+	},
+}
+
+var emergencyAccessDenyCmd = &cobra.Command{
+	Use:   "deny [request-id]",
+	Short: "Deny an emergency access request",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.DenyEmergencyAccess(ctx, args[0]); err != nil {
+			return fmt.Errorf("deny emergency access: %w", err)
+		}
+
+		fmt.Printf("Emergency access denied: %s\n", args[0])
+		return nil
+	},
+}
+
+var emergencyAccessCompleteCmd = &cobra.Command{
+	Use:   "complete [request-id]",
+	Short: "Complete an emergency access request",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.CompleteEmergencyAccess(ctx, args[0]); err != nil {
+			return fmt.Errorf("complete emergency access: %w", err)
+		}
+
+		fmt.Printf("Emergency access completed: %s\n", args[0])
+		return nil
+	},
+}
+
+var emergencyAccessVerifyCmd = &cobra.Command{
+	Use:   "verify [request-id]",
+	Short: "Verify emergency access with CRK signature",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sigStr, _ := cmd.Flags().GetString("signature")
+		if sigStr == "" {
+			return fmt.Errorf("--signature is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.VerifyEmergencyAccess(ctx, args[0], []byte(sigStr)); err != nil {
+			return fmt.Errorf("verify emergency access: %w", err)
+		}
+
+		fmt.Printf("Emergency access verified: %s\n", args[0])
+		return nil
+	},
+}
+
+var emergencyAccessListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List emergency access requests",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Flags().GetString("org-id")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		result, err := c.ListEmergencyAccess(ctx, orgID)
+		if err != nil {
+			return fmt.Errorf("list emergency access: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Emergency Access Requests (%d):\n", result.Count)
+			for _, req := range result.Requests {
+				fmt.Printf("  %s  status=%s  reason=%s\n", req.ID, req.Status, req.Reason)
+			}
+		}
+		return nil
+	},
+}
+
+var emergencyAccessGetCmd = &cobra.Command{
+	Use:   "get [request-id]",
+	Short: "Get emergency access request details",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		req, err := c.GetEmergencyAccess(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("get emergency access: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(req, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("ID: %s\nStatus: %s\nReason: %s\nRequested By: %s\nRequested At: %s\n",
+				req.ID, req.Status, req.Reason, req.RequestedBy, req.RequestedAt.Format(time.RFC3339))
+		}
+		return nil
+	},
+}
+
+func init() {
+	emergencyAccessRequestCmd.Flags().String("org-id", "", "Organization ID")
+	emergencyAccessRequestCmd.Flags().String("reason", "", "Reason for emergency access")
+
+	emergencyAccessVerifyCmd.Flags().String("signature", "", "CRK signature (base64)")
+
+	emergencyAccessListCmd.Flags().String("org-id", "", "Organization ID")
+
+	emergencyAccessCmd.AddCommand(emergencyAccessRequestCmd)
+	emergencyAccessCmd.AddCommand(emergencyAccessApproveCmd)
+	emergencyAccessCmd.AddCommand(emergencyAccessDenyCmd)
+	emergencyAccessCmd.AddCommand(emergencyAccessCompleteCmd)
+	emergencyAccessCmd.AddCommand(emergencyAccessVerifyCmd)
+	emergencyAccessCmd.AddCommand(emergencyAccessListCmd)
+	emergencyAccessCmd.AddCommand(emergencyAccessGetCmd)
+
+	rootCmd.AddCommand(emergencyAccessCmd)
+}
+
+// ============================================================================
+// Account Recovery Commands
+// ============================================================================
+
+var accountRecoveryCmd = &cobra.Command{
+	Use:   "account-recovery",
+	Short: "Account recovery management",
+	Long:  `Manage account recovery using CRK share reconstruction.`,
+}
+
+var accountRecoveryInitiateCmd = &cobra.Command{
+	Use:   "initiate",
+	Short: "Initiate account recovery",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		adminID, _ := cmd.Flags().GetString("admin-id")
+		reason, _ := cmd.Flags().GetString("reason")
+		recoveryType, _ := cmd.Flags().GetString("type")
+
+		if adminID == "" || reason == "" {
+			return fmt.Errorf("--admin-id and --reason are required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		recovery, err := c.InitiateRecovery(ctx, client.InitiateRecoveryRequest{
+			AdminID:      adminID,
+			RecoveryType: recoveryType,
+			Reason:       reason,
+		})
+		if err != nil {
+			return fmt.Errorf("initiate recovery: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(recovery, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Recovery initiated: %s (status: %s, shares needed: %d)\n",
+				recovery.ID, recovery.Status, recovery.SharesNeeded)
+		}
+		return nil
+	},
+}
+
+var accountRecoveryShareCmd = &cobra.Command{
+	Use:   "share [recovery-id]",
+	Short: "Submit a share for account recovery",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.CollectRecoveryShare(ctx, args[0]); err != nil {
+			return fmt.Errorf("collect share: %w", err)
+		}
+
+		fmt.Printf("Share collected for recovery: %s\n", args[0])
+		return nil
+	},
+}
+
+var accountRecoveryCompleteCmd = &cobra.Command{
+	Use:   "complete [recovery-id]",
+	Short: "Complete account recovery",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.CompleteRecovery(ctx, args[0]); err != nil {
+			return fmt.Errorf("complete recovery: %w", err)
+		}
+
+		fmt.Printf("Recovery completed: %s\n", args[0])
+		return nil
+	},
+}
+
+func init() {
+	accountRecoveryInitiateCmd.Flags().String("admin-id", "", "Admin ID initiating recovery")
+	accountRecoveryInitiateCmd.Flags().String("reason", "", "Reason for recovery")
+	accountRecoveryInitiateCmd.Flags().String("type", "lost_credentials", "Recovery type (lost_credentials, locked_account)")
+
+	accountRecoveryCmd.AddCommand(accountRecoveryInitiateCmd)
+	accountRecoveryCmd.AddCommand(accountRecoveryShareCmd)
+	accountRecoveryCmd.AddCommand(accountRecoveryCompleteCmd)
+
+	rootCmd.AddCommand(accountRecoveryCmd)
+}
+
+// ============================================================================
+// Compliance Commands
+// ============================================================================
+
+var complianceCmd = &cobra.Command{
+	Use:   "compliance",
+	Short: "Compliance report generation",
+	Long:  `Generate compliance reports including summaries, GDPR DSAR, and access reviews.`,
+}
+
+var complianceSummaryCmd = &cobra.Command{
+	Use:   "summary",
+	Short: "Generate a compliance summary report",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		since, _ := cmd.Flags().GetString("since")
+		until, _ := cmd.Flags().GetString("until")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		report, err := c.GenerateComplianceSummary(ctx, client.ComplianceReportRequest{
+			Since: since,
+			Until: until,
+		})
+		if err != nil {
+			return fmt.Errorf("generate summary: %w", err)
+		}
+
+		data, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	},
+}
+
+var complianceDSARCmd = &cobra.Command{
+	Use:   "gdpr-dsar",
+	Short: "Generate a GDPR Data Subject Access Request report",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		subjectID, _ := cmd.Flags().GetString("subject-id")
+		if subjectID == "" {
+			return fmt.Errorf("--subject-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		report, err := c.GenerateGDPRDSAR(ctx, client.DSARRequest{
+			SubjectID: subjectID,
+		})
+		if err != nil {
+			return fmt.Errorf("generate DSAR: %w", err)
+		}
+
+		data, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	},
+}
+
+var complianceAccessReviewCmd = &cobra.Command{
+	Use:   "access-review",
+	Short: "Generate an access review report",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		since, _ := cmd.Flags().GetString("since")
+		until, _ := cmd.Flags().GetString("until")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		report, err := c.GenerateAccessReview(ctx, client.ComplianceReportRequest{
+			Since: since,
+			Until: until,
+		})
+		if err != nil {
+			return fmt.Errorf("generate access review: %w", err)
+		}
+
+		data, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	},
+}
+
+func init() {
+	complianceSummaryCmd.Flags().String("since", "", "Start time (RFC3339)")
+	complianceSummaryCmd.Flags().String("until", "", "End time (RFC3339)")
+
+	complianceDSARCmd.Flags().String("subject-id", "", "Data subject ID")
+
+	complianceAccessReviewCmd.Flags().String("since", "", "Start time (RFC3339)")
+	complianceAccessReviewCmd.Flags().String("until", "", "End time (RFC3339)")
+
+	complianceCmd.AddCommand(complianceSummaryCmd)
+	complianceCmd.AddCommand(complianceDSARCmd)
+	complianceCmd.AddCommand(complianceAccessReviewCmd)
+
+	rootCmd.AddCommand(complianceCmd)
+}
+
+// ============================================================================
+// Rotation Policy Commands
+// ============================================================================
+
+var rotationPolicyCmd = &cobra.Command{
+	Use:   "rotation-policy",
+	Short: "Key rotation policy management",
+	Long:  `Manage automatic key rotation policies for workspaces.`,
+}
+
+var rotationPolicySetCmd = &cobra.Command{
+	Use:   "set [workspace-id]",
+	Short: "Set a rotation policy for a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		maxAge, _ := cmd.Flags().GetString("max-age")
+		enabled, _ := cmd.Flags().GetBool("enabled")
+
+		if maxAge == "" {
+			return fmt.Errorf("--max-age is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		policy, err := c.SetRotationPolicy(ctx, args[0], client.SetRotationPolicyRequest{
+			MaxAge:  maxAge,
+			Enabled: enabled,
+		})
+		if err != nil {
+			return fmt.Errorf("set rotation policy: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(policy, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Rotation policy set for workspace %s (max_age=%s, enabled=%v)\n",
+				policy.WorkspaceID, policy.MaxAge, policy.Enabled)
+		}
+		return nil
+	},
+}
+
+var rotationPolicyGetCmd = &cobra.Command{
+	Use:   "get [workspace-id]",
+	Short: "Get the rotation policy for a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		policy, err := c.GetRotationPolicy(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("get rotation policy: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(policy, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Workspace: %s\nMax Age: %s\nEnabled: %v\n",
+				policy.WorkspaceID, policy.MaxAge, policy.Enabled)
+		}
+		return nil
+	},
+}
+
+var rotationPolicyDeleteCmd = &cobra.Command{
+	Use:   "delete [workspace-id]",
+	Short: "Delete the rotation policy for a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.DeleteRotationPolicy(ctx, args[0]); err != nil {
+			return fmt.Errorf("delete rotation policy: %w", err)
+		}
+
+		fmt.Printf("Rotation policy deleted for workspace %s\n", args[0])
+		return nil
+	},
+}
+
+var rotationPolicyListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all rotation policies",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		result, err := c.ListRotationPolicies(ctx)
+		if err != nil {
+			return fmt.Errorf("list rotation policies: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Rotation Policies (%d):\n", result.Count)
+			for _, p := range result.Policies {
+				fmt.Printf("  workspace=%s  max_age=%s  enabled=%v\n",
+					p.WorkspaceID, p.MaxAge, p.Enabled)
+			}
+		}
+		return nil
+	},
+}
+
+func init() {
+	rotationPolicySetCmd.Flags().String("max-age", "", "Maximum key age (e.g. 720h)")
+	rotationPolicySetCmd.Flags().Bool("enabled", true, "Enable the policy")
+
+	rotationPolicyCmd.AddCommand(rotationPolicySetCmd)
+	rotationPolicyCmd.AddCommand(rotationPolicyGetCmd)
+	rotationPolicyCmd.AddCommand(rotationPolicyDeleteCmd)
+	rotationPolicyCmd.AddCommand(rotationPolicyListCmd)
+
+	rootCmd.AddCommand(rotationPolicyCmd)
 }
 
 // ============================================================================

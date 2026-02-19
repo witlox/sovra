@@ -9,13 +9,16 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/compliance"
 	"github.com/witlox/sovra/internal/crk"
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
 	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/internal/policy"
+	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
 	"github.com/witlox/sovra/pkg/metrics"
+	"github.com/witlox/sovra/pkg/vault"
 )
 
 // RouterConfig holds router configuration.
@@ -42,14 +45,19 @@ func DefaultRouterConfig() *RouterConfig {
 
 // Services holds all service dependencies for the API.
 type Services struct {
-	Workspace   workspace.Service
-	Federation  federation.Service
-	Policy      policy.Service
-	Audit       audit.Service
-	Edge        edge.Service
-	CRKManager  crk.Manager
-	CRKCeremony crk.CeremonyManager
-	Identity    *identity.Manager
+	Workspace         workspace.Service
+	Federation        federation.Service
+	Policy            policy.Service
+	Audit             audit.Service
+	Edge              edge.Service
+	CRKManager        crk.Manager
+	CRKCeremony       crk.CeremonyManager
+	Identity          *identity.Manager
+	PKI               *vault.PKIClient
+	EmergencyAccess   *identity.EmergencyAccessManager
+	AccountRecovery   *identity.AccountRecoveryManager
+	Compliance        *compliance.ReportGenerator
+	RotationScheduler *rotation.Scheduler
 }
 
 // NewRouter creates a new chi router with all middleware and routes.
@@ -87,6 +95,11 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	registerEdgeRoutes(r, services)
 	registerCRKRoutes(r, services)
 	registerIdentityRoutes(r, services)
+	registerCertificateRoutes(r, services)
+	registerEmergencyAccessRoutes(r, services)
+	registerAccountRecoveryRoutes(r, services)
+	registerComplianceRoutes(r, services)
+	registerRotationPolicyRoutes(r, services)
 
 	return r
 }
@@ -179,6 +192,8 @@ func registerWorkspaceRoutes(r chi.Router, services *Services) {
 		r.Post("/{id}/participants", handler.AddParticipant)
 		r.Delete("/{id}/participants/{orgId}", handler.RemoveParticipant)
 		r.Post("/{id}/archive", handler.Archive)
+		r.Post("/{id}/export", handler.Export)
+		r.Post("/import", handler.Import)
 	})
 }
 
@@ -314,5 +329,81 @@ func registerIdentityRoutes(r chi.Router, services *Services) {
 		r.Get("/roles/{id}", handler.GetRole)
 		r.Post("/roles/{id}/assign", handler.AssignRole)
 		r.Delete("/roles/{id}/assignments/{identityId}", handler.UnassignRole)
+
+		// Service credential rotation
+		r.Post("/services/{id}/rotate", handler.RotateServiceCredentials)
+	})
+}
+
+// registerCertificateRoutes registers certificate management endpoints.
+func registerCertificateRoutes(r chi.Router, services *Services) {
+	if services == nil || services.PKI == nil {
+		return
+	}
+	handler := NewCertificateHandler(services.PKI)
+	r.Route("/api/v1/certificates", func(r chi.Router) {
+		r.Post("/issue", handler.Issue)
+		r.Post("/revoke", handler.Revoke)
+		r.Get("/", handler.List)
+		r.Get("/ca-chain", handler.GetCAChain)
+		r.Get("/{serial}", handler.Read)
+		r.Post("/tidy", handler.Tidy)
+	})
+}
+
+// registerEmergencyAccessRoutes registers emergency access endpoints.
+func registerEmergencyAccessRoutes(r chi.Router, services *Services) {
+	if services == nil || services.EmergencyAccess == nil {
+		return
+	}
+	handler := NewEmergencyAccessHandler(services.EmergencyAccess)
+	r.Route("/api/v1/emergency-access", func(r chi.Router) {
+		r.Post("/request", handler.Request)
+		r.Get("/", handler.ListEmergencyAccess)
+		r.Get("/{id}", handler.GetEmergencyAccess)
+		r.Post("/{id}/approve", handler.Approve)
+		r.Post("/{id}/deny", handler.Deny)
+		r.Post("/{id}/complete", handler.Complete)
+		r.Post("/{id}/verify", handler.Verify)
+	})
+}
+
+// registerAccountRecoveryRoutes registers account recovery endpoints.
+func registerAccountRecoveryRoutes(r chi.Router, services *Services) {
+	if services == nil || services.AccountRecovery == nil {
+		return
+	}
+	handler := NewAccountRecoveryHandler(services.AccountRecovery)
+	r.Route("/api/v1/account-recovery", func(r chi.Router) {
+		r.Post("/initiate", handler.Initiate)
+		r.Post("/{id}/share", handler.CollectShare)
+		r.Post("/{id}/complete", handler.CompleteRecovery)
+	})
+}
+
+// registerComplianceRoutes registers compliance report endpoints.
+func registerComplianceRoutes(r chi.Router, services *Services) {
+	if services == nil || services.Compliance == nil {
+		return
+	}
+	handler := NewComplianceHandler(services.Compliance)
+	r.Route("/api/v1/compliance/reports", func(r chi.Router) {
+		r.Post("/summary", handler.GenerateSummary)
+		r.Post("/gdpr-dsar", handler.GenerateDSAR)
+		r.Post("/access-review", handler.GenerateAccessReview)
+	})
+}
+
+// registerRotationPolicyRoutes registers rotation policy endpoints.
+func registerRotationPolicyRoutes(r chi.Router, services *Services) {
+	if services == nil || services.RotationScheduler == nil {
+		return
+	}
+	handler := NewRotationPolicyHandler(services.RotationScheduler)
+	r.Get("/api/v1/rotation-policies", handler.ListPolicies)
+	r.Route("/api/v1/workspaces/{id}/rotation-policy", func(r chi.Router) {
+		r.Put("/", handler.Set)
+		r.Get("/", handler.Get)
+		r.Delete("/", handler.Delete)
 	})
 }

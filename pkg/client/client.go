@@ -1265,6 +1265,42 @@ func (c *Client) GetEdgeSyncStatus(ctx context.Context, id string) (*EdgeSyncSta
 }
 
 // ============================================================================
+// Metrics API
+// ============================================================================
+
+// GetMetrics retrieves Prometheus metrics from the server.
+func (c *Client) GetMetrics(ctx context.Context) (string, error) {
+	data, err := c.requestRaw(ctx, http.MethodGet, "/metrics", nil)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// ============================================================================
+// Activity Log API
+// ============================================================================
+
+// GetActivityLog retrieves audit events for a specific actor.
+func (c *Client) GetActivityLog(ctx context.Context, actorID string, params AuditQueryParams) ([]*models.AuditEvent, error) {
+	path := "/api/v1/audit?actor=" + url.QueryEscape(actorID)
+	if params.Since != "" {
+		path += "&since=" + url.QueryEscape(params.Since)
+	}
+	if params.Until != "" {
+		path += "&until=" + url.QueryEscape(params.Until)
+	}
+	if params.Limit > 0 {
+		path += fmt.Sprintf("&limit=%d", params.Limit)
+	}
+	var result []*models.AuditEvent
+	if err := c.request(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ============================================================================
 // CRK API — Additional Methods
 // ============================================================================
 
@@ -1278,6 +1314,355 @@ type RotateCRKRequest struct {
 func (c *Client) RotateCRK(ctx context.Context, req RotateCRKRequest) (*CeremonyResponse, error) {
 	var result CeremonyResponse
 	if err := c.request(ctx, http.MethodPost, "/api/v1/crk/rotate", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ============================================================================
+// Certificate API
+// ============================================================================
+
+// IssueCertificateRequest represents a certificate issuance request.
+type IssueCertificateRequest struct {
+	CommonName string   `json:"common_name"`
+	AltNames   []string `json:"alt_names,omitempty"`
+	TTL        string   `json:"ttl,omitempty"`
+}
+
+// CertificateResponse represents a certificate response.
+type CertificateResponse struct {
+	Certificate    string   `json:"certificate"`
+	PrivateKey     string   `json:"private_key,omitempty"`
+	PrivateKeyType string   `json:"private_key_type,omitempty"`
+	SerialNumber   string   `json:"serial_number"`
+	IssuingCA      string   `json:"issuing_ca,omitempty"`
+	CAChain        []string `json:"ca_chain,omitempty"`
+	Expiration     string   `json:"expiration,omitempty"`
+}
+
+// IssueCertificate issues a new certificate.
+func (c *Client) IssueCertificate(ctx context.Context, role string, req IssueCertificateRequest) (*CertificateResponse, error) {
+	path := "/api/v1/certificates/issue"
+	if role != "" {
+		path += "?role=" + url.QueryEscape(role)
+	}
+	var result CertificateResponse
+	if err := c.request(ctx, http.MethodPost, path, req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RevokeCertificateRequest represents a certificate revocation request.
+type RevokeCertificateRequest struct {
+	SerialNumber string `json:"serial_number"`
+}
+
+// RevokeCertificate revokes a certificate.
+func (c *Client) RevokeCertificate(ctx context.Context, serialNumber string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/certificates/revoke", RevokeCertificateRequest{SerialNumber: serialNumber}, nil)
+}
+
+// ReadCertificate retrieves a certificate by serial number.
+func (c *Client) ReadCertificate(ctx context.Context, serial string) (*CertificateResponse, error) {
+	var result CertificateResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/certificates/"+url.PathEscape(serial), nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// CertificateListResponse represents a certificate list response.
+type CertificateListResponse struct {
+	Certificates []string `json:"certificates"`
+	Count        int      `json:"count"`
+}
+
+// ListCertificates lists all certificates.
+func (c *Client) ListCertificates(ctx context.Context) (*CertificateListResponse, error) {
+	var result CertificateListResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/certificates", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// CAChainResponse represents a CA chain response.
+type CAChainResponse struct {
+	CAChain string `json:"ca_chain"`
+}
+
+// GetCAChain retrieves the CA certificate chain.
+func (c *Client) GetCAChain(ctx context.Context) (*CAChainResponse, error) {
+	var result CAChainResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/certificates/ca-chain", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// TidyCertificatesRequest represents a tidy certificates request.
+type TidyCertificatesRequest struct {
+	SafetyBuffer string `json:"safety_buffer,omitempty"`
+}
+
+// TidyCertificates triggers certificate store cleanup.
+func (c *Client) TidyCertificates(ctx context.Context, safetyBuffer string) error {
+	req := TidyCertificatesRequest{SafetyBuffer: safetyBuffer}
+	return c.request(ctx, http.MethodPost, "/api/v1/certificates/tidy", req, nil)
+}
+
+// ============================================================================
+// Workspace Export/Import API
+// ============================================================================
+
+// WorkspaceBundleResponse represents an exported workspace bundle.
+type WorkspaceBundleResponse struct {
+	Workspace  *models.Workspace `json:"workspace"`
+	Policies   []byte            `json:"policies,omitempty"`
+	ExportedAt string            `json:"exported_at"`
+	ExportedBy string            `json:"exported_by"`
+	Checksum   string            `json:"checksum"`
+}
+
+// ExportWorkspace exports a workspace as a bundle.
+func (c *Client) ExportWorkspace(ctx context.Context, id string) (*WorkspaceBundleResponse, error) {
+	var result WorkspaceBundleResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+id+"/export", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ImportWorkspace imports a workspace from a bundle.
+func (c *Client) ImportWorkspace(ctx context.Context, bundle *WorkspaceBundleResponse) (*models.Workspace, error) {
+	var result models.Workspace
+	if err := c.request(ctx, http.MethodPost, "/api/v1/workspaces/import", bundle, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ============================================================================
+// Service Credential Rotation API
+// ============================================================================
+
+// RotateServiceCredentials rotates credentials for a service identity.
+func (c *Client) RotateServiceCredentials(ctx context.Context, id string) (*models.ServiceIdentity, error) {
+	var result models.ServiceIdentity
+	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/services/"+id+"/rotate", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ============================================================================
+// Emergency Access API
+// ============================================================================
+
+// EmergencyAccessRequestPayload represents an emergency access request payload.
+type EmergencyAccessRequestPayload struct {
+	OrgID  string `json:"org_id,omitempty"`
+	Reason string `json:"reason"`
+}
+
+// RequestEmergencyAccess initiates an emergency access request.
+func (c *Client) RequestEmergencyAccess(ctx context.Context, req EmergencyAccessRequestPayload) (*models.EmergencyAccessRequest, error) {
+	var result models.EmergencyAccessRequest
+	if err := c.request(ctx, http.MethodPost, "/api/v1/emergency-access/request", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ApproveEmergencyAccess approves an emergency access request.
+func (c *Client) ApproveEmergencyAccess(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/emergency-access/"+id+"/approve", nil, nil)
+}
+
+// DenyEmergencyAccess denies an emergency access request.
+func (c *Client) DenyEmergencyAccess(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/emergency-access/"+id+"/deny", nil, nil)
+}
+
+// CompleteEmergencyAccess completes an emergency access request.
+func (c *Client) CompleteEmergencyAccess(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/emergency-access/"+id+"/complete", nil, nil)
+}
+
+// VerifyEmergencyAccessPayload represents a CRK verification request.
+type VerifyEmergencyAccessPayload struct {
+	Signature []byte `json:"signature"`
+}
+
+// VerifyEmergencyAccess verifies an emergency access request with CRK.
+func (c *Client) VerifyEmergencyAccess(ctx context.Context, id string, signature []byte) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/emergency-access/"+id+"/verify", VerifyEmergencyAccessPayload{Signature: signature}, nil)
+}
+
+// EmergencyAccessListResponse represents the list response.
+type EmergencyAccessListResponse struct {
+	Requests []*models.EmergencyAccessRequest `json:"requests"`
+	Count    int                              `json:"count"`
+}
+
+// ListEmergencyAccess lists emergency access requests.
+func (c *Client) ListEmergencyAccess(ctx context.Context, orgID string) (*EmergencyAccessListResponse, error) {
+	path := "/api/v1/emergency-access"
+	if orgID != "" {
+		path += "?org_id=" + url.QueryEscape(orgID)
+	}
+	var result EmergencyAccessListResponse
+	if err := c.request(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetEmergencyAccess retrieves an emergency access request by ID.
+func (c *Client) GetEmergencyAccess(ctx context.Context, id string) (*models.EmergencyAccessRequest, error) {
+	var result models.EmergencyAccessRequest
+	if err := c.request(ctx, http.MethodGet, "/api/v1/emergency-access/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ============================================================================
+// Account Recovery API
+// ============================================================================
+
+// InitiateRecoveryRequest represents an account recovery initiation request.
+type InitiateRecoveryRequest struct {
+	AdminID      string `json:"admin_id"`
+	RecoveryType string `json:"recovery_type"`
+	Reason       string `json:"reason"`
+}
+
+// InitiateRecovery initiates an account recovery.
+func (c *Client) InitiateRecovery(ctx context.Context, req InitiateRecoveryRequest) (*models.AccountRecovery, error) {
+	var result models.AccountRecovery
+	if err := c.request(ctx, http.MethodPost, "/api/v1/account-recovery/initiate", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// CollectRecoveryShare submits a share for account recovery.
+func (c *Client) CollectRecoveryShare(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/account-recovery/"+id+"/share", nil, nil)
+}
+
+// CompleteRecovery completes an account recovery.
+func (c *Client) CompleteRecovery(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/account-recovery/"+id+"/complete", nil, nil)
+}
+
+// ============================================================================
+// Compliance API
+// ============================================================================
+
+// ComplianceReportRequest represents a compliance report request.
+type ComplianceReportRequest struct {
+	OrgID string `json:"org_id,omitempty"`
+	Since string `json:"since,omitempty"`
+	Until string `json:"until,omitempty"`
+}
+
+// ComplianceReport represents a generated compliance report.
+type ComplianceReport struct {
+	ID          string          `json:"id"`
+	Type        string          `json:"type"`
+	GeneratedAt string          `json:"generated_at"`
+	GeneratedBy string          `json:"generated_by"`
+	Period      json.RawMessage `json:"period"`
+	Data        json.RawMessage `json:"data"`
+}
+
+// GenerateComplianceSummary generates a compliance summary report.
+func (c *Client) GenerateComplianceSummary(ctx context.Context, req ComplianceReportRequest) (*ComplianceReport, error) {
+	var result ComplianceReport
+	if err := c.request(ctx, http.MethodPost, "/api/v1/compliance/reports/summary", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DSARRequest represents a GDPR DSAR request.
+type DSARRequest struct {
+	OrgID     string `json:"org_id,omitempty"`
+	SubjectID string `json:"subject_id"`
+}
+
+// GenerateGDPRDSAR generates a GDPR Data Subject Access Request report.
+func (c *Client) GenerateGDPRDSAR(ctx context.Context, req DSARRequest) (*ComplianceReport, error) {
+	var result ComplianceReport
+	if err := c.request(ctx, http.MethodPost, "/api/v1/compliance/reports/gdpr-dsar", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GenerateAccessReview generates an access review report.
+func (c *Client) GenerateAccessReview(ctx context.Context, req ComplianceReportRequest) (*ComplianceReport, error) {
+	var result ComplianceReport
+	if err := c.request(ctx, http.MethodPost, "/api/v1/compliance/reports/access-review", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ============================================================================
+// Rotation Policy API
+// ============================================================================
+
+// RotationPolicy represents a key rotation policy.
+type RotationPolicy struct {
+	WorkspaceID string `json:"workspace_id"`
+	MaxAge      string `json:"max_age"`
+	Enabled     bool   `json:"enabled"`
+}
+
+// SetRotationPolicyRequest represents a set rotation policy request.
+type SetRotationPolicyRequest struct {
+	MaxAge  string `json:"max_age"`
+	Enabled bool   `json:"enabled"`
+}
+
+// SetRotationPolicy sets a rotation policy for a workspace.
+func (c *Client) SetRotationPolicy(ctx context.Context, workspaceID string, req SetRotationPolicyRequest) (*RotationPolicy, error) {
+	var result RotationPolicy
+	if err := c.request(ctx, http.MethodPut, "/api/v1/workspaces/"+workspaceID+"/rotation-policy", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetRotationPolicy retrieves the rotation policy for a workspace.
+func (c *Client) GetRotationPolicy(ctx context.Context, workspaceID string) (*RotationPolicy, error) {
+	var result RotationPolicy
+	if err := c.request(ctx, http.MethodGet, "/api/v1/workspaces/"+workspaceID+"/rotation-policy", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DeleteRotationPolicy removes the rotation policy for a workspace.
+func (c *Client) DeleteRotationPolicy(ctx context.Context, workspaceID string) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/workspaces/"+workspaceID+"/rotation-policy", nil, nil)
+}
+
+// RotationPolicyListResponse represents a rotation policy list response.
+type RotationPolicyListResponse struct {
+	Policies []*RotationPolicy `json:"policies"`
+	Count    int               `json:"count"`
+}
+
+// ListRotationPolicies lists all rotation policies.
+func (c *Client) ListRotationPolicies(ctx context.Context) (*RotationPolicyListResponse, error) {
+	var result RotationPolicyListResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/rotation-policies", nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

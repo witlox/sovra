@@ -589,6 +589,24 @@ func (m *Manager) GetRoleAssignments(ctx context.Context, roleID string) ([]*mod
 	return assignments, nil
 }
 
+// RotateServiceCredentials rotates credentials for a service identity.
+func (m *Manager) RotateServiceCredentials(ctx context.Context, id string) (*models.ServiceIdentity, error) {
+	svc, err := m.services.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get service: %w", err)
+	}
+
+	// Generate a new vault role name to force credential rotation
+	svc.VaultRole = fmt.Sprintf("%s-v%d", svc.Name, time.Now().Unix())
+	svc.UpdatedAt = time.Now()
+
+	if err := m.services.Update(ctx, svc); err != nil {
+		return nil, fmt.Errorf("update service credentials: %w", err)
+	}
+
+	return svc, nil
+}
+
 // ShareEncryptor handles CRK share encryption for distribution.
 type ShareEncryptor struct{}
 
