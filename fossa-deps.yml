@@ -1,0 +1,7 @@
+# Override incorrect license detection for transitive dependencies.
+# go.opentelemetry.io/auto/sdk is Apache-2.0, but FOSSA misidentifies it as LGPL-2.1.
+# See: https://github.com/open-telemetry/opentelemetry-go-instrumentation/blob/main/LICENSE
+custom-dependencies:
+  - name: go.opentelemetry.io/auto/sdk
+    version: v1.2.1
+    license: Apache-2.0
