@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -124,10 +126,13 @@ func init() {
 	crkCeremonyCmd.AddCommand(crkCeremonyCompleteCmd)
 	crkCeremonyCmd.AddCommand(crkCeremonyCancelCmd)
 
+	crkRotateCmd.Flags().Int("threshold", 3, "Threshold for rotation ceremony")
+
 	crkCmd.AddCommand(crkGenerateCmd)
 	crkCmd.AddCommand(crkSignCmd)
 	crkCmd.AddCommand(crkVerifyCmd)
 	crkCmd.AddCommand(crkCeremonyCmd)
+	crkCmd.AddCommand(crkRotateCmd)
 }
 
 func runCRKGenerate(cmd *cobra.Command, args []string) error {
@@ -427,6 +432,32 @@ var crkCeremonyCancelCmd = &cobra.Command{
 	},
 }
 
+var crkRotateCmd = &cobra.Command{
+	Use:   "rotate",
+	Short: "Rotate the CRK (starts a rotation ceremony)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		threshold, _ := cmd.Flags().GetInt("threshold")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.RotateCRK(ctx, client.RotateCRKRequest{Threshold: threshold})
+		if err != nil {
+			return fmt.Errorf("rotate CRK: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("CRK rotation ceremony started: %s\nStatus: %s\nThreshold: %d\n",
+				resp.ID, resp.Status, resp.Threshold)
+		}
+		return nil
+	},
+}
+
 // ============================================================================
 // Workspace Commands
 // ============================================================================
@@ -473,6 +504,16 @@ func init() {
 
 	workspaceInviteCmd.Flags().String("org-id", "", "Organization ID to invite")
 
+	workspaceDeleteCmd.Flags().String("org-id", "", "Organization ID for signature")
+
+	workspaceAcceptInvitationCmd.Flags().String("org-id", "", "Organization ID")
+
+	workspaceDeclineInvitationCmd.Flags().String("org-id", "", "Organization ID")
+
+	workspaceAddParticipantCmd.Flags().String("org-id", "", "Organization ID to add")
+
+	workspaceRemoveParticipantCmd.Flags().String("org-id", "", "Organization ID to remove")
+
 	workspaceCmd.AddCommand(workspaceCreateCmd)
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceGetCmd)
@@ -480,6 +521,12 @@ func init() {
 	workspaceCmd.AddCommand(workspaceRotateDEKCmd)
 	workspaceCmd.AddCommand(workspaceExtendCmd)
 	workspaceCmd.AddCommand(workspaceInviteCmd)
+	workspaceCmd.AddCommand(workspaceDeleteCmd)
+	workspaceCmd.AddCommand(workspaceAcceptInvitationCmd)
+	workspaceCmd.AddCommand(workspaceDeclineInvitationCmd)
+	workspaceCmd.AddCommand(workspaceAddParticipantCmd)
+	workspaceCmd.AddCommand(workspaceRemoveParticipantCmd)
+	workspaceCmd.AddCommand(workspaceArchiveCmd)
 }
 
 func runWorkspaceCreate(cmd *cobra.Command, args []string) error {
@@ -675,6 +722,128 @@ var workspaceInviteCmd = &cobra.Command{
 	},
 }
 
+var workspaceDeleteCmd = &cobra.Command{
+	Use:   "delete [workspace-id]",
+	Short: "Delete a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.DeleteWorkspace(ctx, args[0], client.DeleteWorkspaceRequest{}); err != nil {
+			return fmt.Errorf("delete workspace: %w", err)
+		}
+
+		fmt.Printf("Workspace deleted: %s\n", args[0])
+		return nil
+	},
+}
+
+var workspaceAcceptInvitationCmd = &cobra.Command{
+	Use:   "accept-invitation [workspace-id]",
+	Short: "Accept a workspace invitation",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Flags().GetString("org-id")
+		if orgID == "" {
+			return fmt.Errorf("--org-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.AcceptInvitation(ctx, args[0], client.AcceptInvitationRequest{OrgID: orgID}); err != nil {
+			return fmt.Errorf("accept invitation: %w", err)
+		}
+
+		fmt.Printf("Invitation accepted for workspace: %s\n", args[0])
+		return nil
+	},
+}
+
+var workspaceDeclineInvitationCmd = &cobra.Command{
+	Use:   "decline-invitation [workspace-id]",
+	Short: "Decline a workspace invitation",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Flags().GetString("org-id")
+		if orgID == "" {
+			return fmt.Errorf("--org-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.DeclineInvitation(ctx, args[0], client.DeclineInvitationRequest{OrgID: orgID}); err != nil {
+			return fmt.Errorf("decline invitation: %w", err)
+		}
+
+		fmt.Printf("Invitation declined for workspace: %s\n", args[0])
+		return nil
+	},
+}
+
+var workspaceAddParticipantCmd = &cobra.Command{
+	Use:   "add-participant [workspace-id]",
+	Short: "Add a participant to a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Flags().GetString("org-id")
+		if orgID == "" {
+			return fmt.Errorf("--org-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.AddParticipant(ctx, args[0], client.AddParticipantRequest{OrgID: orgID}); err != nil {
+			return fmt.Errorf("add participant: %w", err)
+		}
+
+		fmt.Printf("Participant %s added to workspace %s\n", orgID, args[0])
+		return nil
+	},
+}
+
+var workspaceRemoveParticipantCmd = &cobra.Command{
+	Use:   "remove-participant [workspace-id]",
+	Short: "Remove a participant from a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Flags().GetString("org-id")
+		if orgID == "" {
+			return fmt.Errorf("--org-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.RemoveParticipant(ctx, args[0], orgID, client.RemoveParticipantRequest{}); err != nil {
+			return fmt.Errorf("remove participant: %w", err)
+		}
+
+		fmt.Printf("Participant %s removed from workspace %s\n", orgID, args[0])
+		return nil
+	},
+}
+
+var workspaceArchiveCmd = &cobra.Command{
+	Use:   "archive [workspace-id]",
+	Short: "Archive a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.ArchiveWorkspace(ctx, args[0], client.ArchiveWorkspaceRequest{}); err != nil {
+			return fmt.Errorf("archive workspace: %w", err)
+		}
+
+		fmt.Printf("Workspace archived: %s\n", args[0])
+		return nil
+	},
+}
+
 // ============================================================================
 // Federation Commands
 // ============================================================================
@@ -735,9 +904,165 @@ var federationStatusCmd = &cobra.Command{
 	},
 }
 
+var federationInitCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Initialize federation for the organization",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Root().PersistentFlags().GetString("org-id")
+		if orgID == "" {
+			return fmt.Errorf("--org-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.InitFederation(ctx, client.InitFederationRequest{OrgID: orgID})
+		if err != nil {
+			return fmt.Errorf("init federation: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Federation initialized for org: %s\n", resp.OrgID)
+		}
+		return nil
+	},
+}
+
+var federationEstablishCmd = &cobra.Command{
+	Use:   "establish",
+	Short: "Establish federation with a partner",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		partnerOrg, _ := cmd.Flags().GetString("partner-org")
+		partnerURL, _ := cmd.Flags().GetString("partner-url")
+
+		if partnerOrg == "" || partnerURL == "" {
+			return fmt.Errorf("--partner-org and --partner-url are required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		fed, err := c.EstablishFederation(ctx, client.EstablishFederationRequest{
+			PartnerOrgID: partnerOrg,
+			PartnerURL:   partnerURL,
+		})
+		if err != nil {
+			return fmt.Errorf("establish federation: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(fed, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Federation established with: %s\nStatus: %s\n", fed.PartnerOrgID, fed.Status)
+		}
+		return nil
+	},
+}
+
+var federationRevokeCmd = &cobra.Command{
+	Use:   "revoke [partner-org-id]",
+	Short: "Revoke federation with a partner",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.RevokeFederation(ctx, args[0], client.RevokeFederationRequest{
+			NotifyPartner: true,
+			RevokeCerts:   true,
+		}); err != nil {
+			return fmt.Errorf("revoke federation: %w", err)
+		}
+
+		fmt.Printf("Federation revoked: %s\n", args[0])
+		return nil
+	},
+}
+
+var federationHealthCmd = &cobra.Command{
+	Use:   "health",
+	Short: "Check federation partner health",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.FederationHealth(ctx)
+		if err != nil {
+			return fmt.Errorf("federation health: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			for _, r := range resp.Results {
+				status := "healthy"
+				if !r.Healthy {
+					status = "unhealthy"
+				}
+				fmt.Printf("%s  %s", r.PartnerOrgID, status)
+				if r.Error != "" {
+					fmt.Printf("  error=%s", r.Error)
+				}
+				fmt.Println()
+			}
+		}
+		return nil
+	},
+}
+
+var federationImportCertCmd = &cobra.Command{
+	Use:   "import-cert",
+	Short: "Import a federation partner certificate",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		partnerOrg, _ := cmd.Flags().GetString("partner-org")
+		certFile, _ := cmd.Flags().GetString("cert-file")
+
+		if partnerOrg == "" || certFile == "" {
+			return fmt.Errorf("--partner-org and --cert-file are required")
+		}
+
+		certData, err := os.ReadFile(certFile)
+		if err != nil {
+			return fmt.Errorf("read certificate file: %w", err)
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.ImportFederationCertificate(ctx, client.ImportFederationCertificateRequest{
+			PartnerOrgID: partnerOrg,
+			Certificate:  certData,
+		}); err != nil {
+			return fmt.Errorf("import certificate: %w", err)
+		}
+
+		fmt.Printf("Certificate imported for partner: %s\n", partnerOrg)
+		return nil
+	},
+}
+
 func init() {
+	federationEstablishCmd.Flags().String("partner-org", "", "Partner organization ID")
+	federationEstablishCmd.Flags().String("partner-url", "", "Partner API URL")
+
+	federationImportCertCmd.Flags().String("partner-org", "", "Partner organization ID")
+	federationImportCertCmd.Flags().String("cert-file", "", "Certificate file path")
+
 	federationCmd.AddCommand(federationListCmd)
 	federationCmd.AddCommand(federationStatusCmd)
+	federationCmd.AddCommand(federationInitCmd)
+	federationCmd.AddCommand(federationEstablishCmd)
+	federationCmd.AddCommand(federationRevokeCmd)
+	federationCmd.AddCommand(federationHealthCmd)
+	federationCmd.AddCommand(federationImportCertCmd)
 }
 
 // ============================================================================
@@ -752,9 +1077,197 @@ var policyCmd = &cobra.Command{
 
 var policyListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List policies",
+	Short: "List policies for a workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Policy listing requires API connection.")
+		workspace, _ := cmd.Flags().GetString("workspace")
+		if workspace == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.GetPoliciesForWorkspace(ctx, workspace)
+		if err != nil {
+			return fmt.Errorf("list policies: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Found %d policies:\n", resp.Count)
+			for _, p := range resp.Policies {
+				fmt.Printf("%s  %s  v%d  %s\n", p.ID, p.Name, p.Version, p.UpdatedAt.Format(time.RFC3339))
+			}
+		}
+		return nil
+	},
+}
+
+var policyGetCmd = &cobra.Command{
+	Use:   "get [policy-id]",
+	Short: "Get policy details",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		policy, err := c.GetPolicy(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("get policy: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(policy, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("ID: %s\nName: %s\nWorkspace: %s\nVersion: %d\nUpdated: %s\n---\n%s\n",
+				policy.ID, policy.Name, policy.WorkspaceID, policy.Version, policy.UpdatedAt.Format(time.RFC3339), policy.Rego)
+		}
+		return nil
+	},
+}
+
+var policyCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a new policy",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
+		regoFile, _ := cmd.Flags().GetString("rego-file")
+		workspace, _ := cmd.Flags().GetString("workspace")
+
+		if name == "" || regoFile == "" || workspace == "" {
+			return fmt.Errorf("--name, --rego-file, and --workspace are required")
+		}
+
+		rego, err := os.ReadFile(regoFile)
+		if err != nil {
+			return fmt.Errorf("read rego file: %w", err)
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		policy, err := c.CreatePolicy(ctx, client.CreatePolicyRequest{
+			Name:      name,
+			Workspace: workspace,
+			Rego:      string(rego),
+		})
+		if err != nil {
+			return fmt.Errorf("create policy: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(policy, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Policy created: %s (%s)\n", policy.Name, policy.ID)
+		}
+		return nil
+	},
+}
+
+var policyUpdateCmd = &cobra.Command{
+	Use:   "update [policy-id]",
+	Short: "Update a policy",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		regoFile, _ := cmd.Flags().GetString("rego-file")
+		if regoFile == "" {
+			return fmt.Errorf("--rego-file is required")
+		}
+
+		rego, err := os.ReadFile(regoFile)
+		if err != nil {
+			return fmt.Errorf("read rego file: %w", err)
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		policy, err := c.UpdatePolicy(ctx, args[0], client.UpdatePolicyRequest{
+			Rego: string(rego),
+		})
+		if err != nil {
+			return fmt.Errorf("update policy: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(policy, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Policy updated: %s (v%d)\n", policy.Name, policy.Version)
+		}
+		return nil
+	},
+}
+
+var policyDeleteCmd = &cobra.Command{
+	Use:   "delete [policy-id]",
+	Short: "Delete a policy",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.DeletePolicy(ctx, args[0], client.DeletePolicyRequest{}); err != nil {
+			return fmt.Errorf("delete policy: %w", err)
+		}
+
+		fmt.Printf("Policy deleted: %s\n", args[0])
+		return nil
+	},
+}
+
+var policyEvaluateCmd = &cobra.Command{
+	Use:   "evaluate",
+	Short: "Evaluate a policy",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		workspace, _ := cmd.Flags().GetString("workspace")
+		inputFile, _ := cmd.Flags().GetString("input-file")
+
+		if workspace == "" || inputFile == "" {
+			return fmt.Errorf("--workspace and --input-file are required")
+		}
+
+		inputData, err := os.ReadFile(inputFile)
+		if err != nil {
+			return fmt.Errorf("read input file: %w", err)
+		}
+
+		var req client.EvaluatePolicyRequest
+		if err := json.Unmarshal(inputData, &req); err != nil {
+			return fmt.Errorf("parse input file: %w", err)
+		}
+		req.Workspace = workspace
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		result, err := c.EvaluatePolicy(ctx, req)
+		if err != nil {
+			return fmt.Errorf("evaluate policy: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			if result.Allowed {
+				fmt.Println("Result: ALLOWED")
+			} else {
+				fmt.Printf("Result: DENIED\nReason: %s\n", result.DenyReason)
+			}
+			if result.PolicyID != "" {
+				fmt.Printf("Policy: %s\n", result.PolicyID)
+			}
+		}
 		return nil
 	},
 }
@@ -766,17 +1279,50 @@ var policyValidateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		content, err := os.ReadFile(args[0])
 		if err != nil {
-			return fmt.Errorf("failed to read file: %w", err)
+			return fmt.Errorf("read file: %w", err)
 		}
-		fmt.Printf("Validating policy from %s (%d bytes)\n", args[0], len(content))
-		// Would call policy validation here
-		fmt.Println("Policy syntax: OK")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		result, err := c.ValidatePolicy(ctx, client.ValidatePolicyRequest{Rego: string(content)})
+		if err != nil {
+			return fmt.Errorf("validate policy: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			if result.Valid {
+				fmt.Println("Policy syntax: OK")
+			} else {
+				fmt.Printf("Policy syntax: INVALID\nError: %s\n", result.Error)
+			}
+		}
 		return nil
 	},
 }
 
 func init() {
+	policyListCmd.Flags().String("workspace", "", "Workspace ID")
+
+	policyCreateCmd.Flags().String("name", "", "Policy name")
+	policyCreateCmd.Flags().String("rego-file", "", "Path to Rego policy file")
+	policyCreateCmd.Flags().String("workspace", "", "Workspace ID")
+
+	policyUpdateCmd.Flags().String("rego-file", "", "Path to Rego policy file")
+
+	policyEvaluateCmd.Flags().String("workspace", "", "Workspace ID")
+	policyEvaluateCmd.Flags().String("input-file", "", "JSON input file for evaluation")
+
 	policyCmd.AddCommand(policyListCmd)
+	policyCmd.AddCommand(policyGetCmd)
+	policyCmd.AddCommand(policyCreateCmd)
+	policyCmd.AddCommand(policyUpdateCmd)
+	policyCmd.AddCommand(policyDeleteCmd)
+	policyCmd.AddCommand(policyEvaluateCmd)
 	policyCmd.AddCommand(policyValidateCmd)
 }
 
@@ -838,33 +1384,109 @@ var auditExportCmd = &cobra.Command{
 		c := getClient(cmd)
 		ctx := context.Background()
 
-		events, err := c.QueryAudit(ctx, client.AuditQueryParams{
-			Since: since,
-			Until: until,
-			Limit: 10000,
+		data, err := c.ExportAudit(ctx, client.ExportAuditRequest{
+			Since:  since,
+			Until:  until,
+			Format: format,
 		})
 		if err != nil {
-			return fmt.Errorf("query audit for export: %w", err)
-		}
-
-		var data []byte
-		if format == "csv" {
-			data = []byte("timestamp,event_type,actor,result,workspace\n")
-			for _, ev := range events {
-				data = append(data, []byte(fmt.Sprintf("%s,%s,%s,%s,%s\n",
-					ev.Timestamp.Format(time.RFC3339), ev.EventType, ev.Actor, ev.Result, ev.Workspace))...)
-			}
-		} else {
-			data, _ = json.MarshalIndent(events, "", "  ")
+			return fmt.Errorf("export audit: %w", err)
 		}
 
 		if output != "" {
 			if err := os.WriteFile(output, data, 0644); err != nil {
 				return fmt.Errorf("write output: %w", err)
 			}
-			fmt.Printf("Exported %d events to %s\n", len(events), output)
+			fmt.Printf("Exported audit logs to %s\n", output)
 		} else {
 			fmt.Println(string(data))
+		}
+		return nil
+	},
+}
+
+var auditGetCmd = &cobra.Command{
+	Use:   "get [event-id]",
+	Short: "Get audit event details",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		event, err := c.GetAuditEvent(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("get audit event: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(event, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("ID: %s\nTimestamp: %s\nType: %s\nActor: %s\nResult: %s\nWorkspace: %s\n",
+				event.ID, event.Timestamp.Format(time.RFC3339), event.EventType, event.Actor, event.Result, event.Workspace)
+		}
+		return nil
+	},
+}
+
+var auditStatsCmd = &cobra.Command{
+	Use:   "stats",
+	Short: "Get audit statistics",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		since, _ := cmd.Flags().GetString("since")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		stats, err := c.GetAuditStats(ctx, since)
+		if err != nil {
+			return fmt.Errorf("get audit stats: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(stats, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Total Events: %d\nSuccess: %d\nErrors: %d\nDenied: %d\nUnique Actors: %d\n",
+				stats.TotalEvents, stats.SuccessCount, stats.ErrorCount, stats.DeniedCount, stats.UniqueActors)
+		}
+		return nil
+	},
+}
+
+var auditVerifyCmd = &cobra.Command{
+	Use:   "verify",
+	Short: "Verify audit log integrity",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		since, _ := cmd.Flags().GetString("since")
+		until, _ := cmd.Flags().GetString("until")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		result, err := c.VerifyAuditIntegrity(ctx, client.VerifyAuditIntegrityRequest{
+			Since: since,
+			Until: until,
+		})
+		if err != nil {
+			return fmt.Errorf("verify audit integrity: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			if result.Valid {
+				fmt.Println("Audit integrity: VALID")
+			} else {
+				fmt.Println("Audit integrity: INVALID")
+			}
+			if result.Since != "" {
+				fmt.Printf("Range: %s to %s\n", result.Since, result.Until)
+			}
 		}
 		return nil
 	},
@@ -881,8 +1503,16 @@ func init() {
 	auditExportCmd.Flags().String("since", "", "Start time (RFC3339)")
 	auditExportCmd.Flags().String("until", "", "End time (RFC3339)")
 
+	auditStatsCmd.Flags().String("since", "", "Start time (RFC3339)")
+
+	auditVerifyCmd.Flags().String("since", "", "Start time (RFC3339)")
+	auditVerifyCmd.Flags().String("until", "", "End time (RFC3339)")
+
 	auditCmd.AddCommand(auditQueryCmd)
 	auditCmd.AddCommand(auditExportCmd)
+	auditCmd.AddCommand(auditGetCmd)
+	auditCmd.AddCommand(auditStatsCmd)
+	auditCmd.AddCommand(auditVerifyCmd)
 }
 
 // ============================================================================
@@ -1529,9 +2159,16 @@ func init() {
 	// identity role unassign flags
 	identityRoleUnassignCmd.Flags().String("identity-id", "", "Identity ID to unassign role from")
 
+	// identity create user-sso flags
+	identityCreateUserSSOCmd.Flags().String("email", "", "User email address")
+	identityCreateUserSSOCmd.Flags().String("name", "", "User display name")
+	identityCreateUserSSOCmd.Flags().String("sso-provider", "", "SSO provider (azure_ad, okta, google)")
+	identityCreateUserSSOCmd.Flags().String("sso-subject", "", "SSO subject identifier")
+
 	// Wire up create subcommands
 	identityCreateCmd.AddCommand(identityCreateAdminCmd)
 	identityCreateCmd.AddCommand(identityCreateServiceCmd)
+	identityCreateCmd.AddCommand(identityCreateUserSSOCmd)
 
 	// Wire up MFA subcommands
 	identityMFACmd.AddCommand(identityMFAEnableCmd)
@@ -1667,15 +2304,122 @@ var edgeUnregisterCmd = &cobra.Command{
 	},
 }
 
+var edgeHealthCmd = &cobra.Command{
+	Use:   "health [edge-id]",
+	Short: "Check edge node health",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		health, err := c.GetEdgeHealth(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("get edge health: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(health, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			status := "healthy"
+			if !health.Healthy {
+				status = "unhealthy"
+			}
+			fmt.Printf("Status: %s\nVersion: %s\nVault Sealed: %v\nHA Enabled: %v\nCluster Nodes: %d\n",
+				status, health.Version, health.VaultSealed, health.HAEnabled, health.ClusterNodes)
+			if health.ErrorMessage != "" {
+				fmt.Printf("Error: %s\n", health.ErrorMessage)
+			}
+		}
+		return nil
+	},
+}
+
+var edgeSyncPoliciesCmd = &cobra.Command{
+	Use:   "sync-policies [edge-id]",
+	Short: "Sync policies to edge node",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.SyncEdgePolicies(ctx, args[0]); err != nil {
+			return fmt.Errorf("sync policies: %w", err)
+		}
+
+		fmt.Printf("Policies synced to edge node: %s\n", args[0])
+		return nil
+	},
+}
+
+var edgeSyncKeysCmd = &cobra.Command{
+	Use:   "sync-keys [edge-id]",
+	Short: "Sync keys to edge node",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		workspaceID, _ := cmd.Flags().GetString("workspace")
+		if workspaceID == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.SyncEdgeKeys(ctx, args[0], client.SyncEdgeKeysRequest{
+			WorkspaceID: workspaceID,
+		}); err != nil {
+			return fmt.Errorf("sync keys: %w", err)
+		}
+
+		fmt.Printf("Keys synced to edge node: %s\n", args[0])
+		return nil
+	},
+}
+
+var edgeSyncStatusCmd = &cobra.Command{
+	Use:   "sync-status [edge-id]",
+	Short: "Get edge node sync status",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		status, err := c.GetEdgeSyncStatus(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("get sync status: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(status, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Last Synced: %s\nSync In Progress: %v\nPolicies Synced: %d\nKeys Synced: %d\nErrors: %d\n",
+				status.LastSyncedAt, status.SyncInProgress, status.PoliciesSynced, status.KeysSynced, status.ErrorCount)
+			if status.LastError != "" {
+				fmt.Printf("Last Error: %s\n", status.LastError)
+			}
+		}
+		return nil
+	},
+}
+
 func init() {
 	edgeRegisterCmd.Flags().String("name", "", "Edge node name")
 	edgeRegisterCmd.Flags().String("vault-addr", "", "Vault address")
 	edgeRegisterCmd.Flags().String("region", "", "Region")
 
+	edgeSyncKeysCmd.Flags().String("workspace", "", "Workspace ID")
+
 	edgeCmd.AddCommand(edgeListCmd)
 	edgeCmd.AddCommand(edgeGetCmd)
 	edgeCmd.AddCommand(edgeRegisterCmd)
 	edgeCmd.AddCommand(edgeUnregisterCmd)
+	edgeCmd.AddCommand(edgeHealthCmd)
+	edgeCmd.AddCommand(edgeSyncPoliciesCmd)
+	edgeCmd.AddCommand(edgeSyncKeysCmd)
+	edgeCmd.AddCommand(edgeSyncStatusCmd)
 }
 
 // ============================================================================
@@ -1743,9 +2487,21 @@ var encryptCmd = &cobra.Command{
 		data, _ := cmd.Flags().GetString("data")
 		dataFile, _ := cmd.Flags().GetString("data-file")
 		output, _ := cmd.Flags().GetString("output")
+		inputDir, _ := cmd.Flags().GetString("input-dir")
+		outputDir, _ := cmd.Flags().GetString("output-dir")
 
 		if workspaceID == "" {
 			return fmt.Errorf("--workspace is required")
+		}
+
+		c := getClient(cmd)
+
+		// Batch mode
+		if inputDir != "" {
+			if outputDir == "" {
+				return fmt.Errorf("--output-dir is required with --input-dir")
+			}
+			return batchEncrypt(c, workspaceID, inputDir, outputDir)
 		}
 
 		var plaintext []byte
@@ -1761,12 +2517,27 @@ var encryptCmd = &cobra.Command{
 			return fmt.Errorf("--data or --data-file is required")
 		}
 
-		c := getClient(cmd)
 		ctx := context.Background()
 
-		ciphertext, err := c.Encrypt(ctx, workspaceID, plaintext)
-		if err != nil {
-			return fmt.Errorf("encrypt: %w", err)
+		// Parse optional encryption context
+		encContext, _ := cmd.Flags().GetString("context")
+		var ciphertext []byte
+		if encContext != "" {
+			var ctxMap map[string]string
+			if err := json.Unmarshal([]byte(encContext), &ctxMap); err != nil {
+				return fmt.Errorf("parse --context JSON: %w", err)
+			}
+			var encErr error
+			ciphertext, encErr = c.EncryptWithContext(ctx, workspaceID, plaintext, ctxMap)
+			if encErr != nil {
+				return fmt.Errorf("encrypt: %w", encErr)
+			}
+		} else {
+			var encErr error
+			ciphertext, encErr = c.Encrypt(ctx, workspaceID, plaintext)
+			if encErr != nil {
+				return fmt.Errorf("encrypt: %w", encErr)
+			}
 		}
 
 		encoded := base64.StdEncoding.EncodeToString(ciphertext)
@@ -1790,9 +2561,21 @@ var decryptCmd = &cobra.Command{
 		data, _ := cmd.Flags().GetString("data")
 		dataFile, _ := cmd.Flags().GetString("data-file")
 		output, _ := cmd.Flags().GetString("output")
+		inputDir, _ := cmd.Flags().GetString("input-dir")
+		outputDir, _ := cmd.Flags().GetString("output-dir")
 
 		if workspaceID == "" {
 			return fmt.Errorf("--workspace is required")
+		}
+
+		c := getClient(cmd)
+
+		// Batch mode
+		if inputDir != "" {
+			if outputDir == "" {
+				return fmt.Errorf("--output-dir is required with --input-dir")
+			}
+			return batchDecrypt(c, workspaceID, inputDir, outputDir)
 		}
 
 		var encoded string
@@ -1813,12 +2596,27 @@ var decryptCmd = &cobra.Command{
 			return fmt.Errorf("decode base64: %w", err)
 		}
 
-		c := getClient(cmd)
 		ctx := context.Background()
 
-		plaintext, err := c.Decrypt(ctx, workspaceID, ciphertext)
-		if err != nil {
-			return fmt.Errorf("decrypt: %w", err)
+		// Parse optional encryption context
+		encContext, _ := cmd.Flags().GetString("context")
+		var plaintext []byte
+		if encContext != "" {
+			var ctxMap map[string]string
+			if err := json.Unmarshal([]byte(encContext), &ctxMap); err != nil {
+				return fmt.Errorf("parse --context JSON: %w", err)
+			}
+			var decErr error
+			plaintext, decErr = c.DecryptWithContext(ctx, workspaceID, ciphertext, ctxMap)
+			if decErr != nil {
+				return fmt.Errorf("decrypt: %w", decErr)
+			}
+		} else {
+			var decErr error
+			plaintext, decErr = c.Decrypt(ctx, workspaceID, ciphertext)
+			if decErr != nil {
+				return fmt.Errorf("decrypt: %w", decErr)
+			}
 		}
 
 		if output != "" {
@@ -1838,12 +2636,291 @@ func init() {
 	encryptCmd.Flags().String("data", "", "Data to encrypt")
 	encryptCmd.Flags().String("data-file", "", "File containing data to encrypt")
 	encryptCmd.Flags().String("output", "", "Output file")
+	encryptCmd.Flags().String("input-dir", "", "Directory of files to encrypt (batch mode)")
+	encryptCmd.Flags().String("output-dir", "", "Output directory for batch mode")
+	encryptCmd.Flags().String("context", "", "Encryption context (JSON string)")
 
 	decryptCmd.Flags().String("workspace", "", "Workspace ID")
 	decryptCmd.Flags().String("data", "", "Base64 encoded ciphertext")
 	decryptCmd.Flags().String("data-file", "", "File containing base64 ciphertext")
 	decryptCmd.Flags().String("output", "", "Output file")
+	decryptCmd.Flags().String("input-dir", "", "Directory of files to decrypt (batch mode)")
+	decryptCmd.Flags().String("output-dir", "", "Output directory for batch mode")
+	decryptCmd.Flags().String("context", "", "Decryption context (JSON string)")
 
 	rootCmd.AddCommand(encryptCmd)
 	rootCmd.AddCommand(decryptCmd)
+	rootCmd.AddCommand(healthCmd)
+	rootCmd.AddCommand(configCmd)
+}
+
+// ============================================================================
+// Health Command
+// ============================================================================
+
+var healthCmd = &cobra.Command{
+	Use:   "health",
+	Short: "Check API health status",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.Health(ctx)
+		if err != nil {
+			return fmt.Errorf("health check: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Status: %s\nVersion: %s\n", resp.Status, resp.Version)
+		}
+		return nil
+	},
+}
+
+// ============================================================================
+// Config Commands
+// ============================================================================
+
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Configuration management",
+	Long:  `Show and validate CLI configuration.`,
+}
+
+var configShowCmd = &cobra.Command{
+	Use:   "show",
+	Short: "Show current configuration",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		configPath, _ := cmd.Root().PersistentFlags().GetString("config")
+		if configPath == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("get home directory: %w", err)
+			}
+			configPath = filepath.Join(home, ".sovra", "config.json")
+		}
+
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				fmt.Printf("No config file found at %s\n", configPath)
+				fmt.Println("Using defaults:")
+				apiURL, _ := cmd.Root().PersistentFlags().GetString("api-url")
+				orgID, _ := cmd.Root().PersistentFlags().GetString("org-id")
+				fmt.Printf("  API URL: %s\n", apiURL)
+				fmt.Printf("  Org ID: %s\n", orgID)
+				fmt.Printf("  Token: %s\n", maskToken(os.Getenv("SOVRA_TOKEN")))
+				return nil
+			}
+			return fmt.Errorf("read config: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Config file: %s\n---\n%s\n", configPath, string(data))
+		}
+		return nil
+	},
+}
+
+var configValidateCmd = &cobra.Command{
+	Use:   "validate",
+	Short: "Validate configuration",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		configPath, _ := cmd.Root().PersistentFlags().GetString("config")
+		if configPath == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("get home directory: %w", err)
+			}
+			configPath = filepath.Join(home, ".sovra", "config.json")
+		}
+
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				fmt.Printf("No config file at %s (using defaults)\n", configPath)
+				return nil
+			}
+			return fmt.Errorf("read config: %w", err)
+		}
+
+		var cfg map[string]any
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			fmt.Printf("Config INVALID: %s\n", err)
+			os.Exit(1)
+		}
+
+		issues := []string{}
+		if v, ok := cfg["api_url"]; ok {
+			if s, ok := v.(string); !ok || s == "" {
+				issues = append(issues, "api_url is empty or not a string")
+			}
+		}
+		if v, ok := cfg["org_id"]; ok {
+			if s, ok := v.(string); !ok || s == "" {
+				issues = append(issues, "org_id is empty or not a string")
+			}
+		}
+
+		if len(issues) > 0 {
+			fmt.Println("Config validation issues:")
+			for _, issue := range issues {
+				fmt.Printf("  - %s\n", issue)
+			}
+			os.Exit(1)
+		}
+
+		fmt.Println("Config: OK")
+		return nil
+	},
+}
+
+func init() {
+	configCmd.AddCommand(configShowCmd)
+	configCmd.AddCommand(configValidateCmd)
+}
+
+func maskToken(token string) string {
+	if token == "" {
+		return "(not set)"
+	}
+	if len(token) <= 8 {
+		return strings.Repeat("*", len(token))
+	}
+	return token[:4] + strings.Repeat("*", len(token)-8) + token[len(token)-4:]
+}
+
+// ============================================================================
+// Identity Create User SSO Command
+// ============================================================================
+
+var identityCreateUserSSOCmd = &cobra.Command{
+	Use:   "user-sso",
+	Short: "Create a user identity from SSO",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		email, _ := cmd.Flags().GetString("email")
+		name, _ := cmd.Flags().GetString("name")
+		ssoProvider, _ := cmd.Flags().GetString("sso-provider")
+		ssoSubject, _ := cmd.Flags().GetString("sso-subject")
+
+		if email == "" || name == "" || ssoProvider == "" || ssoSubject == "" {
+			return fmt.Errorf("--email, --name, --sso-provider, and --sso-subject are required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		user, err := c.CreateUserFromSSO(ctx, client.CreateUserSSORequest{
+			Email:       email,
+			Name:        name,
+			SSOProvider: models.SSOProvider(ssoProvider),
+			SSOSubject:  ssoSubject,
+		})
+		if err != nil {
+			return fmt.Errorf("create SSO user: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(user, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("SSO user created: %s (%s)\n", user.Name, user.ID)
+		}
+		return nil
+	},
+}
+
+// ============================================================================
+// Batch Encrypt/Decrypt Helpers
+// ============================================================================
+
+func batchEncrypt(c *client.Client, workspaceID, inputDir, outputDir string) error {
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	entries, err := os.ReadDir(inputDir)
+	if err != nil {
+		return fmt.Errorf("read input directory: %w", err)
+	}
+
+	ctx := context.Background()
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		plaintext, err := os.ReadFile(filepath.Join(inputDir, entry.Name()))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", entry.Name(), err)
+		}
+
+		ciphertext, err := c.Encrypt(ctx, workspaceID, plaintext)
+		if err != nil {
+			return fmt.Errorf("encrypt %s: %w", entry.Name(), err)
+		}
+
+		encoded := base64.StdEncoding.EncodeToString(ciphertext)
+		outPath := filepath.Join(outputDir, entry.Name()+".enc")
+		if err := os.WriteFile(outPath, []byte(encoded), 0644); err != nil {
+			return fmt.Errorf("write %s: %w", outPath, err)
+		}
+		count++
+	}
+
+	fmt.Printf("Encrypted %d files to %s\n", count, outputDir)
+	return nil
+}
+
+func batchDecrypt(c *client.Client, workspaceID, inputDir, outputDir string) error {
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	entries, err := os.ReadDir(inputDir)
+	if err != nil {
+		return fmt.Errorf("read input directory: %w", err)
+	}
+
+	ctx := context.Background()
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		encoded, err := os.ReadFile(filepath.Join(inputDir, entry.Name()))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", entry.Name(), err)
+		}
+
+		ciphertext, err := base64.StdEncoding.DecodeString(string(encoded))
+		if err != nil {
+			return fmt.Errorf("decode %s: %w", entry.Name(), err)
+		}
+
+		plaintext, err := c.Decrypt(ctx, workspaceID, ciphertext)
+		if err != nil {
+			return fmt.Errorf("decrypt %s: %w", entry.Name(), err)
+		}
+
+		outName := strings.TrimSuffix(entry.Name(), ".enc")
+		outPath := filepath.Join(outputDir, outName)
+		if err := os.WriteFile(outPath, plaintext, 0644); err != nil {
+			return fmt.Errorf("write %s: %w", outPath, err)
+		}
+		count++
+	}
+
+	fmt.Printf("Decrypted %d files to %s\n", count, outputDir)
+	return nil
 }

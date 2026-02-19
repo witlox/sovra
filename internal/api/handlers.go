@@ -405,7 +405,8 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // EncryptRequest represents an encryption request.
 type EncryptRequest struct {
-	Plaintext []byte `json:"plaintext"`
+	Plaintext []byte            `json:"plaintext"`
+	Context   map[string]string `json:"context,omitempty"`
 }
 
 // EncryptResponse represents an encryption response.
@@ -443,7 +444,8 @@ func (h *WorkspaceHandler) Encrypt(w http.ResponseWriter, r *http.Request) {
 
 // DecryptRequest represents a decryption request.
 type DecryptRequest struct {
-	Ciphertext []byte `json:"ciphertext"`
+	Ciphertext []byte            `json:"ciphertext"`
+	Context    map[string]string `json:"context,omitempty"`
 }
 
 // DecryptResponse represents a decryption response.

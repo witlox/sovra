@@ -163,7 +163,8 @@ func (c *Client) ListWorkspaces(ctx context.Context, limit, offset int) ([]*mode
 
 // EncryptRequest represents an encryption request.
 type EncryptRequest struct {
-	Data []byte `json:"data"`
+	Data    []byte            `json:"data"`
+	Context map[string]string `json:"context,omitempty"`
 }
 
 // EncryptResponse represents an encryption response.
@@ -180,9 +181,19 @@ func (c *Client) Encrypt(ctx context.Context, workspaceID string, data []byte) (
 	return result.Ciphertext, nil
 }
 
+// EncryptWithContext encrypts data in a workspace with encryption context.
+func (c *Client) EncryptWithContext(ctx context.Context, workspaceID string, data []byte, encCtx map[string]string) ([]byte, error) {
+	var result EncryptResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/encrypt", EncryptRequest{Data: data, Context: encCtx}, &result); err != nil {
+		return nil, err
+	}
+	return result.Ciphertext, nil
+}
+
 // DecryptRequest represents a decryption request.
 type DecryptRequest struct {
-	Ciphertext []byte `json:"ciphertext"`
+	Ciphertext []byte            `json:"ciphertext"`
+	Context    map[string]string `json:"context,omitempty"`
 }
 
 // DecryptResponse represents a decryption response.
@@ -194,6 +205,15 @@ type DecryptResponse struct {
 func (c *Client) Decrypt(ctx context.Context, workspaceID string, ciphertext []byte) ([]byte, error) {
 	var result DecryptResponse
 	if err := c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/decrypt", DecryptRequest{Ciphertext: ciphertext}, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// DecryptWithContext decrypts data from a workspace with encryption context.
+func (c *Client) DecryptWithContext(ctx context.Context, workspaceID string, ciphertext []byte, encCtx map[string]string) ([]byte, error) {
+	var result DecryptResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/decrypt", DecryptRequest{Ciphertext: ciphertext, Context: encCtx}, &result); err != nil {
 		return nil, err
 	}
 	return result.Data, nil
@@ -802,4 +822,463 @@ func (c *Client) AssignRole(ctx context.Context, roleID string, req AssignRoleRe
 // UnassignRole removes a role assignment from an identity.
 func (c *Client) UnassignRole(ctx context.Context, roleID, identityID string) error {
 	return c.request(ctx, http.MethodDelete, "/api/v1/identities/roles/"+roleID+"/assignments/"+identityID, nil, nil)
+}
+
+// requestRaw makes an HTTP request and returns the raw response body.
+func (c *Client) requestRaw(ctx context.Context, method, path string, body any) ([]byte, error) {
+	u, err := url.JoinPath(c.baseURL, path)
+	if err != nil {
+		return nil, fmt.Errorf("build URL: %w", err)
+	}
+
+	var reqBody io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshal request: %w", err)
+		}
+		reqBody = bytes.NewReader(data)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, u, reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	if c.orgID != "" {
+		req.Header.Set("X-Org-ID", c.orgID)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		var errResp ErrorResponse
+		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != "" {
+			return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, errResp.Error)
+		}
+		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return respBody, nil
+}
+
+// ============================================================================
+// Workspace API — Additional Methods
+// ============================================================================
+
+// DeleteWorkspaceRequest represents a workspace deletion request.
+type DeleteWorkspaceRequest struct {
+	Signatures map[string][]byte `json:"signatures,omitempty"`
+}
+
+// DeleteWorkspace deletes a workspace.
+func (c *Client) DeleteWorkspace(ctx context.Context, id string, req DeleteWorkspaceRequest) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/workspaces/"+id, req, nil)
+}
+
+// AddParticipantRequest represents a request to add a participant to a workspace.
+type AddParticipantRequest struct {
+	OrgID     string `json:"org_id"`
+	Signature []byte `json:"signature,omitempty"`
+}
+
+// AddParticipant adds a participant to a workspace.
+func (c *Client) AddParticipant(ctx context.Context, workspaceID string, req AddParticipantRequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/participants", req, nil)
+}
+
+// RemoveParticipantRequest represents a request to remove a participant from a workspace.
+type RemoveParticipantRequest struct {
+	Signature []byte `json:"signature,omitempty"`
+}
+
+// RemoveParticipant removes a participant from a workspace.
+func (c *Client) RemoveParticipant(ctx context.Context, workspaceID, orgID string, req RemoveParticipantRequest) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/workspaces/"+workspaceID+"/participants/"+orgID, req, nil)
+}
+
+// ArchiveWorkspaceRequest represents a workspace archive request.
+type ArchiveWorkspaceRequest struct {
+	Signature []byte `json:"signature,omitempty"`
+}
+
+// ArchiveWorkspace archives a workspace.
+func (c *Client) ArchiveWorkspace(ctx context.Context, id string, req ArchiveWorkspaceRequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+id+"/archive", req, nil)
+}
+
+// ============================================================================
+// Federation API — Additional Methods
+// ============================================================================
+
+// InitFederationRequest represents a federation initialization request.
+type InitFederationRequest struct {
+	OrgID        string `json:"org_id"`
+	CRKSignature []byte `json:"crk_signature,omitempty"`
+}
+
+// InitFederationResponse represents a federation initialization response.
+type InitFederationResponse struct {
+	OrgID       string `json:"org_id"`
+	CSR         []byte `json:"csr"`
+	Certificate []byte `json:"certificate"`
+	PublicKey   []byte `json:"public_key"`
+}
+
+// InitFederation initializes federation for the organization.
+func (c *Client) InitFederation(ctx context.Context, req InitFederationRequest) (*InitFederationResponse, error) {
+	var result InitFederationResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/federation/init", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// EstablishFederationRequest represents a federation establishment request.
+type EstablishFederationRequest struct {
+	PartnerOrgID string `json:"partner_org_id"`
+	PartnerURL   string `json:"partner_url"`
+	PartnerCert  []byte `json:"partner_cert,omitempty"`
+	PartnerCSR   []byte `json:"partner_csr,omitempty"`
+	CRKSignature []byte `json:"crk_signature,omitempty"`
+}
+
+// EstablishFederation establishes a federation with a partner organization.
+func (c *Client) EstablishFederation(ctx context.Context, req EstablishFederationRequest) (*models.Federation, error) {
+	var result models.Federation
+	if err := c.request(ctx, http.MethodPost, "/api/v1/federation/establish", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RevokeFederationRequest represents a federation revocation request.
+type RevokeFederationRequest struct {
+	Signature     []byte `json:"signature,omitempty"`
+	NotifyPartner bool   `json:"notify_partner,omitempty"`
+	RevokeCerts   bool   `json:"revoke_certs,omitempty"`
+}
+
+// RevokeFederation revokes a federation with a partner organization.
+func (c *Client) RevokeFederation(ctx context.Context, partnerOrgID string, req RevokeFederationRequest) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/federation/"+partnerOrgID, req, nil)
+}
+
+// FederationHealthResult represents the health of a federation partner.
+type FederationHealthResult struct {
+	PartnerOrgID string    `json:"partner_org_id"`
+	Healthy      bool      `json:"healthy"`
+	LastCheck    time.Time `json:"last_check"`
+	Error        string    `json:"error,omitempty"`
+}
+
+// FederationHealthResponse represents the federation health check response.
+type FederationHealthResponse struct {
+	Results []FederationHealthResult `json:"results"`
+}
+
+// FederationHealth checks the health of all federation partners.
+func (c *Client) FederationHealth(ctx context.Context) (*FederationHealthResponse, error) {
+	var result FederationHealthResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/federation/health", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ImportFederationCertificateRequest represents a certificate import request.
+type ImportFederationCertificateRequest struct {
+	PartnerOrgID string `json:"partner_org_id"`
+	Certificate  []byte `json:"certificate"`
+	Signature    []byte `json:"signature,omitempty"`
+}
+
+// ImportFederationCertificate imports a federation partner's certificate.
+func (c *Client) ImportFederationCertificate(ctx context.Context, req ImportFederationCertificateRequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/federation/certificate/import", req, nil)
+}
+
+// ============================================================================
+// Policy API
+// ============================================================================
+
+// CreatePolicyRequest represents a policy creation request.
+type CreatePolicyRequest struct {
+	Name         string `json:"name"`
+	Workspace    string `json:"workspace"`
+	Rego         string `json:"rego"`
+	CRKSignature []byte `json:"crk_signature,omitempty"`
+}
+
+// CreatePolicy creates a new policy.
+func (c *Client) CreatePolicy(ctx context.Context, req CreatePolicyRequest) (*models.Policy, error) {
+	var result models.Policy
+	if err := c.request(ctx, http.MethodPost, "/api/v1/policies", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetPolicy retrieves a policy by ID.
+func (c *Client) GetPolicy(ctx context.Context, id string) (*models.Policy, error) {
+	var result models.Policy
+	if err := c.request(ctx, http.MethodGet, "/api/v1/policies/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// UpdatePolicyRequest represents a policy update request.
+type UpdatePolicyRequest struct {
+	Rego      string `json:"rego"`
+	Signature []byte `json:"signature,omitempty"`
+}
+
+// UpdatePolicy updates a policy.
+func (c *Client) UpdatePolicy(ctx context.Context, id string, req UpdatePolicyRequest) (*models.Policy, error) {
+	var result models.Policy
+	if err := c.request(ctx, http.MethodPut, "/api/v1/policies/"+id, req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DeletePolicyRequest represents a policy deletion request.
+type DeletePolicyRequest struct {
+	Signature []byte `json:"signature,omitempty"`
+}
+
+// DeletePolicy deletes a policy.
+func (c *Client) DeletePolicy(ctx context.Context, id string, req DeletePolicyRequest) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/policies/"+id, req, nil)
+}
+
+// PoliciesForWorkspaceResponse represents the response for workspace policies.
+type PoliciesForWorkspaceResponse struct {
+	Policies []*models.Policy `json:"policies"`
+	Count    int              `json:"count"`
+}
+
+// GetPoliciesForWorkspace retrieves policies for a workspace.
+func (c *Client) GetPoliciesForWorkspace(ctx context.Context, workspaceID string) (*PoliciesForWorkspaceResponse, error) {
+	var result PoliciesForWorkspaceResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/policies/workspace/"+workspaceID, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// EvaluatePolicyRequest represents a policy evaluation request.
+type EvaluatePolicyRequest struct {
+	Actor     string         `json:"actor"`
+	Role      string         `json:"role"`
+	Operation string         `json:"operation"`
+	Workspace string         `json:"workspace"`
+	Purpose   string         `json:"purpose,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+// EvaluatePolicyResponse represents a policy evaluation response.
+type EvaluatePolicyResponse struct {
+	Allowed    bool   `json:"Allowed"`
+	DenyReason string `json:"DenyReason,omitempty"`
+	PolicyID   string `json:"PolicyID,omitempty"`
+	EvalTimeMs int64  `json:"EvalTimeMs,omitempty"`
+}
+
+// EvaluatePolicy evaluates a policy.
+func (c *Client) EvaluatePolicy(ctx context.Context, req EvaluatePolicyRequest) (*EvaluatePolicyResponse, error) {
+	var result EvaluatePolicyResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/policies/evaluate", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ValidatePolicyRequest represents a policy validation request.
+type ValidatePolicyRequest struct {
+	Rego string `json:"rego"`
+}
+
+// ValidatePolicyResponse represents a policy validation response.
+type ValidatePolicyResponse struct {
+	Valid bool   `json:"valid"`
+	Error string `json:"error,omitempty"`
+}
+
+// ValidatePolicy validates a Rego policy on the server.
+func (c *Client) ValidatePolicy(ctx context.Context, req ValidatePolicyRequest) (*ValidatePolicyResponse, error) {
+	var result ValidatePolicyResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/policies/validate", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ============================================================================
+// Audit API — Additional Methods
+// ============================================================================
+
+// GetAuditEvent retrieves an audit event by ID.
+func (c *Client) GetAuditEvent(ctx context.Context, id string) (*models.AuditEvent, error) {
+	var result models.AuditEvent
+	if err := c.request(ctx, http.MethodGet, "/api/v1/audit/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ExportAuditRequest represents an audit export request.
+type ExportAuditRequest struct {
+	OrgID     string `json:"org_id,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
+	EventType string `json:"event_type,omitempty"`
+	Since     string `json:"since,omitempty"`
+	Until     string `json:"until,omitempty"`
+	Format    string `json:"format,omitempty"`
+}
+
+// ExportAudit exports audit logs, returning raw bytes (JSON or CSV).
+func (c *Client) ExportAudit(ctx context.Context, req ExportAuditRequest) ([]byte, error) {
+	return c.requestRaw(ctx, http.MethodPost, "/api/v1/audit/export", req)
+}
+
+// AuditStatsResponse represents audit statistics.
+type AuditStatsResponse struct {
+	TotalEvents  int64            `json:"TotalEvents"`
+	SuccessCount int64            `json:"SuccessCount"`
+	ErrorCount   int64            `json:"ErrorCount"`
+	DeniedCount  int64            `json:"DeniedCount"`
+	EventsByType map[string]int64 `json:"EventsByType,omitempty"`
+	EventsByOrg  map[string]int64 `json:"EventsByOrg,omitempty"`
+	UniqueActors int64            `json:"UniqueActors"`
+	TimeRange    float64          `json:"TimeRange"`
+}
+
+// GetAuditStats retrieves audit statistics.
+func (c *Client) GetAuditStats(ctx context.Context, since string) (*AuditStatsResponse, error) {
+	path := "/api/v1/audit/stats"
+	if since != "" {
+		path += "?since=" + url.QueryEscape(since)
+	}
+	var result AuditStatsResponse
+	if err := c.request(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// VerifyAuditIntegrityRequest represents an audit integrity verification request.
+type VerifyAuditIntegrityRequest struct {
+	Since string `json:"since,omitempty"`
+	Until string `json:"until,omitempty"`
+}
+
+// VerifyAuditIntegrityResponse represents an audit integrity verification response.
+type VerifyAuditIntegrityResponse struct {
+	Valid bool   `json:"valid"`
+	Since string `json:"since,omitempty"`
+	Until string `json:"until,omitempty"`
+}
+
+// VerifyAuditIntegrity verifies the integrity of audit logs.
+func (c *Client) VerifyAuditIntegrity(ctx context.Context, req VerifyAuditIntegrityRequest) (*VerifyAuditIntegrityResponse, error) {
+	var result VerifyAuditIntegrityResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/audit/verify", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ============================================================================
+// Edge API — Additional Methods
+// ============================================================================
+
+// EdgeHealthResponse represents edge node health status.
+type EdgeHealthResponse struct {
+	Healthy      bool    `json:"Healthy"`
+	LastChecked  string  `json:"LastChecked,omitempty"`
+	VaultSealed  bool    `json:"VaultSealed"`
+	HAEnabled    bool    `json:"HAEnabled"`
+	HAMode       string  `json:"HAMode,omitempty"`
+	ClusterNodes int     `json:"ClusterNodes"`
+	Version      string  `json:"Version,omitempty"`
+	Latency      float64 `json:"Latency"`
+	ErrorMessage string  `json:"ErrorMessage,omitempty"`
+}
+
+// GetEdgeHealth retrieves the health status of an edge node.
+func (c *Client) GetEdgeHealth(ctx context.Context, id string) (*EdgeHealthResponse, error) {
+	var result EdgeHealthResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/edges/"+id+"/health", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SyncEdgePolicies triggers policy synchronization for an edge node.
+func (c *Client) SyncEdgePolicies(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/edges/"+id+"/sync/policies", nil, nil)
+}
+
+// SyncEdgeKeysRequest represents a key sync request for an edge node.
+type SyncEdgeKeysRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	WrappedDEK  []byte `json:"wrapped_dek"`
+}
+
+// SyncEdgeKeys triggers key synchronization for an edge node.
+func (c *Client) SyncEdgeKeys(ctx context.Context, id string, req SyncEdgeKeysRequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/edges/"+id+"/sync/keys", req, nil)
+}
+
+// EdgeSyncStatusResponse represents edge node sync status.
+type EdgeSyncStatusResponse struct {
+	LastSyncedAt   string `json:"LastSyncedAt,omitempty"`
+	SyncInProgress bool   `json:"SyncInProgress"`
+	PoliciesSynced int    `json:"PoliciesSynced"`
+	KeysSynced     int    `json:"KeysSynced"`
+	ErrorCount     int    `json:"ErrorCount"`
+	LastError      string `json:"LastError,omitempty"`
+}
+
+// GetEdgeSyncStatus retrieves the sync status of an edge node.
+func (c *Client) GetEdgeSyncStatus(ctx context.Context, id string) (*EdgeSyncStatusResponse, error) {
+	var result EdgeSyncStatusResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/edges/"+id+"/sync/status", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ============================================================================
+// CRK API — Additional Methods
+// ============================================================================
+
+// RotateCRKRequest represents a CRK rotation request.
+type RotateCRKRequest struct {
+	OrgID     string `json:"org_id,omitempty"`
+	Threshold int    `json:"threshold"`
+}
+
+// RotateCRK initiates a CRK rotation ceremony.
+func (c *Client) RotateCRK(ctx context.Context, req RotateCRKRequest) (*CeremonyResponse, error) {
+	var result CeremonyResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/crk/rotate", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }

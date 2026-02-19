@@ -713,3 +713,388 @@ func TestClientNetworkError(t *testing.T) {
 	_, err := c.Health(context.Background())
 	assert.Error(t, err)
 }
+
+// ============================================================================
+// Tests for new client methods
+// ============================================================================
+
+func TestDeleteWorkspace(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Delete("/api/v1/workspaces/{id}", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	err := c.DeleteWorkspace(context.Background(), "ws1", DeleteWorkspaceRequest{})
+	require.NoError(t, err)
+}
+
+func TestAddParticipant(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/workspaces/{id}/participants", func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "ws1", chi.URLParam(r, "id"))
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	err := c.AddParticipant(context.Background(), "ws1", AddParticipantRequest{OrgID: "org2"})
+	require.NoError(t, err)
+}
+
+func TestRemoveParticipant(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Delete("/api/v1/workspaces/{id}/participants/{orgId}", func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "ws1", chi.URLParam(r, "id"))
+			assert.Equal(t, "org2", chi.URLParam(r, "orgId"))
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	err := c.RemoveParticipant(context.Background(), "ws1", "org2", RemoveParticipantRequest{})
+	require.NoError(t, err)
+}
+
+func TestArchiveWorkspace(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/workspaces/{id}/archive", func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "ws1", chi.URLParam(r, "id"))
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	err := c.ArchiveWorkspace(context.Background(), "ws1", ArchiveWorkspaceRequest{})
+	require.NoError(t, err)
+}
+
+func TestInitFederation(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/federation/init", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, InitFederationResponse{OrgID: "org1", CSR: []byte("csr-data")})
+		})
+	})
+	resp, err := c.InitFederation(context.Background(), InitFederationRequest{OrgID: "org1"})
+	require.NoError(t, err)
+	assert.Equal(t, "org1", resp.OrgID)
+	assert.Equal(t, []byte("csr-data"), resp.CSR)
+}
+
+func TestEstablishFederation(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/federation/establish", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, models.Federation{ID: "fed1", PartnerOrgID: "partner1", Status: "active"})
+		})
+	})
+	fed, err := c.EstablishFederation(context.Background(), EstablishFederationRequest{PartnerOrgID: "partner1", PartnerURL: "https://partner.example.com"})
+	require.NoError(t, err)
+	assert.Equal(t, "fed1", fed.ID)
+	assert.Equal(t, "partner1", fed.PartnerOrgID)
+}
+
+func TestRevokeFederation(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Delete("/api/v1/federation/{partnerId}", func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "partner1", chi.URLParam(r, "partnerId"))
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	err := c.RevokeFederation(context.Background(), "partner1", RevokeFederationRequest{NotifyPartner: true})
+	require.NoError(t, err)
+}
+
+func TestFederationHealth(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/federation/health", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, FederationHealthResponse{
+				Results: []FederationHealthResult{{PartnerOrgID: "p1", Healthy: true}},
+			})
+		})
+	})
+	resp, err := c.FederationHealth(context.Background())
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, "p1", resp.Results[0].PartnerOrgID)
+	assert.True(t, resp.Results[0].Healthy)
+}
+
+func TestImportFederationCertificate(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/federation/certificate/import", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	err := c.ImportFederationCertificate(context.Background(), ImportFederationCertificateRequest{
+		PartnerOrgID: "partner1",
+		Certificate:  []byte("cert-data"),
+	})
+	require.NoError(t, err)
+}
+
+func TestCreatePolicy(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, models.Policy{ID: "pol1", Name: "test-policy"})
+		})
+	})
+	pol, err := c.CreatePolicy(context.Background(), CreatePolicyRequest{Name: "test-policy", Workspace: "ws1", Rego: "package test"})
+	require.NoError(t, err)
+	assert.Equal(t, "pol1", pol.ID)
+	assert.Equal(t, "test-policy", pol.Name)
+}
+
+func TestGetPolicy(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, models.Policy{ID: chi.URLParam(r, "id"), Name: "my-policy"})
+		})
+	})
+	pol, err := c.GetPolicy(context.Background(), "pol1")
+	require.NoError(t, err)
+	assert.Equal(t, "pol1", pol.ID)
+}
+
+func TestUpdatePolicy(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Put("/api/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, models.Policy{ID: chi.URLParam(r, "id"), Version: 2})
+		})
+	})
+	pol, err := c.UpdatePolicy(context.Background(), "pol1", UpdatePolicyRequest{Rego: "package updated"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, pol.Version)
+}
+
+func TestDeletePolicy(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Delete("/api/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	err := c.DeletePolicy(context.Background(), "pol1", DeletePolicyRequest{})
+	require.NoError(t, err)
+}
+
+func TestGetPoliciesForWorkspace(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/policies/workspace/{workspaceId}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, PoliciesForWorkspaceResponse{
+				Policies: []*models.Policy{{ID: "p1"}, {ID: "p2"}},
+				Count:    2,
+			})
+		})
+	})
+	resp, err := c.GetPoliciesForWorkspace(context.Background(), "ws1")
+	require.NoError(t, err)
+	assert.Equal(t, 2, resp.Count)
+	assert.Len(t, resp.Policies, 2)
+}
+
+func TestEvaluatePolicy(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/policies/evaluate", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, EvaluatePolicyResponse{Allowed: true, PolicyID: "pol1"})
+		})
+	})
+	resp, err := c.EvaluatePolicy(context.Background(), EvaluatePolicyRequest{
+		Actor: "admin", Role: "super_admin", Operation: "encrypt", Workspace: "ws1",
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.Allowed)
+	assert.Equal(t, "pol1", resp.PolicyID)
+}
+
+func TestValidatePolicy(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/policies/validate", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, ValidatePolicyResponse{Valid: true})
+		})
+	})
+	resp, err := c.ValidatePolicy(context.Background(), ValidatePolicyRequest{Rego: "package test"})
+	require.NoError(t, err)
+	assert.True(t, resp.Valid)
+}
+
+func TestValidatePolicyInvalid(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/policies/validate", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, ValidatePolicyResponse{Valid: false, Error: "syntax error"})
+		})
+	})
+	resp, err := c.ValidatePolicy(context.Background(), ValidatePolicyRequest{Rego: "bad rego"})
+	require.NoError(t, err)
+	assert.False(t, resp.Valid)
+	assert.Equal(t, "syntax error", resp.Error)
+}
+
+func TestGetAuditEvent(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/audit/{id}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, models.AuditEvent{ID: chi.URLParam(r, "id"), Actor: "admin"})
+		})
+	})
+	ev, err := c.GetAuditEvent(context.Background(), "ev1")
+	require.NoError(t, err)
+	assert.Equal(t, "ev1", ev.ID)
+	assert.Equal(t, "admin", ev.Actor)
+}
+
+func TestExportAudit(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/audit/export", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"ev1"}]`))
+		})
+	})
+	data, err := c.ExportAudit(context.Background(), ExportAuditRequest{Format: "json"})
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "ev1")
+}
+
+func TestGetAuditStats(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, AuditStatsResponse{TotalEvents: 100, SuccessCount: 90, ErrorCount: 10})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := New(Config{BaseURL: srv.URL})
+	stats, err := c.GetAuditStats(context.Background(), "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+	assert.Equal(t, int64(100), stats.TotalEvents)
+	assert.Equal(t, int64(90), stats.SuccessCount)
+}
+
+func TestGetAuditStatsNoSince(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, AuditStatsResponse{TotalEvents: 50})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := New(Config{BaseURL: srv.URL})
+	stats, err := c.GetAuditStats(context.Background(), "")
+	require.NoError(t, err)
+	assert.Equal(t, int64(50), stats.TotalEvents)
+}
+
+func TestVerifyAuditIntegrity(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/audit/verify", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, VerifyAuditIntegrityResponse{Valid: true, Since: "2024-01-01", Until: "2024-12-31"})
+		})
+	})
+	resp, err := c.VerifyAuditIntegrity(context.Background(), VerifyAuditIntegrityRequest{Since: "2024-01-01", Until: "2024-12-31"})
+	require.NoError(t, err)
+	assert.True(t, resp.Valid)
+}
+
+func TestGetEdgeHealth(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/edges/{id}/health", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, EdgeHealthResponse{Healthy: true, Version: "1.15.0", ClusterNodes: 3})
+		})
+	})
+	health, err := c.GetEdgeHealth(context.Background(), "e1")
+	require.NoError(t, err)
+	assert.True(t, health.Healthy)
+	assert.Equal(t, "1.15.0", health.Version)
+	assert.Equal(t, 3, health.ClusterNodes)
+}
+
+func TestSyncEdgePolicies(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/edges/{id}/sync/policies", func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "e1", chi.URLParam(r, "id"))
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	err := c.SyncEdgePolicies(context.Background(), "e1")
+	require.NoError(t, err)
+}
+
+func TestSyncEdgeKeys(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/edges/{id}/sync/keys", func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "e1", chi.URLParam(r, "id"))
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	err := c.SyncEdgeKeys(context.Background(), "e1", SyncEdgeKeysRequest{WorkspaceID: "ws1"})
+	require.NoError(t, err)
+}
+
+func TestGetEdgeSyncStatus(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/edges/{id}/sync/status", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, EdgeSyncStatusResponse{PoliciesSynced: 5, KeysSynced: 10, SyncInProgress: false})
+		})
+	})
+	status, err := c.GetEdgeSyncStatus(context.Background(), "e1")
+	require.NoError(t, err)
+	assert.Equal(t, 5, status.PoliciesSynced)
+	assert.Equal(t, 10, status.KeysSynced)
+	assert.False(t, status.SyncInProgress)
+}
+
+func TestRotateCRK(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/crk/rotate", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, CeremonyResponse{ID: "cer1", Status: "started", Threshold: 3})
+		})
+	})
+	resp, err := c.RotateCRK(context.Background(), RotateCRKRequest{Threshold: 3})
+	require.NoError(t, err)
+	assert.Equal(t, "cer1", resp.ID)
+	assert.Equal(t, "started", resp.Status)
+	assert.Equal(t, 3, resp.Threshold)
+}
+
+func TestEncryptWithContext(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/workspaces/{id}/encrypt", func(w http.ResponseWriter, r *http.Request) {
+			var req EncryptRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			assert.NotNil(t, req.Context)
+			assert.Equal(t, "value1", req.Context["key1"])
+			writeJSONResponse(w, http.StatusOK, EncryptResponse{Ciphertext: []byte("encrypted")})
+		})
+	})
+	ct, err := c.EncryptWithContext(context.Background(), "ws1", []byte("hello"), map[string]string{"key1": "value1"})
+	require.NoError(t, err)
+	assert.Equal(t, []byte("encrypted"), ct)
+}
+
+func TestDecryptWithContext(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/workspaces/{id}/decrypt", func(w http.ResponseWriter, r *http.Request) {
+			var req DecryptRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			assert.NotNil(t, req.Context)
+			assert.Equal(t, "value1", req.Context["key1"])
+			writeJSONResponse(w, http.StatusOK, DecryptResponse{Data: []byte("decrypted")})
+		})
+	})
+	pt, err := c.DecryptWithContext(context.Background(), "ws1", []byte("cipher"), map[string]string{"key1": "value1"})
+	require.NoError(t, err)
+	assert.Equal(t, []byte("decrypted"), pt)
+}
+
+func TestRequestRaw(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/raw", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/csv")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("id,name\n1,test\n"))
+		})
+	})
+	data, err := c.requestRaw(context.Background(), http.MethodPost, "/api/v1/raw", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "id,name\n1,test\n", string(data))
+}
+
+func TestRequestRawError(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/raw", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusBadRequest, ErrorResponse{Error: "bad request"})
+		})
+	})
+	_, err := c.requestRaw(context.Background(), http.MethodPost, "/api/v1/raw", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bad request")
+}
