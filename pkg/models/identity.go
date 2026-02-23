@@ -51,6 +51,8 @@ type AdminIdentity struct {
 	CreatedBy        string                `json:"created_by,omitempty"`
 	IsBootstrap      bool                  `json:"is_bootstrap,omitempty"`
 	CRKSignature     []byte                `json:"-"`
+	SSOProvider      SSOProvider           `json:"sso_provider,omitempty"`
+	SSOSubject       string                `json:"sso_subject,omitempty"`
 	CreatedAt        time.Time             `json:"created_at"`
 	UpdatedAt        time.Time             `json:"updated_at"`
 	LastLoginAt      time.Time             `json:"last_login_at,omitempty"`

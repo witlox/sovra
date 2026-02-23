@@ -1400,6 +1400,22 @@ func (m *AdminIdentityRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *AdminIdentityRepository) ListActiveSSOBound(ctx context.Context) ([]*models.AdminIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("list SSO-bound admins failed")
+	}
+	var result []*models.AdminIdentity
+	for _, admin := range m.admins {
+		if admin.Active && admin.SSOProvider != "" && admin.SSOSubject != "" {
+			result = append(result, admin)
+		}
+	}
+	return result, nil
+}
+
 // UserIdentityRepository mock for user identity persistence.
 type UserIdentityRepository struct {
 	mu       sync.RWMutex

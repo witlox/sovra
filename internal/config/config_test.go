@@ -59,6 +59,12 @@ func TestLoadDefaults(t *testing.T) {
 	assert.True(t, cfg.Federation.Enabled)
 	assert.Equal(t, 30*time.Second, cfg.Federation.HealthInterval)
 	assert.Equal(t, 8760*time.Hour, cfg.Federation.CertificateExpiry)
+
+	// Admin defaults
+	assert.Equal(t, 24*time.Hour, cfg.Admin.CertTTL)
+	assert.Equal(t, 5*time.Minute, cfg.Admin.ReconciliationInterval)
+	assert.False(t, cfg.Admin.ReconciliationEnabled)
+	assert.Empty(t, cfg.Admin.IDPIssuerURL)
 }
 
 func TestLoadFromEnv(t *testing.T) {

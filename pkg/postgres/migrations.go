@@ -405,6 +405,16 @@ func Migrations() []Migration {
 			UPDATE admin_identities SET enrollment_status = 'active' WHERE active = true AND enrollment_status = 'active';
 			UPDATE admin_identities SET enrollment_status = 'disabled' WHERE active = false`,
 		},
+		{
+			Version:     29,
+			Description: "Add SSO columns to admin_identities",
+			SQL: `ALTER TABLE admin_identities
+				ADD COLUMN IF NOT EXISTS sso_provider VARCHAR(50),
+				ADD COLUMN IF NOT EXISTS sso_subject VARCHAR(255);
+			CREATE INDEX IF NOT EXISTS idx_admin_sso_subject
+				ON admin_identities(sso_provider, sso_subject)
+				WHERE sso_provider IS NOT NULL`,
+		},
 	}
 }
 

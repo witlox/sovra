@@ -76,6 +76,16 @@ func (m *mockAdminRepo) GetByCertCN(ctx context.Context, cn string) (*models.Adm
 	return nil, assert.AnError
 }
 
+func (m *mockAdminRepo) ListActiveSSOBound(ctx context.Context) ([]*models.AdminIdentity, error) {
+	var result []*models.AdminIdentity
+	for _, admin := range m.admins {
+		if admin.Active && admin.SSOProvider != "" && admin.SSOSubject != "" {
+			result = append(result, admin)
+		}
+	}
+	return result, nil
+}
+
 type mockUserRepo struct {
 	users map[string]*models.UserIdentity
 }
@@ -482,7 +492,7 @@ func TestAdminIdentityManagement(t *testing.T) {
 		msg := identity.GenerateAdminCreationMessage("org-acme", "security@acme.com", "Security Admin", models.AdminRoleSecurityAdmin)
 		sig := ed25519.Sign(setup.crkPriv, []byte(msg))
 
-		newAdmin, token, err := setup.mgr.CreateAdmin(ctx, "org-acme", caller.ID, "security@acme.com", "Security Admin", models.AdminRoleSecurityAdmin, sig)
+		newAdmin, token, err := setup.mgr.CreateAdmin(ctx, "org-acme", caller.ID, "security@acme.com", "Security Admin", models.AdminRoleSecurityAdmin, sig, nil)
 		require.NoError(t, err)
 		assert.Equal(t, models.AdminRoleSecurityAdmin, newAdmin.Role)
 		assert.Equal(t, models.AdminEnrollmentPending, newAdmin.EnrollmentStatus)

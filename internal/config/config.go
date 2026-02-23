@@ -35,6 +35,9 @@ type Config struct {
 
 	// Telemetry configuration
 	Telemetry TelemetryConfig `mapstructure:"telemetry"`
+
+	// Admin configuration
+	Admin AdminConfig `mapstructure:"admin"`
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -92,6 +95,16 @@ type FederationConfig struct {
 	Enabled           bool          `mapstructure:"enabled"`
 	HealthInterval    time.Duration `mapstructure:"health_interval"`
 	CertificateExpiry time.Duration `mapstructure:"certificate_expiry"`
+}
+
+// AdminConfig holds admin identity management configuration.
+type AdminConfig struct {
+	CertTTL                time.Duration `mapstructure:"cert_ttl"`
+	ReconciliationInterval time.Duration `mapstructure:"reconciliation_interval"`
+	ReconciliationEnabled  bool          `mapstructure:"reconciliation_enabled"`
+	IDPIssuerURL           string        `mapstructure:"idp_issuer_url"`
+	IDPClientID            string        `mapstructure:"idp_client_id"`
+	IDPOIDCSecret          string        `mapstructure:"idp_client_secret"` // nolint:gosec // G117: OIDC client secret
 }
 
 // TelemetryConfig holds telemetry/tracing configuration.
@@ -182,6 +195,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("federation.enabled", true)
 	v.SetDefault("federation.health_interval", 30*time.Second)
 	v.SetDefault("federation.certificate_expiry", 8760*time.Hour) // 1 year
+
+	// Admin defaults
+	v.SetDefault("admin.cert_ttl", 24*time.Hour)
+	v.SetDefault("admin.reconciliation_interval", 5*time.Minute)
+	v.SetDefault("admin.reconciliation_enabled", false)
 
 	// Telemetry defaults
 	v.SetDefault("telemetry.enabled", false)

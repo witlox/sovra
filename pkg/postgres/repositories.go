@@ -1423,7 +1423,7 @@ func (r *AdminIdentityRepository) Create(ctx context.Context, admin *models.Admi
 	if !admin.LastLoginAt.IsZero() {
 		lastLoginAt = &admin.LastLoginAt
 	}
-	var certSerial, certCN, createdBy sql.NullString
+	var certSerial, certCN, createdBy, ssoProvider, ssoSubject sql.NullString
 	if admin.CertSerial != "" {
 		certSerial = sql.NullString{String: admin.CertSerial, Valid: true}
 	}
@@ -1432,6 +1432,12 @@ func (r *AdminIdentityRepository) Create(ctx context.Context, admin *models.Admi
 	}
 	if admin.CreatedBy != "" {
 		createdBy = sql.NullString{String: admin.CreatedBy, Valid: true}
+	}
+	if admin.SSOProvider != "" {
+		ssoProvider = sql.NullString{String: string(admin.SSOProvider), Valid: true}
+	}
+	if admin.SSOSubject != "" {
+		ssoSubject = sql.NullString{String: admin.SSOSubject, Valid: true}
 	}
 	var certExpiry *time.Time
 	if !admin.CertExpiry.IsZero() {
@@ -1444,10 +1450,10 @@ func (r *AdminIdentityRepository) Create(ctx context.Context, admin *models.Admi
 
 	_, err = r.db.ExecContext(ctx,
 		`INSERT INTO admin_identities (id, org_id, email, name, role, mfa_enabled, mfa_secret, active, created_at, updated_at, last_login_at,
-		 cert_serial, cert_expiry, cert_cn, enrollment_status, created_by, is_bootstrap, crk_signature)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+		 cert_serial, cert_expiry, cert_cn, enrollment_status, created_by, is_bootstrap, crk_signature, sso_provider, sso_subject)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
 		id, orgID, admin.Email, admin.Name, admin.Role, admin.MFAEnabled, mfaSecret, admin.Active, admin.CreatedAt, admin.UpdatedAt, lastLoginAt,
-		certSerial, certExpiry, certCN, enrollmentStatus, createdBy, admin.IsBootstrap, admin.CRKSignature,
+		certSerial, certExpiry, certCN, enrollmentStatus, createdBy, admin.IsBootstrap, admin.CRKSignature, ssoProvider, ssoSubject,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create admin identity: %w", err)
@@ -1463,15 +1469,15 @@ func (r *AdminIdentityRepository) Get(ctx context.Context, id string) (*models.A
 	}
 
 	admin := &models.AdminIdentity{}
-	var mfaSecret, certSerial, certCN, createdBy sql.NullString
+	var mfaSecret, certSerial, certCN, createdBy, ssoProvider, ssoSubject sql.NullString
 	var lastLoginAt, certExpiry sql.NullTime
 	err = r.db.QueryRowContext(ctx,
 		`SELECT id, org_id, email, name, role, mfa_enabled, mfa_secret, active, created_at, updated_at, last_login_at,
-		 cert_serial, cert_expiry, cert_cn, enrollment_status, created_by, is_bootstrap, crk_signature
+		 cert_serial, cert_expiry, cert_cn, enrollment_status, created_by, is_bootstrap, crk_signature, sso_provider, sso_subject
 		 FROM admin_identities WHERE id = $1`,
 		uid,
 	).Scan(&admin.ID, &admin.OrgID, &admin.Email, &admin.Name, &admin.Role, &admin.MFAEnabled, &mfaSecret, &admin.Active, &admin.CreatedAt, &admin.UpdatedAt, &lastLoginAt,
-		&certSerial, &certExpiry, &certCN, &admin.EnrollmentStatus, &createdBy, &admin.IsBootstrap, &admin.CRKSignature)
+		&certSerial, &certExpiry, &certCN, &admin.EnrollmentStatus, &createdBy, &admin.IsBootstrap, &admin.CRKSignature, &ssoProvider, &ssoSubject)
 	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
@@ -1495,6 +1501,12 @@ func (r *AdminIdentityRepository) Get(ctx context.Context, id string) (*models.A
 	}
 	if createdBy.Valid {
 		admin.CreatedBy = createdBy.String
+	}
+	if ssoProvider.Valid {
+		admin.SSOProvider = models.SSOProvider(ssoProvider.String)
+	}
+	if ssoSubject.Valid {
+		admin.SSOSubject = ssoSubject.String
 	}
 	return admin, nil
 }
@@ -1585,7 +1597,7 @@ func (r *AdminIdentityRepository) Update(ctx context.Context, admin *models.Admi
 	if !admin.LastLoginAt.IsZero() {
 		lastLoginAt = &admin.LastLoginAt
 	}
-	var certSerial, certCN, createdBy sql.NullString
+	var certSerial, certCN, createdBy, ssoProvider, ssoSubject sql.NullString
 	if admin.CertSerial != "" {
 		certSerial = sql.NullString{String: admin.CertSerial, Valid: true}
 	}
@@ -1595,6 +1607,12 @@ func (r *AdminIdentityRepository) Update(ctx context.Context, admin *models.Admi
 	if admin.CreatedBy != "" {
 		createdBy = sql.NullString{String: admin.CreatedBy, Valid: true}
 	}
+	if admin.SSOProvider != "" {
+		ssoProvider = sql.NullString{String: string(admin.SSOProvider), Valid: true}
+	}
+	if admin.SSOSubject != "" {
+		ssoSubject = sql.NullString{String: admin.SSOSubject, Valid: true}
+	}
 	var certExpiry *time.Time
 	if !admin.CertExpiry.IsZero() {
 		certExpiry = &admin.CertExpiry
@@ -1602,10 +1620,12 @@ func (r *AdminIdentityRepository) Update(ctx context.Context, admin *models.Admi
 
 	result, err := r.db.ExecContext(ctx,
 		`UPDATE admin_identities SET email = $2, name = $3, role = $4, mfa_enabled = $5, mfa_secret = $6, active = $7, updated_at = $8, last_login_at = $9,
-		 cert_serial = $10, cert_expiry = $11, cert_cn = $12, enrollment_status = $13, created_by = $14, is_bootstrap = $15, crk_signature = $16
+		 cert_serial = $10, cert_expiry = $11, cert_cn = $12, enrollment_status = $13, created_by = $14, is_bootstrap = $15, crk_signature = $16,
+		 sso_provider = $17, sso_subject = $18
 		 WHERE id = $1`,
 		id, admin.Email, admin.Name, admin.Role, admin.MFAEnabled, mfaSecret, admin.Active, admin.UpdatedAt, lastLoginAt,
 		certSerial, certExpiry, certCN, admin.EnrollmentStatus, createdBy, admin.IsBootstrap, admin.CRKSignature,
+		ssoProvider, ssoSubject,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update admin identity: %w", err)
@@ -1633,6 +1653,36 @@ func (r *AdminIdentityRepository) Delete(ctx context.Context, id string) error {
 		return errors.ErrNotFound
 	}
 	return nil
+}
+
+// ListActiveSSOBound returns all active admin identities that have SSO bindings.
+func (r *AdminIdentityRepository) ListActiveSSOBound(ctx context.Context) ([]*models.AdminIdentity, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id FROM admin_identities
+		 WHERE active = true AND sso_provider IS NOT NULL AND sso_subject IS NOT NULL AND sso_subject != ''
+		 ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list SSO-bound admin identities: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var admins []*models.AdminIdentity
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan admin identity ID: %w", err)
+		}
+		admin, err := r.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		admins = append(admins, admin)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate SSO-bound admin identities: %w", err)
+	}
+	return admins, nil
 }
 
 // =============================================================================

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/witlox/sovra/internal/api"
 	"github.com/witlox/sovra/internal/audit"
 	"github.com/witlox/sovra/internal/compliance"
@@ -21,9 +22,12 @@ import (
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
 	"github.com/witlox/sovra/internal/identity"
+	"github.com/witlox/sovra/internal/identity/idp"
 	"github.com/witlox/sovra/internal/policy"
+	"github.com/witlox/sovra/internal/reconciliation"
 	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
+	"github.com/witlox/sovra/pkg/models"
 	"github.com/witlox/sovra/pkg/postgres"
 	"github.com/witlox/sovra/pkg/telemetry"
 	"github.com/witlox/sovra/pkg/vault"
@@ -155,6 +159,62 @@ func main() {
 		crkProvider, identity.NewSimpleTokenGenerator(), pkiIssuer, auditSvc,
 	)
 
+	// Configure IdP checker and reconciliation scheduler
+	var reconciler *reconciliation.Scheduler
+	if cfg.Admin.IDPIssuerURL != "" {
+		idpChecker, err := idp.NewOIDCChecker(idp.OIDCCheckerConfig{
+			IssuerURL:  cfg.Admin.IDPIssuerURL,
+			ClientID:   cfg.Admin.IDPClientID,
+			OIDCSecret: cfg.Admin.IDPOIDCSecret,
+		})
+		if err != nil {
+			logger.Error("failed to create IdP checker", "error", err)
+			os.Exit(1)
+		}
+		identityMgr.SetIDPChecker(idpChecker)
+		identityMgr.SetCertTTL(cfg.Admin.CertTTL)
+		logger.Info("admin IdP integration enabled",
+			"cert_ttl", cfg.Admin.CertTTL,
+			"idp_issuer", cfg.Admin.IDPIssuerURL)
+
+		if cfg.Admin.ReconciliationEnabled {
+			reconciler = reconciliation.NewScheduler(
+				adminRepo, idpChecker, identityMgr.DisableAdmin, auditSvc,
+				cfg.Admin.ReconciliationInterval,
+			)
+			go reconciler.Start(ctx)
+			logger.Info("admin IdP reconciliation enabled",
+				"interval", cfg.Admin.ReconciliationInterval)
+		}
+	} else {
+		// No IdP configured — air-gap mode assumption.
+		// Use extended cert TTL unless the operator explicitly overrode it.
+		airgapCertTTL := cfg.Admin.CertTTL
+		if cfg.Admin.CertTTL == 24*time.Hour {
+			// Default value was not overridden — extend for air-gap
+			airgapCertTTL = 8760 * time.Hour
+		}
+		identityMgr.SetCertTTL(airgapCertTTL)
+
+		logger.Warn("no admin IdP configured — assuming air-gap deployment",
+			"cert_ttl", airgapCertTTL,
+			"hint", "if this is not an air-gapped deployment, set admin.idp_issuer_url")
+
+		auditSvc.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     cfg.OrgID,
+			EventType: "admin.airgap.assumed",
+			Actor:     "api-gateway",
+			Result:    "warning",
+			Metadata: map[string]any{
+				"cert_ttl": airgapCertTTL.String(),
+				"reason":   "no admin.idp_issuer_url configured",
+				"hint":     "if this is not an air-gapped deployment, configure IdP integration",
+			},
+		})
+	}
+
 	// Emergency access and account recovery
 	emergencyRepo := postgres.NewEmergencyAccessRepository(db)
 	recoveryRepo := postgres.NewAccountRecoveryRepository(db)
@@ -245,6 +305,9 @@ func main() {
 
 	logger.Info("shutting down...")
 	rotationScheduler.Stop()
+	if reconciler != nil {
+		reconciler.Stop()
+	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 	_ = server.Shutdown(shutdownCtx)

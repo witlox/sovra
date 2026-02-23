@@ -29,6 +29,7 @@ var (
 	ErrKeyNotFound              = errors.New("key not found")
 	ErrCertificateExpired       = errors.New("certificate expired")
 	ErrCertificateInvalid       = errors.New("certificate invalid")
+	ErrServiceUnavailable       = errors.New("service unavailable")
 )
 
 // ValidationError represents a validation error with field-specific details.

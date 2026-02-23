@@ -71,6 +71,8 @@ func handleError(w http.ResponseWriter, err error) {
 		writeJSONError(w, http.StatusBadGateway, "FEDERATION_FAILED", err.Error())
 	case errors.Is(err, apierrors.ErrEdgeNodeUnreachable):
 		writeJSONError(w, http.StatusServiceUnavailable, "EDGE_UNREACHABLE", err.Error())
+	case errors.Is(err, apierrors.ErrServiceUnavailable):
+		writeJSONError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", err.Error())
 	default:
 		writeJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}
@@ -1640,10 +1642,12 @@ func NewIdentityHandler(manager *identity.Manager) *IdentityHandler {
 
 // CreateAdminRequest represents an admin creation request.
 type CreateAdminRequest struct {
-	Email        string           `json:"email"`
-	Name         string           `json:"name"`
-	Role         models.AdminRole `json:"role"`
-	CRKSignature []byte           `json:"crk_signature"`
+	Email        string             `json:"email"`
+	Name         string             `json:"name"`
+	Role         models.AdminRole   `json:"role"`
+	CRKSignature []byte             `json:"crk_signature"`
+	SSOProvider  models.SSOProvider `json:"sso_provider,omitempty"`
+	SSOSubject   string             `json:"sso_subject,omitempty"`
 }
 
 // BootstrapAdminRequest represents a bootstrap admin creation request.
@@ -1773,7 +1777,14 @@ func (h *IdentityHandler) CreateAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	orgID := getOrgID(r)
-	admin, enrollmentToken, err := h.manager.CreateAdmin(r.Context(), orgID, callerAdminID, req.Email, req.Name, req.Role, req.CRKSignature)
+	var opts *identity.CreateAdminOptions
+	if req.SSOProvider != "" || req.SSOSubject != "" {
+		opts = &identity.CreateAdminOptions{
+			SSOProvider: req.SSOProvider,
+			SSOSubject:  req.SSOSubject,
+		}
+	}
+	admin, enrollmentToken, err := h.manager.CreateAdmin(r.Context(), orgID, callerAdminID, req.Email, req.Name, req.Role, req.CRKSignature, opts)
 	if err != nil {
 		handleError(w, err)
 		return

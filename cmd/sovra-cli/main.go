@@ -1694,6 +1694,8 @@ var identityCreateAdminCmd = &cobra.Command{
 		name, _ := cmd.Flags().GetString("name")
 		role, _ := cmd.Flags().GetString("role")
 		crkSigHex, _ := cmd.Flags().GetString("crk-signature")
+		ssoProvider, _ := cmd.Flags().GetString("sso-provider")
+		ssoSubject, _ := cmd.Flags().GetString("sso-subject")
 
 		if email == "" || name == "" {
 			return fmt.Errorf("--email and --name are required")
@@ -1715,6 +1717,8 @@ var identityCreateAdminCmd = &cobra.Command{
 			Name:         name,
 			Role:         models.AdminRole(role),
 			CRKSignature: crkSig,
+			SSOProvider:  models.SSOProvider(ssoProvider),
+			SSOSubject:   ssoSubject,
 		})
 		if err != nil {
 			return fmt.Errorf("create admin: %w", err)
@@ -2146,6 +2150,8 @@ func init() {
 	identityCreateAdminCmd.Flags().String("name", "", "Admin display name")
 	identityCreateAdminCmd.Flags().String("role", "operations_admin", "Admin role (super_admin, security_admin, operations_admin, auditor)")
 	identityCreateAdminCmd.Flags().String("crk-signature", "", "CRK co-signature (hex-encoded)")
+	identityCreateAdminCmd.Flags().String("sso-provider", "", "SSO provider (azure_ad, okta, google, oidc)")
+	identityCreateAdminCmd.Flags().String("sso-subject", "", "SSO subject identifier")
 
 	// identity create service flags
 	identityCreateServiceCmd.Flags().String("name", "", "Service name")

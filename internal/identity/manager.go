@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pquerna/otp/totp"
+	"github.com/witlox/sovra/internal/identity/idp"
 	"github.com/witlox/sovra/pkg/errors"
 	"github.com/witlox/sovra/pkg/models"
 )
@@ -24,6 +25,7 @@ type AdminRepository interface {
 	GetByEmail(ctx context.Context, orgID, email string) (*models.AdminIdentity, error)
 	GetByCertCN(ctx context.Context, cn string) (*models.AdminIdentity, error)
 	List(ctx context.Context, orgID string) ([]*models.AdminIdentity, error)
+	ListActiveSSOBound(ctx context.Context) ([]*models.AdminIdentity, error)
 	Update(ctx context.Context, admin *models.AdminIdentity) error
 	Delete(ctx context.Context, id string) error
 }
@@ -117,6 +119,12 @@ func (a *PKIIssuerAdapter) RevokeCertificate(ctx context.Context, serial string)
 	return a.RevokeFn(ctx, serial)
 }
 
+// CreateAdminOptions holds optional SSO binding fields for admin creation.
+type CreateAdminOptions struct {
+	SSOProvider models.SSOProvider
+	SSOSubject  string
+}
+
 // Manager provides identity management operations.
 type Manager struct {
 	admins      AdminRepository
@@ -129,6 +137,8 @@ type Manager struct {
 	tokenGen    TokenGenerator
 	pkiIssuer   PKIIssuer
 	auditor     Auditor
+	certTTL     time.Duration
+	idpChecker  idp.SubjectChecker
 }
 
 // NewManager creates a new identity manager.
@@ -177,6 +187,19 @@ func NewManagerWithAdminSecurity(
 	}
 }
 
+// SetCertTTL sets the certificate TTL for admin certificates.
+func (m *Manager) SetCertTTL(ttl time.Duration) { m.certTTL = ttl }
+
+// SetIDPChecker sets the IdP subject checker for SSO liveness verification.
+func (m *Manager) SetIDPChecker(checker idp.SubjectChecker) { m.idpChecker = checker }
+
+func (m *Manager) getCertTTL() time.Duration {
+	if m.certTTL > 0 {
+		return m.certTTL
+	}
+	return 24 * time.Hour
+}
+
 // GenerateAdminCreationMessage creates the deterministic message for CRK signing.
 func GenerateAdminCreationMessage(orgID, email, name string, role models.AdminRole) string {
 	return fmt.Sprintf("%s:%s:%s:%s", orgID, email, name, role)
@@ -193,8 +216,9 @@ func truncate(s string, maxLen int) string {
 // CreateAdmin creates a new admin identity with CRK co-signature verification.
 // callerAdminID is the authenticated admin making the request.
 // crkSignature is the Ed25519 signature over the creation message.
+// opts optionally binds SSO provider/subject to the admin.
 // Returns the admin identity and an enrollment token.
-func (m *Manager) CreateAdmin(ctx context.Context, orgID, callerAdminID, email, name string, role models.AdminRole, crkSignature []byte) (*models.AdminIdentity, string, error) {
+func (m *Manager) CreateAdmin(ctx context.Context, orgID, callerAdminID, email, name string, role models.AdminRole, crkSignature []byte, opts *CreateAdminOptions) (*models.AdminIdentity, string, error) {
 	if email == "" || name == "" {
 		return nil, "", errors.ErrInvalidInput
 	}
@@ -259,6 +283,11 @@ func (m *Manager) CreateAdmin(ctx context.Context, orgID, callerAdminID, email, 
 		CertCN:           fmt.Sprintf("admin-%s-%s", truncate(orgID, 8), uuid.New().String()[:8]),
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
+	}
+
+	if opts != nil {
+		admin.SSOProvider = opts.SSOProvider
+		admin.SSOSubject = opts.SSOSubject
 	}
 
 	if err := m.admins.Create(ctx, admin); err != nil {
@@ -438,7 +467,7 @@ func (m *Manager) EnrollAdmin(ctx context.Context, adminID, enrollmentToken, tot
 		return nil, nil, fmt.Errorf("PKI issuer not configured")
 	}
 
-	certResult, err := m.pkiIssuer.IssueCertificate(ctx, "sovra-admin", admin.CertCN, nil, 8760*time.Hour)
+	certResult, err := m.pkiIssuer.IssueCertificate(ctx, "sovra-admin", admin.CertCN, nil, m.getCertTTL())
 	if err != nil {
 		return nil, nil, fmt.Errorf("issue certificate: %w", err)
 	}
@@ -536,6 +565,24 @@ func (m *Manager) RenewAdminCertificate(ctx context.Context, adminID, totpCode s
 		return nil, fmt.Errorf("admin is not active: %w", errors.ErrForbidden)
 	}
 
+	// IdP liveness check (fail-closed: refuse renewal if IdP unreachable)
+	if admin.SSOSubject != "" && m.idpChecker != nil {
+		status := m.idpChecker.CheckSubject(ctx, admin.SSOSubject)
+		if status.Error != nil {
+			m.auditLog(ctx, admin.OrgID, "admin.certificate.renew", "denied", map[string]any{
+				"admin_id": adminID, "reason": "identity provider unreachable",
+			})
+			return nil, fmt.Errorf("cannot verify SSO status: %w", errors.ErrServiceUnavailable)
+		}
+		if !status.Active {
+			_ = m.DisableAdmin(ctx, adminID)
+			m.auditLog(ctx, admin.OrgID, "admin.certificate.renew", "denied", map[string]any{
+				"admin_id": adminID, "reason": "SSO subject no longer active",
+			})
+			return nil, fmt.Errorf("SSO subject no longer active: %w", errors.ErrForbidden)
+		}
+	}
+
 	if !admin.MFAEnabled || admin.MFASecret == "" {
 		m.auditLog(ctx, admin.OrgID, "admin.certificate.renew", "denied", map[string]any{
 			"admin_id": adminID,
@@ -565,7 +612,7 @@ func (m *Manager) RenewAdminCertificate(ctx context.Context, adminID, totpCode s
 	}
 
 	// Issue new certificate
-	certResult, err := m.pkiIssuer.IssueCertificate(ctx, "sovra-admin", admin.CertCN, nil, 8760*time.Hour)
+	certResult, err := m.pkiIssuer.IssueCertificate(ctx, "sovra-admin", admin.CertCN, nil, m.getCertTTL())
 	if err != nil {
 		m.auditLog(ctx, admin.OrgID, "admin.certificate.renew", "denied", map[string]any{
 			"admin_id": adminID,

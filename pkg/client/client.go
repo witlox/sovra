@@ -524,10 +524,12 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 // CreateAdminRequest represents a request to create an admin identity.
 // Requires CRK co-signature and authenticated admin caller (mTLS).
 type CreateAdminRequest struct {
-	Email        string           `json:"email"`
-	Name         string           `json:"name"`
-	Role         models.AdminRole `json:"role"`
-	CRKSignature []byte           `json:"crk_signature"`
+	Email        string             `json:"email"`
+	Name         string             `json:"name"`
+	Role         models.AdminRole   `json:"role"`
+	CRKSignature []byte             `json:"crk_signature"`
+	SSOProvider  models.SSOProvider `json:"sso_provider,omitempty"`
+	SSOSubject   string             `json:"sso_subject,omitempty"`
 }
 
 // CreateAdminResponse includes the created admin and enrollment token.
