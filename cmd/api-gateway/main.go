@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -118,19 +119,46 @@ func main() {
 	deviceRepo := postgres.NewDeviceIdentityRepository(db)
 	groupRepo := postgres.NewIdentityGroupRepository(db)
 	roleRepo := postgres.NewRoleRepository(db)
-	identityMgr := identity.NewManager(adminRepo, userRepo, serviceRepo, deviceRepo, groupRepo, roleRepo)
 
 	// PKI client for certificate management
 	pkiClient := vaultClient.PKI("")
+
+	// CRK provider adapter (shared by identity manager, emergency access, account recovery)
+	crkProvider := &identity.CRKProviderAdapter{
+		GetByOrgIDFn: crkRepo.GetByOrgID,
+		VerifyFn:     crkMgr.Verify,
+	}
+
+	// PKI issuer adapter for admin certificate lifecycle
+	pkiIssuer := &identity.PKIIssuerAdapter{
+		IssueFn: func(ctx context.Context, role, cn string, altNames []string, ttl time.Duration) (*identity.PKICertResult, error) {
+			cert, err := pkiClient.IssueCertificate(ctx, role, &vault.CertificateRequest{
+				CommonName: cn,
+				AltNames:   altNames,
+				TTL:        ttl,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("pki issue certificate: %w", err)
+			}
+			return &identity.PKICertResult{
+				Certificate:  cert.Certificate,
+				CertKey:      cert.PrivateKey,
+				SerialNumber: cert.SerialNumber,
+				Expiration:   cert.Expiration,
+			}, nil
+		},
+		RevokeFn: pkiClient.RevokeCertificate,
+	}
+
+	identityMgr := identity.NewManagerWithAdminSecurity(
+		adminRepo, userRepo, serviceRepo, deviceRepo, groupRepo, roleRepo,
+		crkProvider, identity.NewSimpleTokenGenerator(), pkiIssuer, auditSvc,
+	)
 
 	// Emergency access and account recovery
 	emergencyRepo := postgres.NewEmergencyAccessRepository(db)
 	recoveryRepo := postgres.NewAccountRecoveryRepository(db)
 
-	crkProvider := &identity.CRKProviderAdapter{
-		GetByOrgIDFn: crkRepo.GetByOrgID,
-		VerifyFn:     crkMgr.Verify,
-	}
 	emergencyMgr := identity.NewEmergencyAccessManagerWithAudit(emergencyRepo, crkProvider, identity.NewSimpleTokenGenerator(), auditSvc)
 	recoveryMgr := identity.NewAccountRecoveryManager(recoveryRepo, crkProvider)
 
@@ -159,6 +187,7 @@ func main() {
 
 	routerCfg := api.DefaultRouterConfig()
 	routerCfg.Logger = logger
+	routerCfg.AdminIdentityResolver = &adminResolverAdapter{mgr: identityMgr}
 	router := api.NewRouter(routerCfg, services)
 
 	server := &http.Server{
@@ -220,4 +249,24 @@ func main() {
 	defer shutdownCancel()
 	_ = server.Shutdown(shutdownCtx)
 	logger.Info("shutdown complete")
+}
+
+// adminResolverAdapter adapts identity.Manager to api.AdminIdentityResolver.
+type adminResolverAdapter struct {
+	mgr *identity.Manager
+}
+
+func (a *adminResolverAdapter) GetAdminByCertCN(ctx context.Context, cn string) (*api.AdminCertIdentity, error) {
+	admin, err := a.mgr.GetAdminByCertCN(ctx, cn)
+	if err != nil {
+		return nil, fmt.Errorf("get admin by cert CN: %w", err)
+	}
+	if admin == nil {
+		return nil, nil
+	}
+	return &api.AdminCertIdentity{
+		AdminID: admin.ID,
+		OrgID:   admin.OrgID,
+		Active:  admin.Active,
+	}, nil
 }

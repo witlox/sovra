@@ -29,6 +29,8 @@ const (
 	ContextKeyOrgID contextKey = "org_id"
 	// ContextKeyUserID holds the user ID in context.
 	ContextKeyUserID contextKey = "user_id"
+	// ContextKeyAdminID holds the admin ID in context (set by AdminCertMiddleware).
+	ContextKeyAdminID contextKey = "admin_id"
 )
 
 // MiddlewareConfig holds middleware configuration.
@@ -476,4 +478,50 @@ func (a *DefaultAuthenticator) AuthenticateToken(ctx context.Context, token stri
 		return &AuthResult{Authenticated: true, UserID: "dev-user", OrgID: "dev-org"}, nil
 	}
 	return nil, errors.New("no authenticator configured")
+}
+
+// AdminIdentityResolver resolves admin identities from certificate common names.
+type AdminIdentityResolver interface {
+	GetAdminByCertCN(ctx context.Context, cn string) (*AdminCertIdentity, error)
+}
+
+// AdminCertIdentity holds resolved admin identity info for middleware.
+type AdminCertIdentity struct {
+	AdminID string
+	OrgID   string
+	Active  bool
+}
+
+// AdminCertMiddleware maps mTLS certificate CN to admin identity.
+// Runs after MTLSMiddleware. If CN matches an active admin, sets ContextKeyAdminID.
+func AdminCertMiddleware(resolver AdminIdentityResolver) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Only process if we have cert info from mTLS
+			certInfo, ok := r.Context().Value(ContextKeyCert).(*CertificateInfo)
+			if !ok || certInfo == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Try to resolve admin by certificate CN
+			adminIdentity, err := resolver.GetAdminByCertCN(r.Context(), certInfo.CommonName)
+			if err != nil || adminIdentity == nil {
+				// Not an admin cert, pass through
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if !adminIdentity.Active {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Set admin context
+			ctx := context.WithValue(r.Context(), ContextKeyAdminID, adminIdentity.AdminID)
+			ctx = context.WithValue(ctx, ContextKeyUserID, adminIdentity.AdminID)
+			ctx = context.WithValue(ctx, ContextKeyOrgID, adminIdentity.OrgID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/witlox/sovra/internal/crk"
+	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/pkg/client"
 	"github.com/witlox/sovra/pkg/models"
 )
@@ -30,13 +32,19 @@ func main() {
 func getClient(cmd *cobra.Command) *client.Client {
 	apiURL, _ := cmd.Root().PersistentFlags().GetString("api-url")
 	orgID, _ := cmd.Root().PersistentFlags().GetString("org-id")
+	certFile, _ := cmd.Root().PersistentFlags().GetString("cert")
+	keyFile, _ := cmd.Root().PersistentFlags().GetString("key")
+	caCertFile, _ := cmd.Root().PersistentFlags().GetString("ca-cert")
 	token := os.Getenv("SOVRA_TOKEN")
 
 	return client.New(client.Config{
-		BaseURL: apiURL,
-		Token:   token,
-		OrgID:   orgID,
-		Timeout: 30 * time.Second,
+		BaseURL:    apiURL,
+		Token:      token,
+		OrgID:      orgID,
+		CertFile:   certFile,
+		KeyFile:    keyFile,
+		CACertFile: caCertFile,
+		Timeout:    30 * time.Second,
 	})
 }
 
@@ -64,6 +72,9 @@ func init() {
 	rootCmd.PersistentFlags().String("org-id", "", "Organization ID")
 	rootCmd.PersistentFlags().String("api-url", "http://localhost:8080", "API Gateway URL")
 	rootCmd.PersistentFlags().Bool("json", false, "Output in JSON format")
+	rootCmd.PersistentFlags().String("cert", "", "Client certificate file for mTLS admin authentication")
+	rootCmd.PersistentFlags().String("key", "", "Client private key file for mTLS admin authentication")
+	rootCmd.PersistentFlags().String("ca-cert", "", "CA certificate file for server verification")
 }
 
 // ============================================================================
@@ -1677,23 +1688,33 @@ var identityCreateCmd = &cobra.Command{
 
 var identityCreateAdminCmd = &cobra.Command{
 	Use:   "admin",
-	Short: "Create an admin identity",
+	Short: "Create an admin identity (requires CRK co-signature and mTLS auth)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		email, _ := cmd.Flags().GetString("email")
 		name, _ := cmd.Flags().GetString("name")
 		role, _ := cmd.Flags().GetString("role")
+		crkSigHex, _ := cmd.Flags().GetString("crk-signature")
 
 		if email == "" || name == "" {
 			return fmt.Errorf("--email and --name are required")
+		}
+		if crkSigHex == "" {
+			return fmt.Errorf("--crk-signature is required (hex-encoded Ed25519 signature)")
+		}
+
+		crkSig, err := hex.DecodeString(crkSigHex)
+		if err != nil {
+			return fmt.Errorf("invalid --crk-signature: must be hex-encoded: %w", err)
 		}
 
 		c := getClient(cmd)
 		ctx := context.Background()
 
-		admin, err := c.CreateAdmin(ctx, client.CreateAdminRequest{
-			Email: email,
-			Name:  name,
-			Role:  models.AdminRole(role),
+		resp, err := c.CreateAdmin(ctx, client.CreateAdminRequest{
+			Email:        email,
+			Name:         name,
+			Role:         models.AdminRole(role),
+			CRKSignature: crkSig,
 		})
 		if err != nil {
 			return fmt.Errorf("create admin: %w", err)
@@ -1701,10 +1722,12 @@ var identityCreateAdminCmd = &cobra.Command{
 
 		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
 		if jsonOutput {
-			data, _ := json.MarshalIndent(admin, "", "  ")
+			data, _ := json.MarshalIndent(resp, "", "  ")
 			fmt.Println(string(data))
 		} else {
-			fmt.Printf("Admin created: %s (%s)\n", admin.Name, admin.ID)
+			fmt.Printf("Admin created: %s (%s)\n", resp.Admin.Name, resp.Admin.ID)
+			fmt.Printf("Enrollment token: %s\n", resp.EnrollmentToken)
+			fmt.Println("Use 'sovra-cli identity admin enroll' to complete enrollment.")
 		}
 		return nil
 	},
@@ -2122,6 +2145,7 @@ func init() {
 	identityCreateAdminCmd.Flags().String("email", "", "Admin email address")
 	identityCreateAdminCmd.Flags().String("name", "", "Admin display name")
 	identityCreateAdminCmd.Flags().String("role", "operations_admin", "Admin role (super_admin, security_admin, operations_admin, auditor)")
+	identityCreateAdminCmd.Flags().String("crk-signature", "", "CRK co-signature (hex-encoded)")
 
 	// identity create service flags
 	identityCreateServiceCmd.Flags().String("name", "", "Service name")
@@ -2288,9 +2312,175 @@ var identityServiceRotateCmd = &cobra.Command{
 	},
 }
 
+var identityAdminBootstrapCmd = &cobra.Command{
+	Use:   "bootstrap",
+	Short: "Create the first admin for an organization (only when no admins exist)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Root().PersistentFlags().GetString("org-id")
+		email, _ := cmd.Flags().GetString("email")
+		name, _ := cmd.Flags().GetString("name")
+		role, _ := cmd.Flags().GetString("role")
+		crkSigHex, _ := cmd.Flags().GetString("crk-signature")
+
+		if orgID == "" || email == "" || name == "" {
+			return fmt.Errorf("--org-id, --email, and --name are required")
+		}
+		if crkSigHex == "" {
+			return fmt.Errorf("--crk-signature is required (hex-encoded Ed25519 signature)")
+		}
+
+		crkSig, err := hex.DecodeString(crkSigHex)
+		if err != nil {
+			return fmt.Errorf("invalid --crk-signature: %w", err)
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.BootstrapAdmin(ctx, client.BootstrapAdminRequest{
+			OrgID:        orgID,
+			Email:        email,
+			Name:         name,
+			Role:         models.AdminRole(role),
+			CRKSignature: crkSig,
+		})
+		if err != nil {
+			return fmt.Errorf("bootstrap admin: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Bootstrap admin created: %s (%s)\n", resp.Admin.Name, resp.Admin.ID)
+			fmt.Printf("Enrollment token: %s\n", resp.EnrollmentToken)
+			fmt.Println("Use 'sovra-cli identity admin enroll' to complete enrollment.")
+		}
+		return nil
+	},
+}
+
+var identityAdminSignMessageCmd = &cobra.Command{
+	Use:   "sign-message",
+	Short: "Output the message that must be signed with CRK for admin creation",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Root().PersistentFlags().GetString("org-id")
+		email, _ := cmd.Flags().GetString("email")
+		name, _ := cmd.Flags().GetString("name")
+		role, _ := cmd.Flags().GetString("role")
+
+		if orgID == "" || email == "" || name == "" {
+			return fmt.Errorf("--org-id, --email, and --name are required")
+		}
+
+		msg := identity.GenerateAdminCreationMessage(orgID, email, name, models.AdminRole(role))
+		fmt.Println(msg)
+		return nil
+	},
+}
+
+var identityAdminEnrollCmd = &cobra.Command{
+	Use:   "enroll [admin-id]",
+	Short: "Complete admin enrollment with TOTP verification and certificate issuance",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		token, _ := cmd.Flags().GetString("token")
+		totpCode, _ := cmd.Flags().GetString("totp-code")
+
+		if token == "" || totpCode == "" {
+			return fmt.Errorf("--token and --totp-code are required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.EnrollAdmin(ctx, args[0], client.EnrollAdminRequest{
+			EnrollmentToken: token,
+			TOTPCode:        totpCode,
+		})
+		if err != nil {
+			return fmt.Errorf("enroll admin: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Admin enrolled: %s (%s)\n", resp.Admin.Name, resp.Admin.ID)
+			fmt.Printf("Certificate serial: %s\n", resp.Serial)
+			fmt.Printf("Expires: %s\n", resp.Expiration.Format(time.RFC3339))
+			fmt.Println("\n--- Certificate ---")
+			fmt.Println(resp.Certificate)
+			fmt.Println("--- Private Key ---")
+			fmt.Println(resp.CertKey)
+			fmt.Println("\nSave these securely. The private key is shown only once.")
+		}
+		return nil
+	},
+}
+
+var identityAdminRenewCertCmd = &cobra.Command{
+	Use:   "renew-cert [admin-id]",
+	Short: "Renew an admin's mTLS certificate (requires TOTP)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		totpCode, _ := cmd.Flags().GetString("totp-code")
+
+		if totpCode == "" {
+			return fmt.Errorf("--totp-code is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.RenewAdminCertificate(ctx, args[0], client.RenewAdminCertRequest{
+			TOTPCode: totpCode,
+		})
+		if err != nil {
+			return fmt.Errorf("renew certificate: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Certificate renewed: serial=%s\n", resp.Serial)
+			fmt.Printf("Expires: %s\n", resp.Expiration.Format(time.RFC3339))
+			fmt.Println("\n--- Certificate ---")
+			fmt.Println(resp.Certificate)
+			fmt.Println("--- Private Key ---")
+			fmt.Println(resp.CertKey)
+			fmt.Println("\nSave these securely. The private key is shown only once.")
+		}
+		return nil
+	},
+}
+
 func init() {
+	// Admin sub-command flags
+	identityAdminBootstrapCmd.Flags().String("email", "", "Admin email address")
+	identityAdminBootstrapCmd.Flags().String("name", "", "Admin display name")
+	identityAdminBootstrapCmd.Flags().String("role", "super_admin", "Admin role")
+	identityAdminBootstrapCmd.Flags().String("crk-signature", "", "CRK co-signature (hex-encoded)")
+
+	identityAdminSignMessageCmd.Flags().String("email", "", "Admin email address")
+	identityAdminSignMessageCmd.Flags().String("name", "", "Admin display name")
+	identityAdminSignMessageCmd.Flags().String("role", "operations_admin", "Admin role")
+
+	identityAdminEnrollCmd.Flags().String("token", "", "Enrollment token")
+	identityAdminEnrollCmd.Flags().String("totp-code", "", "TOTP verification code")
+
+	identityAdminRenewCertCmd.Flags().String("totp-code", "", "TOTP verification code")
+
 	identityAdminCmd.AddCommand(identityAdminDisableCmd)
 	identityAdminCmd.AddCommand(identityAdminEnableCmd)
+	identityAdminCmd.AddCommand(identityAdminBootstrapCmd)
+	identityAdminCmd.AddCommand(identityAdminSignMessageCmd)
+	identityAdminCmd.AddCommand(identityAdminEnrollCmd)
+	identityAdminCmd.AddCommand(identityAdminRenewCertCmd)
 
 	identityServiceCmd.AddCommand(identityServiceRotateCmd)
 }

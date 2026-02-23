@@ -390,12 +390,16 @@ func TestHealth(t *testing.T) {
 func TestCreateAdmin(t *testing.T) {
 	_, c := mockServer(t, func(r chi.Router) {
 		r.Post("/api/v1/identities/admins", func(w http.ResponseWriter, r *http.Request) {
-			writeJSONResponse(w, http.StatusOK, models.AdminIdentity{ID: "admin1", Email: "a@b.com"})
+			writeJSONResponse(w, http.StatusOK, CreateAdminResponse{
+				Admin:           &models.AdminIdentity{ID: "admin1", Email: "a@b.com"},
+				EnrollmentToken: "tok-123",
+			})
 		})
 	})
-	admin, err := c.CreateAdmin(context.Background(), CreateAdminRequest{Email: "a@b.com", Name: "Admin"})
+	resp, err := c.CreateAdmin(context.Background(), CreateAdminRequest{Email: "a@b.com", Name: "Admin", CRKSignature: []byte("sig")})
 	require.NoError(t, err)
-	assert.Equal(t, "admin1", admin.ID)
+	assert.Equal(t, "admin1", resp.Admin.ID)
+	assert.Equal(t, "tok-123", resp.EnrollmentToken)
 }
 
 func TestListAdmins(t *testing.T) {

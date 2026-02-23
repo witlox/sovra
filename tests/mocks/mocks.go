@@ -1343,6 +1343,21 @@ func (m *AdminIdentityRepository) GetByEmail(ctx context.Context, orgID, email s
 	return nil, errors.ErrNotFound
 }
 
+func (m *AdminIdentityRepository) GetByCertCN(ctx context.Context, cn string) (*models.AdminIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get admin by cert CN failed")
+	}
+	for _, admin := range m.admins {
+		if admin.CertCN == cn {
+			return admin, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
 func (m *AdminIdentityRepository) List(ctx context.Context, orgID string) ([]*models.AdminIdentity, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

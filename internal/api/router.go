@@ -23,12 +23,13 @@ import (
 
 // RouterConfig holds router configuration.
 type RouterConfig struct {
-	Logger           *slog.Logger
-	MTLSVerifier     MTLSVerifier
-	Authenticator    Authenticator
-	RateLimiter      RateLimiter
-	MiddlewareConfig *MiddlewareConfig
-	HealthCheckers   map[string]func() error
+	Logger                *slog.Logger
+	MTLSVerifier          MTLSVerifier
+	Authenticator         Authenticator
+	RateLimiter           RateLimiter
+	AdminIdentityResolver AdminIdentityResolver
+	MiddlewareConfig      *MiddlewareConfig
+	HealthCheckers        map[string]func() error
 }
 
 // DefaultRouterConfig returns a default router configuration.
@@ -75,9 +76,18 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	r.Use(middleware.RealIP)
 	r.Use(ContentTypeMiddleware)
 
+	// Add enrollment/bootstrap paths to skip list for auth/mTLS
+	config.MiddlewareConfig.SkipPaths = append(config.MiddlewareConfig.SkipPaths,
+		"/api/v1/enrollment",
+		"/api/v1/bootstrap",
+	)
+
 	// Apply security middleware
 	if config.MTLSVerifier != nil {
 		r.Use(MTLSMiddleware(config.MTLSVerifier, config.MiddlewareConfig))
+	}
+	if config.AdminIdentityResolver != nil {
+		r.Use(AdminCertMiddleware(config.AdminIdentityResolver))
 	}
 	if config.Authenticator != nil {
 		r.Use(AuthMiddleware(config.Authenticator, config.MiddlewareConfig))
@@ -95,6 +105,7 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	registerEdgeRoutes(r, services)
 	registerCRKRoutes(r, services)
 	registerIdentityRoutes(r, services)
+	registerEnrollmentRoutes(r, services)
 	registerCertificateRoutes(r, services)
 	registerEmergencyAccessRoutes(r, services)
 	registerAccountRecoveryRoutes(r, services)
@@ -332,7 +343,27 @@ func registerIdentityRoutes(r chi.Router, services *Services) {
 
 		// Service credential rotation
 		r.Post("/services/{id}/rotate", handler.RotateServiceCredentials)
+
+		// Admin certificate management
+		r.Post("/admins/{id}/certificate/renew", handler.RenewAdminCertificate)
 	})
+}
+
+// registerEnrollmentRoutes registers unauthenticated enrollment and bootstrap endpoints.
+func registerEnrollmentRoutes(r chi.Router, services *Services) {
+	if services == nil || services.Identity == nil {
+		return
+	}
+	handler := NewIdentityHandler(services.Identity)
+
+	// Admin enrollment (unauthenticated — token serves as auth)
+	r.Route("/api/v1/enrollment/admins/{id}", func(r chi.Router) {
+		r.Get("/setup", handler.GetEnrollmentSetup)
+		r.Post("/", handler.EnrollAdmin)
+	})
+
+	// Bootstrap admin (unauthenticated — only works when no admins exist)
+	r.Post("/api/v1/bootstrap/admin", handler.BootstrapAdmin)
 }
 
 // registerCertificateRoutes registers certificate management endpoints.

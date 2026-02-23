@@ -3,6 +3,10 @@ package acceptance
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,6 +65,15 @@ func (m *mockAdminRepo) Update(ctx context.Context, admin *models.AdminIdentity)
 func (m *mockAdminRepo) Delete(ctx context.Context, id string) error {
 	delete(m.admins, id)
 	return nil
+}
+
+func (m *mockAdminRepo) GetByCertCN(ctx context.Context, cn string) (*models.AdminIdentity, error) {
+	for _, admin := range m.admins {
+		if admin.CertCN == cn {
+			return admin, nil
+		}
+	}
+	return nil, assert.AnError
 }
 
 type mockUserRepo struct {
@@ -342,32 +355,138 @@ func createIdentityManager() *identity.Manager {
 	)
 }
 
+// mockPKIIssuer generates fake certificates for testing.
+type mockPKIIssuer struct {
+	serial atomic.Int64
+}
+
+func (m *mockPKIIssuer) IssueCertificate(ctx context.Context, role, cn string, altNames []string, ttl time.Duration) (*identity.PKICertResult, error) {
+	n := m.serial.Add(1)
+	return &identity.PKICertResult{
+		Certificate:  fmt.Sprintf("fake-cert-%d", n),
+		CertKey:      fmt.Sprintf("fake-key-%d", n),
+		SerialNumber: fmt.Sprintf("serial-%d", n),
+		Expiration:   time.Now().Add(ttl),
+	}, nil
+}
+
+func (m *mockPKIIssuer) RevokeCertificate(ctx context.Context, serial string) error {
+	return nil
+}
+
+type mockAuditor struct{}
+
+func (a *mockAuditor) Log(ctx context.Context, event *models.AuditEvent) error {
+	return nil
+}
+
+type secureSetup struct {
+	mgr       *identity.Manager
+	adminRepo *mockAdminRepo
+	crkPub    ed25519.PublicKey
+	crkPriv   ed25519.PrivateKey
+}
+
+func createSecureIdentityManager() *secureSetup {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	adminRepo := newMockAdminRepo()
+
+	crkProvider := &identity.CRKProviderAdapter{
+		GetByOrgIDFn: func(ctx context.Context, orgID string) (*models.CRK, error) {
+			return &models.CRK{
+				ID:        "crk-1",
+				OrgID:     orgID,
+				PublicKey: pub,
+				Status:    models.CRKStatusActive,
+			}, nil
+		},
+		VerifyFn: func(publicKey []byte, message []byte, signature []byte) (bool, error) {
+			return ed25519.Verify(ed25519.PublicKey(publicKey), message, signature), nil
+		},
+	}
+
+	mgr := identity.NewManagerWithAdminSecurity(
+		adminRepo,
+		newMockUserRepo(),
+		newMockServiceRepo(),
+		newMockDeviceRepo(),
+		newMockGroupRepo(),
+		newMockRoleRepo(),
+		crkProvider,
+		identity.NewSimpleTokenGenerator(),
+		&mockPKIIssuer{},
+		&mockAuditor{},
+	)
+
+	return &secureSetup{
+		mgr:       mgr,
+		adminRepo: adminRepo,
+		crkPub:    pub,
+		crkPriv:   priv,
+	}
+}
+
+// insertActiveAdmin creates an active admin directly in the repo.
+func insertActiveAdmin(repo *mockAdminRepo, orgID, email, name string, role models.AdminRole) *models.AdminIdentity {
+	admin := &models.AdminIdentity{
+		ID:               fmt.Sprintf("admin-%s", email),
+		OrgID:            orgID,
+		Email:            email,
+		Name:             name,
+		Role:             role,
+		Active:           true,
+		EnrollmentStatus: models.AdminEnrollmentActive,
+		MFAEnabled:       true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	repo.admins[admin.ID] = admin
+	return admin
+}
+
 // TestAdminIdentityManagement tests administrative identity lifecycle.
 func TestAdminIdentityManagement(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping acceptance test in short mode")
 	}
 
-	t.Run("Scenario: Onboard new administrator with MFA", func(t *testing.T) {
-		// Given: an organization needs a new security administrator
-		// When: the super admin creates the account
-		// Then: the admin can enable MFA and access the system
+	t.Run("Scenario: Bootstrap and onboard new administrator with CRK", func(t *testing.T) {
+		// Given: an organization needs its first administrator
+		// When: the bootstrap flow is used with CRK co-signature
+		// Then: the admin is created in pending enrollment status
 
-		mgr := createIdentityManager()
+		setup := createSecureIdentityManager()
 		ctx := context.Background()
 
-		admin, err := mgr.CreateAdmin(ctx, "org-acme", "alice.security@acme.com", "Alice Security", models.AdminRoleSecurityAdmin)
+		msg := identity.GenerateAdminCreationMessage("org-acme", "alice.security@acme.com", "Alice Security", models.AdminRoleSecurityAdmin)
+		sig := ed25519.Sign(setup.crkPriv, []byte(msg))
+
+		admin, token, err := setup.mgr.BootstrapAdmin(ctx, "org-acme", "alice.security@acme.com", "Alice Security", models.AdminRoleSecurityAdmin, sig)
 		require.NoError(t, err)
 		assert.Equal(t, models.AdminRoleSecurityAdmin, admin.Role)
-		assert.True(t, admin.Active)
-		assert.False(t, admin.MFAEnabled)
+		assert.Equal(t, models.AdminEnrollmentPending, admin.EnrollmentStatus)
+		assert.True(t, admin.IsBootstrap)
+		assert.NotEmpty(t, token)
+	})
 
-		secret, err := mgr.EnableMFA(ctx, admin.ID)
+	t.Run("Scenario: CRK-authenticated admin creates another admin", func(t *testing.T) {
+		// Given: an active admin exists
+		// When: they create a new admin with CRK co-signature
+		// Then: the new admin is created in pending status with enrollment token
+
+		setup := createSecureIdentityManager()
+		ctx := context.Background()
+
+		caller := insertActiveAdmin(setup.adminRepo, "org-acme", "super@acme.com", "Super Admin", models.AdminRoleSuperAdmin)
+
+		msg := identity.GenerateAdminCreationMessage("org-acme", "security@acme.com", "Security Admin", models.AdminRoleSecurityAdmin)
+		sig := ed25519.Sign(setup.crkPriv, []byte(msg))
+
+		newAdmin, token, err := setup.mgr.CreateAdmin(ctx, "org-acme", caller.ID, "security@acme.com", "Security Admin", models.AdminRoleSecurityAdmin, sig)
 		require.NoError(t, err)
-		assert.NotEmpty(t, secret)
-		// EnableMFA now returns a TOTP provisioning URL (otpauth://...)
-		assert.Contains(t, secret, "otpauth://totp/")
-		assert.Contains(t, secret, "Sovra")
+		assert.Equal(t, models.AdminRoleSecurityAdmin, newAdmin.Role)
+		assert.Equal(t, models.AdminEnrollmentPending, newAdmin.EnrollmentStatus)
+		assert.NotEmpty(t, token)
 	})
 
 	t.Run("Scenario: Admin role hierarchy is respected", func(t *testing.T) {
@@ -375,23 +494,18 @@ func TestAdminIdentityManagement(t *testing.T) {
 		// When: admins are created with specific roles
 		// Then: each role has appropriate access level
 
-		mgr := createIdentityManager()
-		ctx := context.Background()
+		setup := createSecureIdentityManager()
 
-		superAdmin, err := mgr.CreateAdmin(ctx, "org-acme", "super@acme.com", "Super Admin", models.AdminRoleSuperAdmin)
-		require.NoError(t, err)
+		superAdmin := insertActiveAdmin(setup.adminRepo, "org-acme", "super@acme.com", "Super Admin", models.AdminRoleSuperAdmin)
 		assert.Equal(t, models.AdminRoleSuperAdmin, superAdmin.Role)
 
-		securityAdmin, err := mgr.CreateAdmin(ctx, "org-acme", "security@acme.com", "Security Admin", models.AdminRoleSecurityAdmin)
-		require.NoError(t, err)
+		securityAdmin := insertActiveAdmin(setup.adminRepo, "org-acme", "security@acme.com", "Security Admin", models.AdminRoleSecurityAdmin)
 		assert.Equal(t, models.AdminRoleSecurityAdmin, securityAdmin.Role)
 
-		opsAdmin, err := mgr.CreateAdmin(ctx, "org-acme", "ops@acme.com", "Ops Admin", models.AdminRoleOperationsAdmin)
-		require.NoError(t, err)
+		opsAdmin := insertActiveAdmin(setup.adminRepo, "org-acme", "ops@acme.com", "Ops Admin", models.AdminRoleOperationsAdmin)
 		assert.Equal(t, models.AdminRoleOperationsAdmin, opsAdmin.Role)
 
-		auditor, err := mgr.CreateAdmin(ctx, "org-acme", "auditor@acme.com", "Auditor", models.AdminRoleAuditor)
-		require.NoError(t, err)
+		auditor := insertActiveAdmin(setup.adminRepo, "org-acme", "auditor@acme.com", "Auditor", models.AdminRoleAuditor)
 		assert.Equal(t, models.AdminRoleAuditor, auditor.Role)
 	})
 }

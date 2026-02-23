@@ -3,10 +3,13 @@ package identity_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,6 +68,15 @@ func (m *mockAdminRepository) Update(ctx context.Context, admin *models.AdminIde
 func (m *mockAdminRepository) Delete(ctx context.Context, id string) error {
 	delete(m.admins, id)
 	return nil
+}
+
+func (m *mockAdminRepository) GetByCertCN(ctx context.Context, cn string) (*models.AdminIdentity, error) {
+	for _, admin := range m.admins {
+		if admin.CertCN == cn {
+			return admin, nil
+		}
+	}
+	return nil, assert.AnError
 }
 
 type mockUserRepository struct {
@@ -401,6 +413,137 @@ func (m *mockRoleRepository) GetRolesForIdentity(ctx context.Context, identityID
 	return result, nil
 }
 
+// mockPKIIssuer is a test PKI issuer that generates numbered fake certificates.
+type mockPKIIssuer struct {
+	serial   atomic.Int64
+	revoked  []string
+	issueFn  func(ctx context.Context, role, cn string, altNames []string, ttl time.Duration) (*identity.PKICertResult, error)
+	revokeFn func(ctx context.Context, serial string) error
+}
+
+func newMockPKIIssuer() *mockPKIIssuer {
+	m := &mockPKIIssuer{}
+	m.issueFn = func(ctx context.Context, role, cn string, altNames []string, ttl time.Duration) (*identity.PKICertResult, error) {
+		n := m.serial.Add(1)
+		return &identity.PKICertResult{
+			Certificate:  fmt.Sprintf("-----BEGIN CERTIFICATE-----\nfake-cert-%d\n-----END CERTIFICATE-----", n),
+			CertKey:      fmt.Sprintf("-----BEGIN EC PRIVATE KEY-----\nfake-key-%d\n-----END EC PRIVATE KEY-----", n),
+			SerialNumber: fmt.Sprintf("serial-%d", n),
+			Expiration:   time.Now().Add(ttl),
+		}, nil
+	}
+	m.revokeFn = func(ctx context.Context, serial string) error {
+		m.revoked = append(m.revoked, serial)
+		return nil
+	}
+	return m
+}
+
+func (m *mockPKIIssuer) IssueCertificate(ctx context.Context, role, cn string, altNames []string, ttl time.Duration) (*identity.PKICertResult, error) {
+	return m.issueFn(ctx, role, cn, altNames, ttl)
+}
+
+func (m *mockPKIIssuer) RevokeCertificate(ctx context.Context, serial string) error {
+	return m.revokeFn(ctx, serial)
+}
+
+// mockAuditor records audit events for testing.
+type mockAuditor struct {
+	events []*models.AuditEvent
+}
+
+func (a *mockAuditor) Log(ctx context.Context, event *models.AuditEvent) error {
+	a.events = append(a.events, event)
+	return nil
+}
+
+// testCRKKeys holds Ed25519 key pair for tests.
+type testCRKKeys struct {
+	pub  ed25519.PublicKey
+	priv ed25519.PrivateKey
+}
+
+func generateTestCRKKeys() *testCRKKeys {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	return &testCRKKeys{pub: pub, priv: priv}
+}
+
+func (k *testCRKKeys) sign(message string) []byte {
+	return ed25519.Sign(k.priv, []byte(message))
+}
+
+// secureManagerSetup holds all the components for testing secure admin operations.
+type secureManagerSetup struct {
+	mgr       *identity.Manager
+	adminRepo *mockAdminRepository
+	crkKeys   *testCRKKeys
+	pki       *mockPKIIssuer
+	auditor   *mockAuditor
+	tokenGen  *identity.SimpleTokenGenerator
+}
+
+func createSecureManager() *secureManagerSetup {
+	crkKeys := generateTestCRKKeys()
+	adminRepo := newMockAdminRepo()
+	pki := newMockPKIIssuer()
+	auditor := &mockAuditor{}
+	tokenGen := identity.NewSimpleTokenGenerator()
+
+	crkProvider := &identity.CRKProviderAdapter{
+		GetByOrgIDFn: func(ctx context.Context, orgID string) (*models.CRK, error) {
+			return &models.CRK{
+				ID:        "crk-1",
+				OrgID:     orgID,
+				PublicKey: crkKeys.pub,
+				Status:    models.CRKStatusActive,
+			}, nil
+		},
+		VerifyFn: func(publicKey []byte, message []byte, signature []byte) (bool, error) {
+			return ed25519.Verify(ed25519.PublicKey(publicKey), message, signature), nil
+		},
+	}
+
+	mgr := identity.NewManagerWithAdminSecurity(
+		adminRepo,
+		newMockUserRepo(),
+		newMockServiceRepo(),
+		newMockDeviceRepo(),
+		newMockGroupRepo(),
+		newMockRoleRepo(),
+		crkProvider,
+		tokenGen,
+		pki,
+		auditor,
+	)
+
+	return &secureManagerSetup{
+		mgr:       mgr,
+		adminRepo: adminRepo,
+		crkKeys:   crkKeys,
+		pki:       pki,
+		auditor:   auditor,
+		tokenGen:  tokenGen,
+	}
+}
+
+// createActiveAdmin inserts an active admin directly into the repo for test setup.
+func createActiveAdmin(repo *mockAdminRepository, orgID, email, name string, role models.AdminRole) *models.AdminIdentity {
+	admin := &models.AdminIdentity{
+		ID:               fmt.Sprintf("admin-%s", email),
+		OrgID:            orgID,
+		Email:            email,
+		Name:             name,
+		Role:             role,
+		Active:           true,
+		EnrollmentStatus: models.AdminEnrollmentActive,
+		MFAEnabled:       true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	repo.admins[admin.ID] = admin
+	return admin
+}
+
 func createManager() *identity.Manager {
 	return identity.NewManager(
 		newMockAdminRepo(),
@@ -414,73 +557,103 @@ func createManager() *identity.Manager {
 
 // Admin identity tests.
 
-func TestCreateAdmin(t *testing.T) {
-	t.Run("creates admin with valid input", func(t *testing.T) {
-		mgr := createManager()
+func TestCreateAdminWithCRK(t *testing.T) {
+	t.Run("creates admin with valid CRK signature", func(t *testing.T) {
+		setup := createSecureManager()
 		ctx := context.Background()
 
-		admin, err := mgr.CreateAdmin(ctx, "org-123", "admin@test.com", "Test Admin", models.AdminRoleSuperAdmin)
+		// Create an active caller admin
+		caller := createActiveAdmin(setup.adminRepo, "org-123", "caller@test.com", "Caller", models.AdminRoleSuperAdmin)
+
+		// Sign the creation message
+		msg := identity.GenerateAdminCreationMessage("org-123", "new@test.com", "New Admin", models.AdminRoleSuperAdmin)
+		sig := setup.crkKeys.sign(msg)
+
+		admin, enrollToken, err := setup.mgr.CreateAdmin(ctx, "org-123", caller.ID, "new@test.com", "New Admin", models.AdminRoleSuperAdmin, sig)
 		require.NoError(t, err)
 		assert.NotEmpty(t, admin.ID)
 		assert.Equal(t, "org-123", admin.OrgID)
-		assert.Equal(t, "admin@test.com", admin.Email)
-		assert.Equal(t, "Test Admin", admin.Name)
-		assert.Equal(t, models.AdminRoleSuperAdmin, admin.Role)
-		assert.True(t, admin.Active)
-		assert.False(t, admin.MFAEnabled)
+		assert.Equal(t, "new@test.com", admin.Email)
+		assert.Equal(t, models.AdminEnrollmentPending, admin.EnrollmentStatus)
+		assert.False(t, admin.Active) // Not active until enrolled
+		assert.NotEmpty(t, enrollToken)
+	})
+
+	t.Run("fails with missing CRK signature", func(t *testing.T) {
+		setup := createSecureManager()
+		ctx := context.Background()
+
+		caller := createActiveAdmin(setup.adminRepo, "org-123", "caller@test.com", "Caller", models.AdminRoleSuperAdmin)
+
+		_, _, err := setup.mgr.CreateAdmin(ctx, "org-123", caller.ID, "new@test.com", "New Admin", models.AdminRoleSuperAdmin, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("fails with wrong CRK signature", func(t *testing.T) {
+		setup := createSecureManager()
+		ctx := context.Background()
+
+		caller := createActiveAdmin(setup.adminRepo, "org-123", "caller@test.com", "Caller", models.AdminRoleSuperAdmin)
+
+		// Sign a different message
+		wrongSig := setup.crkKeys.sign("wrong:message")
+
+		_, _, err := setup.mgr.CreateAdmin(ctx, "org-123", caller.ID, "new@test.com", "New Admin", models.AdminRoleSuperAdmin, wrongSig)
+		assert.Error(t, err)
+	})
+
+	t.Run("fails with non-active caller", func(t *testing.T) {
+		setup := createSecureManager()
+		ctx := context.Background()
+
+		// Create a pending (not active) caller
+		pendingCaller := &models.AdminIdentity{
+			ID:               "pending-caller",
+			OrgID:            "org-123",
+			Email:            "pending@test.com",
+			Name:             "Pending",
+			Role:             models.AdminRoleSuperAdmin,
+			Active:           false,
+			EnrollmentStatus: models.AdminEnrollmentPending,
+		}
+		setup.adminRepo.admins[pendingCaller.ID] = pendingCaller
+
+		msg := identity.GenerateAdminCreationMessage("org-123", "new@test.com", "New Admin", models.AdminRoleSuperAdmin)
+		sig := setup.crkKeys.sign(msg)
+
+		_, _, err := setup.mgr.CreateAdmin(ctx, "org-123", pendingCaller.ID, "new@test.com", "New Admin", models.AdminRoleSuperAdmin, sig)
+		assert.Error(t, err)
 	})
 
 	t.Run("fails with empty email", func(t *testing.T) {
-		mgr := createManager()
+		setup := createSecureManager()
 		ctx := context.Background()
 
-		_, err := mgr.CreateAdmin(ctx, "org-123", "", "Test Admin", models.AdminRoleSuperAdmin)
+		_, _, err := setup.mgr.CreateAdmin(ctx, "org-123", "caller-id", "", "Name", models.AdminRoleSuperAdmin, []byte("sig"))
 		assert.Error(t, err)
 	})
 
 	t.Run("fails with empty name", func(t *testing.T) {
-		mgr := createManager()
+		setup := createSecureManager()
 		ctx := context.Background()
 
-		_, err := mgr.CreateAdmin(ctx, "org-123", "admin@test.com", "", models.AdminRoleSuperAdmin)
+		_, _, err := setup.mgr.CreateAdmin(ctx, "org-123", "caller-id", "email@test.com", "", models.AdminRoleSuperAdmin, []byte("sig"))
 		assert.Error(t, err)
-	})
-
-	t.Run("creates different admin roles", func(t *testing.T) {
-		mgr := createManager()
-		ctx := context.Background()
-
-		testCases := []struct {
-			role  models.AdminRole
-			email string
-		}{
-			{models.AdminRoleSuperAdmin, "super@test.com"},
-			{models.AdminRoleSecurityAdmin, "security@test.com"},
-			{models.AdminRoleOperationsAdmin, "ops@test.com"},
-			{models.AdminRoleAuditor, "auditor@test.com"},
-		}
-
-		for _, tc := range testCases {
-			admin, err := mgr.CreateAdmin(ctx, "org-123", tc.email, "Admin", tc.role)
-			require.NoError(t, err)
-			assert.Equal(t, tc.role, admin.Role)
-		}
 	})
 }
 
 func TestEnableMFA(t *testing.T) {
 	t.Run("enables MFA for admin", func(t *testing.T) {
-		mgr := createManager()
+		setup := createSecureManager()
 		ctx := context.Background()
 
-		admin, err := mgr.CreateAdmin(ctx, "org-123", "admin@test.com", "Test Admin", models.AdminRoleSuperAdmin)
-		require.NoError(t, err)
-		assert.False(t, admin.MFAEnabled)
+		admin := createActiveAdmin(setup.adminRepo, "org-123", "admin@test.com", "Test Admin", models.AdminRoleSuperAdmin)
+		admin.MFAEnabled = false
+		setup.adminRepo.admins[admin.ID] = admin
 
-		secret, err := mgr.EnableMFA(ctx, admin.ID)
+		secret, err := setup.mgr.EnableMFA(ctx, admin.ID)
 		require.NoError(t, err)
 		assert.NotEmpty(t, secret)
-		// EnableMFA returns a TOTP provisioning URL (otpauth://...)
 		assert.Contains(t, secret, "otpauth://totp/")
 		assert.Contains(t, secret, "Sovra")
 	})
@@ -1003,13 +1176,14 @@ func TestShareEncryptor(t *testing.T) {
 
 func TestVerifyMFA(t *testing.T) {
 	t.Run("fails when MFA not enabled", func(t *testing.T) {
-		mgr := createManager()
+		setup := createSecureManager()
 		ctx := context.Background()
 
-		admin, err := mgr.CreateAdmin(ctx, "org-123", "admin@test.com", "Admin", models.AdminRoleSuperAdmin)
-		require.NoError(t, err)
+		admin := createActiveAdmin(setup.adminRepo, "org-123", "admin@test.com", "Admin", models.AdminRoleSuperAdmin)
+		admin.MFAEnabled = false
+		setup.adminRepo.admins[admin.ID] = admin
 
-		err = mgr.VerifyMFA(ctx, admin.ID, "123456")
+		err := setup.mgr.VerifyMFA(ctx, admin.ID, "123456")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "MFA not enabled")
 	})
@@ -1025,19 +1199,18 @@ func TestVerifyMFA(t *testing.T) {
 
 func TestGetGroupMembers(t *testing.T) {
 	t.Run("returns members of a group", func(t *testing.T) {
-		mgr := createManager()
+		setup := createSecureManager()
 		ctx := context.Background()
 
-		group, err := mgr.CreateGroup(ctx, "org-123", "engineers", "Engineering team", []string{"read"})
+		group, err := setup.mgr.CreateGroup(ctx, "org-123", "engineers", "Engineering team", []string{"read"})
 		require.NoError(t, err)
 
-		admin, err := mgr.CreateAdmin(ctx, "org-123", "member@test.com", "Member", models.AdminRoleSuperAdmin)
+		admin := createActiveAdmin(setup.adminRepo, "org-123", "member@test.com", "Member", models.AdminRoleSuperAdmin)
+
+		err = setup.mgr.AddToGroup(ctx, group.ID, admin.ID, models.IdentityTypeAdmin)
 		require.NoError(t, err)
 
-		err = mgr.AddToGroup(ctx, group.ID, admin.ID, models.IdentityTypeAdmin)
-		require.NoError(t, err)
-
-		members, err := mgr.GetGroupMembers(ctx, group.ID)
+		members, err := setup.mgr.GetGroupMembers(ctx, group.ID)
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(members), 1)
 	})
@@ -1057,19 +1230,18 @@ func TestGetGroupMembers(t *testing.T) {
 
 func TestGetRoleAssignments(t *testing.T) {
 	t.Run("returns assignments for a role", func(t *testing.T) {
-		mgr := createManager()
+		setup := createSecureManager()
 		ctx := context.Background()
 
-		role, err := mgr.CreateRole(ctx, "org-123", "editor", "Editor role", []models.Permission{{Resource: "workspaces", Actions: []string{"read", "write"}}})
+		role, err := setup.mgr.CreateRole(ctx, "org-123", "editor", "Editor role", []models.Permission{{Resource: "workspaces", Actions: []string{"read", "write"}}})
 		require.NoError(t, err)
 
-		admin, err := mgr.CreateAdmin(ctx, "org-123", "assignee@test.com", "Assignee", models.AdminRoleSuperAdmin)
+		admin := createActiveAdmin(setup.adminRepo, "org-123", "assignee@test.com", "Assignee", models.AdminRoleSuperAdmin)
+
+		err = setup.mgr.AssignRole(ctx, role.ID, admin.ID, models.IdentityTypeAdmin, "system")
 		require.NoError(t, err)
 
-		err = mgr.AssignRole(ctx, role.ID, admin.ID, models.IdentityTypeAdmin, "system")
-		require.NoError(t, err)
-
-		assignments, err := mgr.GetRoleAssignments(ctx, role.ID)
+		assignments, err := setup.mgr.GetRoleAssignments(ctx, role.ID)
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(assignments), 1)
 	})
@@ -1099,4 +1271,107 @@ func TestRotateServiceCredentials(t *testing.T) {
 		_, err := mgr.RotateServiceCredentials(ctx, "nonexistent")
 		assert.Error(t, err)
 	})
+}
+
+// =============================================================================
+// Secure Admin Lifecycle Tests
+// =============================================================================
+
+func TestBootstrapAdmin(t *testing.T) {
+	t.Run("succeeds when no admins exist", func(t *testing.T) {
+		setup := createSecureManager()
+		ctx := context.Background()
+
+		msg := identity.GenerateAdminCreationMessage("org-123", "first@test.com", "First Admin", models.AdminRoleSuperAdmin)
+		sig := setup.crkKeys.sign(msg)
+
+		admin, token, err := setup.mgr.BootstrapAdmin(ctx, "org-123", "first@test.com", "First Admin", models.AdminRoleSuperAdmin, sig)
+		require.NoError(t, err)
+		assert.NotEmpty(t, admin.ID)
+		assert.True(t, admin.IsBootstrap)
+		assert.Equal(t, models.AdminEnrollmentPending, admin.EnrollmentStatus)
+		assert.Equal(t, "bootstrap", admin.CreatedBy)
+		assert.NotEmpty(t, token)
+	})
+
+	t.Run("fails when admins already exist", func(t *testing.T) {
+		setup := createSecureManager()
+		ctx := context.Background()
+
+		// Insert an existing admin
+		createActiveAdmin(setup.adminRepo, "org-123", "existing@test.com", "Existing", models.AdminRoleSuperAdmin)
+
+		msg := identity.GenerateAdminCreationMessage("org-123", "new@test.com", "New Admin", models.AdminRoleSuperAdmin)
+		sig := setup.crkKeys.sign(msg)
+
+		_, _, err := setup.mgr.BootstrapAdmin(ctx, "org-123", "new@test.com", "New Admin", models.AdminRoleSuperAdmin, sig)
+		assert.Error(t, err)
+	})
+
+	t.Run("fails with wrong CRK signature", func(t *testing.T) {
+		setup := createSecureManager()
+		ctx := context.Background()
+
+		wrongSig := setup.crkKeys.sign("wrong:message")
+		_, _, err := setup.mgr.BootstrapAdmin(ctx, "org-123", "first@test.com", "First Admin", models.AdminRoleSuperAdmin, wrongSig)
+		assert.Error(t, err)
+	})
+}
+
+func TestDisableAdmin(t *testing.T) {
+	t.Run("disables active admin and revokes cert", func(t *testing.T) {
+		setup := createSecureManager()
+		ctx := context.Background()
+
+		admin := createActiveAdmin(setup.adminRepo, "org-123", "admin@test.com", "Admin", models.AdminRoleSuperAdmin)
+		admin.CertSerial = "cert-serial-1"
+		setup.adminRepo.admins[admin.ID] = admin
+
+		err := setup.mgr.DisableAdmin(ctx, admin.ID)
+		require.NoError(t, err)
+
+		// Verify admin is disabled
+		updated := setup.adminRepo.admins[admin.ID]
+		assert.False(t, updated.Active)
+		assert.Equal(t, models.AdminEnrollmentDisabled, updated.EnrollmentStatus)
+
+		// Verify cert was revoked
+		assert.Contains(t, setup.pki.revoked, "cert-serial-1")
+	})
+
+	t.Run("fails for non-existent admin", func(t *testing.T) {
+		setup := createSecureManager()
+		ctx := context.Background()
+
+		err := setup.mgr.DisableAdmin(ctx, "nonexistent")
+		assert.Error(t, err)
+	})
+}
+
+func TestGetAdminByCertCN(t *testing.T) {
+	t.Run("returns admin by certificate CN", func(t *testing.T) {
+		setup := createSecureManager()
+		ctx := context.Background()
+
+		admin := createActiveAdmin(setup.adminRepo, "org-123", "admin@test.com", "Admin", models.AdminRoleSuperAdmin)
+		admin.CertCN = "sovra-admin-12345"
+		setup.adminRepo.admins[admin.ID] = admin
+
+		found, err := setup.mgr.GetAdminByCertCN(ctx, "sovra-admin-12345")
+		require.NoError(t, err)
+		assert.Equal(t, admin.ID, found.ID)
+	})
+
+	t.Run("returns error for unknown CN", func(t *testing.T) {
+		setup := createSecureManager()
+		ctx := context.Background()
+
+		_, err := setup.mgr.GetAdminByCertCN(ctx, "unknown-cn")
+		assert.Error(t, err)
+	})
+}
+
+func TestGenerateAdminCreationMessage(t *testing.T) {
+	msg := identity.GenerateAdminCreationMessage("org-abc", "user@example.com", "Test User", models.AdminRoleSuperAdmin)
+	assert.Equal(t, "org-abc:user@example.com:Test User:super_admin", msg)
 }

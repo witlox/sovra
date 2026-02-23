@@ -56,7 +56,7 @@ sovra admin create \
   --role platform-admin \
   --mfa-required
 
-# Output: Admin created. Enrollment email sent to admin@eth.ch
+# Output: Admin created. ID: admin-xxxx
 ```
 
 ### 3. Configure Edge Nodes

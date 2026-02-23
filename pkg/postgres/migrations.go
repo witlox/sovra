@@ -390,6 +390,21 @@ func Migrations() []Migration {
 			CREATE INDEX IF NOT EXISTS idx_workspace_invitations_ws ON workspace_invitations(workspace_id);
 			CREATE INDEX IF NOT EXISTS idx_workspace_invitations_pending ON workspace_invitations(workspace_id, org_id) WHERE status = 'pending'`,
 		},
+		{
+			Version:     28,
+			Description: "Add admin identity cert and enrollment columns",
+			SQL: `ALTER TABLE admin_identities
+				ADD COLUMN IF NOT EXISTS cert_serial VARCHAR(255),
+				ADD COLUMN IF NOT EXISTS cert_expiry TIMESTAMP,
+				ADD COLUMN IF NOT EXISTS cert_cn VARCHAR(255),
+				ADD COLUMN IF NOT EXISTS enrollment_status VARCHAR(50) NOT NULL DEFAULT 'active',
+				ADD COLUMN IF NOT EXISTS created_by VARCHAR(255),
+				ADD COLUMN IF NOT EXISTS is_bootstrap BOOLEAN NOT NULL DEFAULT false,
+				ADD COLUMN IF NOT EXISTS crk_signature BYTEA;
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_cert_cn ON admin_identities(cert_cn) WHERE cert_cn IS NOT NULL AND cert_cn != '';
+			UPDATE admin_identities SET enrollment_status = 'active' WHERE active = true AND enrollment_status = 'active';
+			UPDATE admin_identities SET enrollment_status = 'disabled' WHERE active = false`,
+		},
 	}
 }
 

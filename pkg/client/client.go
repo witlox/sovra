@@ -4,11 +4,14 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/witlox/sovra/pkg/models"
@@ -24,10 +27,13 @@ type Client struct {
 
 // Config holds client configuration.
 type Config struct {
-	BaseURL string
-	Token   string
-	OrgID   string
-	Timeout time.Duration
+	BaseURL    string
+	Token      string
+	OrgID      string
+	Timeout    time.Duration
+	CertFile   string // Client certificate for mTLS
+	KeyFile    string // Client private key for mTLS
+	CACertFile string // CA certificate for server verification
 }
 
 // New creates a new Sovra API client.
@@ -36,10 +42,37 @@ func New(cfg Config) *Client {
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+
+	// Configure mTLS if cert/key are provided
+	if cfg.CertFile != "" && cfg.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+		if err == nil {
+			if transport.TLSClientConfig == nil {
+				transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+			}
+			transport.TLSClientConfig.Certificates = []tls.Certificate{cert}
+		}
+	}
+	if cfg.CACertFile != "" {
+		caCert, err := os.ReadFile(cfg.CACertFile)
+		if err == nil {
+			caPool := x509.NewCertPool()
+			if caPool.AppendCertsFromPEM(caCert) {
+				if transport.TLSClientConfig == nil {
+					transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+				}
+				transport.TLSClientConfig.RootCAs = caPool
+			}
+		}
+	}
+
 	return &Client{
 		baseURL: cfg.BaseURL,
 		httpClient: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: transport,
 		},
 		token: cfg.Token,
 		orgID: cfg.OrgID,
@@ -386,6 +419,8 @@ func (c *Client) UnregisterEdgeNode(ctx context.Context, id string) error {
 }
 
 // Login API
+// Deprecated: Admin authentication uses mTLS client certificates.
+// Login/Logout are retained for SSO user flows only.
 
 // LoginRequest represents a login request.
 type LoginRequest struct {
@@ -400,6 +435,8 @@ type LoginResponse struct {
 }
 
 // Login performs user login.
+//
+// Deprecated: Use mTLS client certificates for admin authentication.
 func (c *Client) Login(ctx context.Context, email, password string) (*LoginResponse, error) {
 	var result LoginResponse
 	if err := c.request(ctx, http.MethodPost, "/api/v1/auth/login", LoginRequest{Email: email, Password: password}, &result); err != nil {
@@ -410,6 +447,8 @@ func (c *Client) Login(ctx context.Context, email, password string) (*LoginRespo
 }
 
 // Logout performs user logout.
+//
+// Deprecated: Use mTLS client certificates for admin authentication.
 func (c *Client) Logout(ctx context.Context) error {
 	return c.request(ctx, http.MethodPost, "/api/v1/auth/logout", nil, nil)
 }
@@ -483,11 +522,60 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 // Admin Identity API
 
 // CreateAdminRequest represents a request to create an admin identity.
+// Requires CRK co-signature and authenticated admin caller (mTLS).
 type CreateAdminRequest struct {
-	Email    string           `json:"email"`
-	Name     string           `json:"name"`
-	Role     models.AdminRole `json:"role"`
-	Password string           `json:"password"`
+	Email        string           `json:"email"`
+	Name         string           `json:"name"`
+	Role         models.AdminRole `json:"role"`
+	CRKSignature []byte           `json:"crk_signature"`
+}
+
+// CreateAdminResponse includes the created admin and enrollment token.
+type CreateAdminResponse struct {
+	Admin           *models.AdminIdentity `json:"admin"`
+	EnrollmentToken string                `json:"enrollment_token"`
+}
+
+// BootstrapAdminRequest represents a bootstrap admin creation request.
+type BootstrapAdminRequest struct {
+	OrgID        string           `json:"org_id"`
+	Email        string           `json:"email"`
+	Name         string           `json:"name"`
+	Role         models.AdminRole `json:"role"`
+	CRKSignature []byte           `json:"crk_signature"`
+}
+
+// EnrollAdminRequest represents an admin enrollment request.
+type EnrollAdminRequest struct {
+	EnrollmentToken string `json:"enrollment_token"`
+	TOTPCode        string `json:"totp_code"`
+}
+
+// EnrollAdminResponse includes the enrolled admin and certificate.
+type EnrollAdminResponse struct {
+	Admin       *models.AdminIdentity `json:"admin"`
+	Certificate string                `json:"certificate"`
+	CertKey     string                `json:"private_key"` // nolint:gosec // G117: PEM key returned to caller
+	Serial      string                `json:"serial"`
+	Expiration  time.Time             `json:"expiration"`
+}
+
+// EnrollmentSetupResponse includes the TOTP provisioning URL.
+type EnrollmentSetupResponse struct {
+	ProvisioningURL string `json:"provisioning_url"`
+}
+
+// RenewAdminCertRequest represents a certificate renewal request.
+type RenewAdminCertRequest struct {
+	TOTPCode string `json:"totp_code"`
+}
+
+// RenewAdminCertResponse includes the new certificate.
+type RenewAdminCertResponse struct {
+	Certificate string    `json:"certificate"`
+	CertKey     string    `json:"private_key"` // nolint:gosec // G117: PEM key returned to caller
+	Serial      string    `json:"serial"`
+	Expiration  time.Time `json:"expiration"`
 }
 
 // UpdateAdminRequest represents a request to update an admin identity.
@@ -508,10 +596,47 @@ type VerifyMFARequest struct {
 	Code string `json:"code"`
 }
 
-// CreateAdmin creates a new admin identity.
-func (c *Client) CreateAdmin(ctx context.Context, req CreateAdminRequest) (*models.AdminIdentity, error) {
-	var result models.AdminIdentity
+// CreateAdmin creates a new admin identity (requires CRK co-signature and mTLS admin auth).
+func (c *Client) CreateAdmin(ctx context.Context, req CreateAdminRequest) (*CreateAdminResponse, error) {
+	var result CreateAdminResponse
 	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/admins", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// BootstrapAdmin creates the first admin for an org (only when no admins exist).
+func (c *Client) BootstrapAdmin(ctx context.Context, req BootstrapAdminRequest) (*CreateAdminResponse, error) {
+	var result CreateAdminResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/bootstrap/admin", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetEnrollmentSetup retrieves the TOTP provisioning URL for admin enrollment.
+func (c *Client) GetEnrollmentSetup(ctx context.Context, adminID, token string) (*EnrollmentSetupResponse, error) {
+	path := "/api/v1/enrollment/admins/" + adminID + "/setup?token=" + url.QueryEscape(token)
+	var result EnrollmentSetupResponse
+	if err := c.request(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// EnrollAdmin completes admin enrollment with TOTP verification and certificate issuance.
+func (c *Client) EnrollAdmin(ctx context.Context, adminID string, req EnrollAdminRequest) (*EnrollAdminResponse, error) {
+	var result EnrollAdminResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/enrollment/admins/"+adminID, req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RenewAdminCertificate renews an admin's mTLS certificate (requires TOTP and current mTLS auth).
+func (c *Client) RenewAdminCertificate(ctx context.Context, adminID string, req RenewAdminCertRequest) (*RenewAdminCertResponse, error) {
+	var result RenewAdminCertResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/admins/"+adminID+"/certificate/renew", req, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

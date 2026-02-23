@@ -25,19 +25,35 @@ const (
 	AdminRoleAuditor         AdminRole = "auditor"
 )
 
+// AdminEnrollmentStatus represents the enrollment status of an admin identity.
+type AdminEnrollmentStatus string
+
+const (
+	AdminEnrollmentPending  AdminEnrollmentStatus = "pending"
+	AdminEnrollmentActive   AdminEnrollmentStatus = "active"
+	AdminEnrollmentDisabled AdminEnrollmentStatus = "disabled"
+)
+
 // AdminIdentity represents a human administrator with elevated privileges.
 type AdminIdentity struct {
-	ID          string    `json:"id"`
-	OrgID       string    `json:"org_id"`
-	Email       string    `json:"email"`
-	Name        string    `json:"name"`
-	Role        AdminRole `json:"role"`
-	MFAEnabled  bool      `json:"mfa_enabled"`
-	MFASecret   string    `json:"-"` // Never exposed in JSON
-	Active      bool      `json:"active"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	LastLoginAt time.Time `json:"last_login_at,omitempty"`
+	ID               string                `json:"id"`
+	OrgID            string                `json:"org_id"`
+	Email            string                `json:"email"`
+	Name             string                `json:"name"`
+	Role             AdminRole             `json:"role"`
+	MFAEnabled       bool                  `json:"mfa_enabled"`
+	MFASecret        string                `json:"-"` // Never exposed in JSON
+	Active           bool                  `json:"active"`
+	CertSerial       string                `json:"cert_serial,omitempty"`
+	CertExpiry       time.Time             `json:"cert_expiry,omitempty"`
+	CertCN           string                `json:"cert_cn,omitempty"`
+	EnrollmentStatus AdminEnrollmentStatus `json:"enrollment_status"`
+	CreatedBy        string                `json:"created_by,omitempty"`
+	IsBootstrap      bool                  `json:"is_bootstrap,omitempty"`
+	CRKSignature     []byte                `json:"-"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+	LastLoginAt      time.Time             `json:"last_login_at,omitempty"`
 }
 
 // SSOProvider represents an SSO identity provider.

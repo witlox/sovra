@@ -1935,15 +1935,35 @@ func TestCRKCeremonyFlow(t *testing.T) {
 // =============================================================================
 
 func TestIdentityHandlerAdminCRUD(t *testing.T) {
-	mgr := newRealIdentityManager()
+	adminRepo := mocks.NewAdminIdentityRepository()
+	mgr := identity.NewManager(
+		adminRepo,
+		mocks.NewUserIdentityRepository(),
+		mocks.NewServiceIdentityRepository(),
+		mocks.NewDeviceIdentityRepository(),
+		mocks.NewIdentityGroupRepository(),
+		mocks.NewRoleRepository(),
+	)
 	handler := api.NewIdentityHandler(mgr)
 
-	var adminID string
+	// Insert admin directly for CRUD tests
+	testAdmin := &models.AdminIdentity{
+		ID:               "admin-crud-1",
+		OrgID:            "org1",
+		Email:            "admin@test.com",
+		Name:             "Test Admin",
+		Role:             models.AdminRoleSuperAdmin,
+		Active:           true,
+		EnrollmentStatus: models.AdminEnrollmentActive,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	require.NoError(t, adminRepo.Create(context.Background(), testAdmin))
 
-	t.Run("creates admin", func(t *testing.T) {
+	t.Run("creates admin requires crk_signature", func(t *testing.T) {
 		reqBody := map[string]any{
-			"email": "admin@test.com",
-			"name":  "Test Admin",
+			"email": "new@test.com",
+			"name":  "New Admin",
 			"role":  "super_admin",
 		}
 		body, _ := json.Marshal(reqBody)
@@ -1954,13 +1974,27 @@ func TestIdentityHandlerAdminCRUD(t *testing.T) {
 
 		handler.CreateAdmin(w, req)
 
-		assert.Equal(t, http.StatusCreated, w.Code)
-		var resp models.AdminIdentity
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, "admin@test.com", resp.Email)
-		assert.Equal(t, "Test Admin", resp.Name)
-		assert.True(t, resp.Active)
-		adminID = resp.ID
+		// Should return 400 because crk_signature is missing
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("creates admin requires admin cert auth", func(t *testing.T) {
+		reqBody := map[string]any{
+			"email":         "new@test.com",
+			"name":          "New Admin",
+			"role":          "super_admin",
+			"crk_signature": []byte("sig"),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := withOrgID(httptest.NewRequest("POST", "/api/v1/identities/admins", bytes.NewReader(body)), "org1")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.CreateAdmin(w, req)
+
+		// Should return 403 because no ContextKeyAdminID in context
+		assert.Equal(t, http.StatusForbidden, w.Code)
 	})
 
 	t.Run("returns 400 for missing email", func(t *testing.T) {
@@ -1999,7 +2033,7 @@ func TestIdentityHandlerAdminCRUD(t *testing.T) {
 		r := chi.NewRouter()
 		r.Get("/api/v1/identities/admins/{id}", handler.GetAdmin)
 
-		req := httptest.NewRequest("GET", "/api/v1/identities/admins/"+adminID, nil)
+		req := httptest.NewRequest("GET", "/api/v1/identities/admins/"+testAdmin.ID, nil)
 		w := httptest.NewRecorder()
 
 		r.ServeHTTP(w, req)
@@ -2007,7 +2041,7 @@ func TestIdentityHandlerAdminCRUD(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp models.AdminIdentity
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, adminID, resp.ID)
+		assert.Equal(t, testAdmin.ID, resp.ID)
 	})
 
 	t.Run("returns 400 for missing admin ID", func(t *testing.T) {
@@ -2043,7 +2077,7 @@ func TestIdentityHandlerAdminCRUD(t *testing.T) {
 		}
 		body, _ := json.Marshal(reqBody)
 
-		req := httptest.NewRequest("PUT", "/api/v1/identities/admins/"+adminID, bytes.NewReader(body))
+		req := httptest.NewRequest("PUT", "/api/v1/identities/admins/"+testAdmin.ID, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -2060,7 +2094,7 @@ func TestIdentityHandlerAdminCRUD(t *testing.T) {
 		r := chi.NewRouter()
 		r.Delete("/api/v1/identities/admins/{id}", handler.DeleteAdmin)
 
-		req := httptest.NewRequest("DELETE", "/api/v1/identities/admins/"+adminID, nil)
+		req := httptest.NewRequest("DELETE", "/api/v1/identities/admins/"+testAdmin.ID, nil)
 		w := httptest.NewRecorder()
 
 		r.ServeHTTP(w, req)
@@ -2070,11 +2104,30 @@ func TestIdentityHandlerAdminCRUD(t *testing.T) {
 }
 
 func TestIdentityHandlerMFA(t *testing.T) {
-	mgr := newRealIdentityManager()
+	adminRepo := mocks.NewAdminIdentityRepository()
+	mgr := identity.NewManager(
+		adminRepo,
+		mocks.NewUserIdentityRepository(),
+		mocks.NewServiceIdentityRepository(),
+		mocks.NewDeviceIdentityRepository(),
+		mocks.NewIdentityGroupRepository(),
+		mocks.NewRoleRepository(),
+	)
 	handler := api.NewIdentityHandler(mgr)
 
-	// Create admin for MFA tests
-	admin, err := mgr.CreateAdmin(context.Background(), "org1", "mfa@test.com", "MFA Admin", "super_admin")
+	// Insert admin directly for MFA tests
+	admin := &models.AdminIdentity{
+		ID:               "mfa-admin-1",
+		OrgID:            "org1",
+		Email:            "mfa@test.com",
+		Name:             "MFA Admin",
+		Role:             models.AdminRoleSuperAdmin,
+		Active:           true,
+		EnrollmentStatus: models.AdminEnrollmentActive,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	err := adminRepo.Create(context.Background(), admin)
 	require.NoError(t, err)
 
 	t.Run("enables MFA", func(t *testing.T) {

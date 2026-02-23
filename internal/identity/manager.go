@@ -22,6 +22,7 @@ type AdminRepository interface {
 	Create(ctx context.Context, admin *models.AdminIdentity) error
 	Get(ctx context.Context, id string) (*models.AdminIdentity, error)
 	GetByEmail(ctx context.Context, orgID, email string) (*models.AdminIdentity, error)
+	GetByCertCN(ctx context.Context, cn string) (*models.AdminIdentity, error)
 	List(ctx context.Context, orgID string) ([]*models.AdminIdentity, error)
 	Update(ctx context.Context, admin *models.AdminIdentity) error
 	Delete(ctx context.Context, id string) error
@@ -86,14 +87,48 @@ type RoleRepository interface {
 	GetRolesForIdentity(ctx context.Context, identityID string) ([]*models.Role, error)
 }
 
+// PKIIssuer provides certificate issuance and revocation.
+type PKIIssuer interface {
+	IssueCertificate(ctx context.Context, role, cn string, altNames []string, ttl time.Duration) (*PKICertResult, error)
+	RevokeCertificate(ctx context.Context, serial string) error
+}
+
+// PKICertResult holds the result of a certificate issuance.
+type PKICertResult struct {
+	Certificate  string
+	CertKey      string // nolint:gosec // G117: this is a PEM-encoded key returned to the caller, not a secret stored in code
+	SerialNumber string
+	Expiration   time.Time
+}
+
+// PKIIssuerAdapter adapts function fields into a PKIIssuer interface.
+type PKIIssuerAdapter struct {
+	IssueFn  func(ctx context.Context, role, cn string, altNames []string, ttl time.Duration) (*PKICertResult, error)
+	RevokeFn func(ctx context.Context, serial string) error
+}
+
+// IssueCertificate delegates to IssueFn.
+func (a *PKIIssuerAdapter) IssueCertificate(ctx context.Context, role, cn string, altNames []string, ttl time.Duration) (*PKICertResult, error) {
+	return a.IssueFn(ctx, role, cn, altNames, ttl)
+}
+
+// RevokeCertificate delegates to RevokeFn.
+func (a *PKIIssuerAdapter) RevokeCertificate(ctx context.Context, serial string) error {
+	return a.RevokeFn(ctx, serial)
+}
+
 // Manager provides identity management operations.
 type Manager struct {
-	admins   AdminRepository
-	users    UserRepository
-	services ServiceRepository
-	devices  DeviceRepository
-	groups   GroupRepository
-	roles    RoleRepository
+	admins      AdminRepository
+	users       UserRepository
+	services    ServiceRepository
+	devices     DeviceRepository
+	groups      GroupRepository
+	roles       RoleRepository
+	crkProvider CRKProvider
+	tokenGen    TokenGenerator
+	pkiIssuer   PKIIssuer
+	auditor     Auditor
 }
 
 // NewManager creates a new identity manager.
@@ -115,29 +150,470 @@ func NewManager(
 	}
 }
 
-// CreateAdmin creates a new admin identity.
-func (m *Manager) CreateAdmin(ctx context.Context, orgID, email, name string, role models.AdminRole) (*models.AdminIdentity, error) {
+// NewManagerWithAdminSecurity creates a new identity manager with admin security features.
+func NewManagerWithAdminSecurity(
+	admins AdminRepository,
+	users UserRepository,
+	services ServiceRepository,
+	devices DeviceRepository,
+	groups GroupRepository,
+	roles RoleRepository,
+	crkProvider CRKProvider,
+	tokenGen TokenGenerator,
+	pkiIssuer PKIIssuer,
+	auditor Auditor,
+) *Manager {
+	return &Manager{
+		admins:      admins,
+		users:       users,
+		services:    services,
+		devices:     devices,
+		groups:      groups,
+		roles:       roles,
+		crkProvider: crkProvider,
+		tokenGen:    tokenGen,
+		pkiIssuer:   pkiIssuer,
+		auditor:     auditor,
+	}
+}
+
+// GenerateAdminCreationMessage creates the deterministic message for CRK signing.
+func GenerateAdminCreationMessage(orgID, email, name string, role models.AdminRole) string {
+	return fmt.Sprintf("%s:%s:%s:%s", orgID, email, name, role)
+}
+
+// truncate returns at most maxLen characters from s.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
+}
+
+// CreateAdmin creates a new admin identity with CRK co-signature verification.
+// callerAdminID is the authenticated admin making the request.
+// crkSignature is the Ed25519 signature over the creation message.
+// Returns the admin identity and an enrollment token.
+func (m *Manager) CreateAdmin(ctx context.Context, orgID, callerAdminID, email, name string, role models.AdminRole, crkSignature []byte) (*models.AdminIdentity, string, error) {
 	if email == "" || name == "" {
-		return nil, errors.ErrInvalidInput
+		return nil, "", errors.ErrInvalidInput
+	}
+
+	if m.crkProvider == nil {
+		return nil, "", fmt.Errorf("admin creation requires CRK provider: %w", errors.ErrForbidden)
+	}
+
+	// Verify caller is an active admin
+	caller, err := m.admins.Get(ctx, callerAdminID)
+	if err != nil {
+		m.auditLog(ctx, orgID, "admin.create", "denied", map[string]any{
+			"reason": "caller is not an active admin",
+		})
+		return nil, "", fmt.Errorf("caller admin not found: %w", errors.ErrForbidden)
+	}
+	if caller.EnrollmentStatus != models.AdminEnrollmentActive {
+		m.auditLog(ctx, orgID, "admin.create", "denied", map[string]any{
+			"reason": "caller is not an active admin",
+		})
+		return nil, "", fmt.Errorf("caller admin is not active: %w", errors.ErrForbidden)
+	}
+
+	// Verify CRK signature
+	if len(crkSignature) == 0 {
+		m.auditLog(ctx, orgID, "admin.create", "denied", map[string]any{
+			"email":  email,
+			"reason": "missing CRK signature",
+		})
+		return nil, "", fmt.Errorf("CRK signature is required: %w", errors.ErrInvalidInput)
+	}
+
+	crk, err := m.crkProvider.GetActiveCRK(ctx, orgID)
+	if err != nil {
+		return nil, "", fmt.Errorf("get active CRK: %w", err)
+	}
+
+	message := GenerateAdminCreationMessage(orgID, email, name, role)
+	valid, err := m.crkProvider.Verify(crk.PublicKey, []byte(message), crkSignature)
+	if err != nil {
+		return nil, "", fmt.Errorf("verify CRK signature: %w", err)
+	}
+	if !valid {
+		m.auditLog(ctx, orgID, "admin.create", "denied", map[string]any{
+			"email":  email,
+			"reason": "invalid CRK signature",
+		})
+		return nil, "", fmt.Errorf("invalid CRK signature: %w", errors.ErrForbidden)
 	}
 
 	admin := &models.AdminIdentity{
-		ID:         uuid.New().String(),
-		OrgID:      orgID,
-		Email:      email,
-		Name:       name,
-		Role:       role,
-		MFAEnabled: false,
-		Active:     true,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:               uuid.New().String(),
+		OrgID:            orgID,
+		Email:            email,
+		Name:             name,
+		Role:             role,
+		MFAEnabled:       false,
+		Active:           false,
+		EnrollmentStatus: models.AdminEnrollmentPending,
+		CreatedBy:        callerAdminID,
+		CRKSignature:     crkSignature,
+		CertCN:           fmt.Sprintf("admin-%s-%s", truncate(orgID, 8), uuid.New().String()[:8]),
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
 	}
 
 	if err := m.admins.Create(ctx, admin); err != nil {
-		return nil, fmt.Errorf("create admin: %w", err)
+		return nil, "", fmt.Errorf("create admin: %w", err)
 	}
 
+	// Generate enrollment token
+	enrollmentToken, err := m.tokenGen.Generate(ctx, orgID, admin.ID, 24*time.Hour)
+	if err != nil {
+		return nil, "", fmt.Errorf("generate enrollment token: %w", err)
+	}
+
+	m.auditLog(ctx, orgID, "admin.create", "success", map[string]any{
+		"admin_id":        admin.ID,
+		"email":           email,
+		"caller_admin_id": callerAdminID,
+		"crk_verified":    true,
+	})
+
+	return admin, enrollmentToken, nil
+}
+
+// BootstrapAdmin creates the first admin for an org (when no admins exist).
+func (m *Manager) BootstrapAdmin(ctx context.Context, orgID, email, name string, role models.AdminRole, crkSignature []byte) (*models.AdminIdentity, string, error) {
+	if email == "" || name == "" {
+		return nil, "", errors.ErrInvalidInput
+	}
+
+	if m.crkProvider == nil {
+		return nil, "", fmt.Errorf("admin creation requires CRK provider: %w", errors.ErrForbidden)
+	}
+
+	// Check no admins exist for this org
+	existing, err := m.admins.List(ctx, orgID)
+	if err != nil {
+		return nil, "", fmt.Errorf("list admins: %w", err)
+	}
+	if len(existing) > 0 {
+		m.auditLog(ctx, orgID, "admin.bootstrap", "denied", map[string]any{
+			"email":  email,
+			"reason": "admins already exist for this org",
+		})
+		return nil, "", fmt.Errorf("bootstrap only allowed when no admins exist: %w", errors.ErrForbidden)
+	}
+
+	// Verify CRK signature
+	if len(crkSignature) == 0 {
+		return nil, "", fmt.Errorf("CRK signature is required: %w", errors.ErrInvalidInput)
+	}
+
+	crk, err := m.crkProvider.GetActiveCRK(ctx, orgID)
+	if err != nil {
+		return nil, "", fmt.Errorf("get active CRK: %w", err)
+	}
+
+	message := GenerateAdminCreationMessage(orgID, email, name, role)
+	valid, err := m.crkProvider.Verify(crk.PublicKey, []byte(message), crkSignature)
+	if err != nil {
+		return nil, "", fmt.Errorf("verify CRK signature: %w", err)
+	}
+	if !valid {
+		m.auditLog(ctx, orgID, "admin.bootstrap", "denied", map[string]any{
+			"email":  email,
+			"reason": "invalid CRK signature",
+		})
+		return nil, "", fmt.Errorf("invalid CRK signature: %w", errors.ErrForbidden)
+	}
+
+	admin := &models.AdminIdentity{
+		ID:               uuid.New().String(),
+		OrgID:            orgID,
+		Email:            email,
+		Name:             name,
+		Role:             role,
+		MFAEnabled:       false,
+		Active:           false,
+		EnrollmentStatus: models.AdminEnrollmentPending,
+		CreatedBy:        "bootstrap",
+		IsBootstrap:      true,
+		CRKSignature:     crkSignature,
+		CertCN:           fmt.Sprintf("admin-%s-%s", truncate(orgID, 8), uuid.New().String()[:8]),
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+
+	if err := m.admins.Create(ctx, admin); err != nil {
+		return nil, "", fmt.Errorf("create bootstrap admin: %w", err)
+	}
+
+	enrollmentToken, err := m.tokenGen.Generate(ctx, orgID, admin.ID, 24*time.Hour)
+	if err != nil {
+		return nil, "", fmt.Errorf("generate enrollment token: %w", err)
+	}
+
+	m.auditLog(ctx, orgID, "admin.bootstrap", "success", map[string]any{
+		"admin_id": admin.ID,
+		"email":    email,
+		"org_id":   orgID,
+	})
+
+	return admin, enrollmentToken, nil
+}
+
+// GetEnrollmentSetup returns the TOTP provisioning URL for enrollment setup.
+func (m *Manager) GetEnrollmentSetup(ctx context.Context, adminID, token string) (string, error) {
+	if !m.tokenGen.Validate(token) {
+		return "", fmt.Errorf("invalid enrollment token: %w", errors.ErrUnauthorized)
+	}
+
+	admin, err := m.admins.Get(ctx, adminID)
+	if err != nil {
+		return "", fmt.Errorf("get admin: %w", err)
+	}
+
+	if admin.EnrollmentStatus != models.AdminEnrollmentPending {
+		return "", fmt.Errorf("admin is not pending enrollment: %w", errors.ErrInvalidInput)
+	}
+
+	// Generate TOTP secret
+	key, err := totp.Generate(totp.GenerateOpts{
+		Issuer:      "Sovra",
+		AccountName: admin.Email,
+	})
+	if err != nil {
+		return "", fmt.Errorf("generate TOTP key: %w", err)
+	}
+
+	// Store the secret for validation during enrollment
+	admin.MFASecret = key.Secret()
+	admin.UpdatedAt = time.Now()
+	if err := m.admins.Update(ctx, admin); err != nil {
+		return "", fmt.Errorf("update admin MFA secret: %w", err)
+	}
+
+	m.auditLog(ctx, admin.OrgID, "admin.enrollment.setup", "success", map[string]any{
+		"admin_id": adminID,
+	})
+
+	return key.URL(), nil
+}
+
+// EnrollAdmin completes admin enrollment with TOTP verification and certificate issuance.
+func (m *Manager) EnrollAdmin(ctx context.Context, adminID, enrollmentToken, totpCode string) (*models.AdminIdentity, *PKICertResult, error) {
+	if !m.tokenGen.Validate(enrollmentToken) {
+		m.auditLog(ctx, "", "admin.enrollment.complete", "denied", map[string]any{
+			"admin_id": adminID,
+			"reason":   "invalid token",
+		})
+		return nil, nil, fmt.Errorf("invalid enrollment token: %w", errors.ErrUnauthorized)
+	}
+
+	admin, err := m.admins.Get(ctx, adminID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get admin: %w", err)
+	}
+
+	if admin.EnrollmentStatus != models.AdminEnrollmentPending {
+		return nil, nil, fmt.Errorf("admin is not pending enrollment: %w", errors.ErrInvalidInput)
+	}
+
+	// Validate TOTP code against the secret set during enrollment setup
+	if admin.MFASecret == "" {
+		return nil, nil, fmt.Errorf("enrollment setup not completed: call GetEnrollmentSetup first: %w", errors.ErrInvalidInput)
+	}
+
+	valid := totp.Validate(totpCode, admin.MFASecret)
+	if !valid {
+		m.auditLog(ctx, admin.OrgID, "admin.enrollment.complete", "denied", map[string]any{
+			"admin_id": adminID,
+			"reason":   "invalid TOTP",
+		})
+		return nil, nil, fmt.Errorf("invalid TOTP code: %w", errors.ErrUnauthorized)
+	}
+
+	// Issue client certificate
+	if m.pkiIssuer == nil {
+		return nil, nil, fmt.Errorf("PKI issuer not configured")
+	}
+
+	certResult, err := m.pkiIssuer.IssueCertificate(ctx, "sovra-admin", admin.CertCN, nil, 8760*time.Hour)
+	if err != nil {
+		return nil, nil, fmt.Errorf("issue certificate: %w", err)
+	}
+
+	// Update admin to active
+	admin.Active = true
+	admin.EnrollmentStatus = models.AdminEnrollmentActive
+	admin.MFAEnabled = true
+	admin.CertSerial = certResult.SerialNumber
+	admin.CertExpiry = certResult.Expiration
+	admin.UpdatedAt = time.Now()
+
+	if err := m.admins.Update(ctx, admin); err != nil {
+		return nil, nil, fmt.Errorf("update admin: %w", err)
+	}
+
+	// Revoke enrollment token
+	_ = m.tokenGen.Revoke(ctx, enrollmentToken)
+
+	m.auditLog(ctx, admin.OrgID, "admin.enrollment.complete", "success", map[string]any{
+		"admin_id":    adminID,
+		"cert_serial": certResult.SerialNumber,
+		"cert_cn":     admin.CertCN,
+	})
+
+	// Auto-disable bootstrap admin if one exists
+	m.autoDisableBootstrapAdmin(ctx, admin.OrgID, adminID)
+
+	return admin, certResult, nil
+}
+
+// autoDisableBootstrapAdmin disables any bootstrap admin after a real admin enrolls.
+func (m *Manager) autoDisableBootstrapAdmin(ctx context.Context, orgID, enrolledAdminID string) {
+	admins, err := m.admins.List(ctx, orgID)
+	if err != nil {
+		return
+	}
+
+	for _, a := range admins {
+		if a.IsBootstrap && a.Active && a.ID != enrolledAdminID {
+			_ = m.DisableAdmin(ctx, a.ID)
+			m.auditLog(ctx, orgID, "admin.bootstrap.disabled", "success", map[string]any{
+				"bootstrap_admin_id":    a.ID,
+				"triggered_by_admin_id": enrolledAdminID,
+			})
+		}
+	}
+}
+
+// DisableAdmin disables an admin and revokes their certificate.
+func (m *Manager) DisableAdmin(ctx context.Context, adminID string) error {
+	admin, err := m.admins.Get(ctx, adminID)
+	if err != nil {
+		return fmt.Errorf("get admin: %w", err)
+	}
+
+	certRevoked := false
+	if admin.CertSerial != "" && m.pkiIssuer != nil {
+		if err := m.pkiIssuer.RevokeCertificate(ctx, admin.CertSerial); err != nil {
+			// Log but continue
+			_ = err
+		} else {
+			certRevoked = true
+		}
+	}
+
+	admin.Active = false
+	admin.EnrollmentStatus = models.AdminEnrollmentDisabled
+	admin.UpdatedAt = time.Now()
+
+	if err := m.admins.Update(ctx, admin); err != nil {
+		return fmt.Errorf("update admin: %w", err)
+	}
+
+	m.auditLog(ctx, admin.OrgID, "admin.disable", "success", map[string]any{
+		"admin_id":     adminID,
+		"cert_revoked": certRevoked,
+	})
+
+	return nil
+}
+
+// RenewAdminCertificate renews an admin's client certificate after TOTP verification.
+func (m *Manager) RenewAdminCertificate(ctx context.Context, adminID, totpCode string) (*PKICertResult, error) {
+	admin, err := m.admins.Get(ctx, adminID)
+	if err != nil {
+		return nil, fmt.Errorf("get admin: %w", err)
+	}
+
+	if !admin.Active || admin.EnrollmentStatus != models.AdminEnrollmentActive {
+		m.auditLog(ctx, admin.OrgID, "admin.certificate.renew", "denied", map[string]any{
+			"admin_id": adminID,
+			"reason":   "admin is not active",
+		})
+		return nil, fmt.Errorf("admin is not active: %w", errors.ErrForbidden)
+	}
+
+	if !admin.MFAEnabled || admin.MFASecret == "" {
+		m.auditLog(ctx, admin.OrgID, "admin.certificate.renew", "denied", map[string]any{
+			"admin_id": adminID,
+			"reason":   "MFA not enabled",
+		})
+		return nil, fmt.Errorf("MFA not enabled: %w", errors.ErrForbidden)
+	}
+
+	valid := totp.Validate(totpCode, admin.MFASecret)
+	if !valid {
+		m.auditLog(ctx, admin.OrgID, "admin.certificate.renew", "denied", map[string]any{
+			"admin_id": adminID,
+			"reason":   "invalid TOTP code",
+		})
+		return nil, fmt.Errorf("invalid TOTP code: %w", errors.ErrUnauthorized)
+	}
+
+	if m.pkiIssuer == nil {
+		return nil, fmt.Errorf("PKI issuer not configured")
+	}
+
+	oldSerial := admin.CertSerial
+
+	// Revoke old certificate
+	if oldSerial != "" {
+		_ = m.pkiIssuer.RevokeCertificate(ctx, oldSerial)
+	}
+
+	// Issue new certificate
+	certResult, err := m.pkiIssuer.IssueCertificate(ctx, "sovra-admin", admin.CertCN, nil, 8760*time.Hour)
+	if err != nil {
+		m.auditLog(ctx, admin.OrgID, "admin.certificate.renew", "denied", map[string]any{
+			"admin_id": adminID,
+			"reason":   "certificate issuance failed",
+		})
+		return nil, fmt.Errorf("issue certificate: %w", err)
+	}
+
+	admin.CertSerial = certResult.SerialNumber
+	admin.CertExpiry = certResult.Expiration
+	admin.UpdatedAt = time.Now()
+
+	if err := m.admins.Update(ctx, admin); err != nil {
+		return nil, fmt.Errorf("update admin: %w", err)
+	}
+
+	m.auditLog(ctx, admin.OrgID, "admin.certificate.renew", "success", map[string]any{
+		"admin_id":   adminID,
+		"old_serial": oldSerial,
+		"new_serial": certResult.SerialNumber,
+	})
+
+	return certResult, nil
+}
+
+// GetAdminByCertCN returns an admin identity by certificate common name.
+func (m *Manager) GetAdminByCertCN(ctx context.Context, cn string) (*models.AdminIdentity, error) {
+	admin, err := m.admins.GetByCertCN(ctx, cn)
+	if err != nil {
+		return nil, fmt.Errorf("get admin by cert CN: %w", err)
+	}
 	return admin, nil
+}
+
+// auditLog emits an audit event if auditor is configured.
+func (m *Manager) auditLog(ctx context.Context, orgID, eventType, result string, metadata map[string]any) {
+	if m.auditor == nil {
+		return
+	}
+	_ = m.auditor.Log(ctx, &models.AuditEvent{
+		ID:        uuid.New().String(),
+		Timestamp: time.Now(),
+		OrgID:     orgID,
+		EventType: models.AuditEventType(eventType),
+		Actor:     "identity-manager",
+		Result:    models.AuditEventResult(result),
+		Metadata:  metadata,
+	})
 }
 
 // EnableMFA enables MFA for an admin and returns the secret and provisioning URL.

@@ -1423,11 +1423,31 @@ func (r *AdminIdentityRepository) Create(ctx context.Context, admin *models.Admi
 	if !admin.LastLoginAt.IsZero() {
 		lastLoginAt = &admin.LastLoginAt
 	}
+	var certSerial, certCN, createdBy sql.NullString
+	if admin.CertSerial != "" {
+		certSerial = sql.NullString{String: admin.CertSerial, Valid: true}
+	}
+	if admin.CertCN != "" {
+		certCN = sql.NullString{String: admin.CertCN, Valid: true}
+	}
+	if admin.CreatedBy != "" {
+		createdBy = sql.NullString{String: admin.CreatedBy, Valid: true}
+	}
+	var certExpiry *time.Time
+	if !admin.CertExpiry.IsZero() {
+		certExpiry = &admin.CertExpiry
+	}
+	enrollmentStatus := admin.EnrollmentStatus
+	if enrollmentStatus == "" {
+		enrollmentStatus = models.AdminEnrollmentActive
+	}
 
 	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO admin_identities (id, org_id, email, name, role, mfa_enabled, mfa_secret, active, created_at, updated_at, last_login_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		`INSERT INTO admin_identities (id, org_id, email, name, role, mfa_enabled, mfa_secret, active, created_at, updated_at, last_login_at,
+		 cert_serial, cert_expiry, cert_cn, enrollment_status, created_by, is_bootstrap, crk_signature)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
 		id, orgID, admin.Email, admin.Name, admin.Role, admin.MFAEnabled, mfaSecret, admin.Active, admin.CreatedAt, admin.UpdatedAt, lastLoginAt,
+		certSerial, certExpiry, certCN, enrollmentStatus, createdBy, admin.IsBootstrap, admin.CRKSignature,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create admin identity: %w", err)
@@ -1443,13 +1463,15 @@ func (r *AdminIdentityRepository) Get(ctx context.Context, id string) (*models.A
 	}
 
 	admin := &models.AdminIdentity{}
-	var mfaSecret sql.NullString
-	var lastLoginAt sql.NullTime
+	var mfaSecret, certSerial, certCN, createdBy sql.NullString
+	var lastLoginAt, certExpiry sql.NullTime
 	err = r.db.QueryRowContext(ctx,
-		`SELECT id, org_id, email, name, role, mfa_enabled, mfa_secret, active, created_at, updated_at, last_login_at
+		`SELECT id, org_id, email, name, role, mfa_enabled, mfa_secret, active, created_at, updated_at, last_login_at,
+		 cert_serial, cert_expiry, cert_cn, enrollment_status, created_by, is_bootstrap, crk_signature
 		 FROM admin_identities WHERE id = $1`,
 		uid,
-	).Scan(&admin.ID, &admin.OrgID, &admin.Email, &admin.Name, &admin.Role, &admin.MFAEnabled, &mfaSecret, &admin.Active, &admin.CreatedAt, &admin.UpdatedAt, &lastLoginAt)
+	).Scan(&admin.ID, &admin.OrgID, &admin.Email, &admin.Name, &admin.Role, &admin.MFAEnabled, &mfaSecret, &admin.Active, &admin.CreatedAt, &admin.UpdatedAt, &lastLoginAt,
+		&certSerial, &certExpiry, &certCN, &admin.EnrollmentStatus, &createdBy, &admin.IsBootstrap, &admin.CRKSignature)
 	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
@@ -1461,6 +1483,18 @@ func (r *AdminIdentityRepository) Get(ctx context.Context, id string) (*models.A
 	}
 	if lastLoginAt.Valid {
 		admin.LastLoginAt = lastLoginAt.Time
+	}
+	if certSerial.Valid {
+		admin.CertSerial = certSerial.String
+	}
+	if certExpiry.Valid {
+		admin.CertExpiry = certExpiry.Time
+	}
+	if certCN.Valid {
+		admin.CertCN = certCN.String
+	}
+	if createdBy.Valid {
+		admin.CreatedBy = createdBy.String
 	}
 	return admin, nil
 }
@@ -1482,6 +1516,22 @@ func (r *AdminIdentityRepository) GetByEmail(ctx context.Context, orgID, email s
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get admin identity by email: %w", err)
+	}
+	return r.Get(ctx, id)
+}
+
+// GetByCertCN retrieves an admin identity by certificate common name.
+func (r *AdminIdentityRepository) GetByCertCN(ctx context.Context, cn string) (*models.AdminIdentity, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id FROM admin_identities WHERE cert_cn = $1`,
+		cn,
+	).Scan(&id)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get admin identity by cert CN: %w", err)
 	}
 	return r.Get(ctx, id)
 }
@@ -1535,11 +1585,27 @@ func (r *AdminIdentityRepository) Update(ctx context.Context, admin *models.Admi
 	if !admin.LastLoginAt.IsZero() {
 		lastLoginAt = &admin.LastLoginAt
 	}
+	var certSerial, certCN, createdBy sql.NullString
+	if admin.CertSerial != "" {
+		certSerial = sql.NullString{String: admin.CertSerial, Valid: true}
+	}
+	if admin.CertCN != "" {
+		certCN = sql.NullString{String: admin.CertCN, Valid: true}
+	}
+	if admin.CreatedBy != "" {
+		createdBy = sql.NullString{String: admin.CreatedBy, Valid: true}
+	}
+	var certExpiry *time.Time
+	if !admin.CertExpiry.IsZero() {
+		certExpiry = &admin.CertExpiry
+	}
 
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE admin_identities SET email = $2, name = $3, role = $4, mfa_enabled = $5, mfa_secret = $6, active = $7, updated_at = $8, last_login_at = $9
+		`UPDATE admin_identities SET email = $2, name = $3, role = $4, mfa_enabled = $5, mfa_secret = $6, active = $7, updated_at = $8, last_login_at = $9,
+		 cert_serial = $10, cert_expiry = $11, cert_cn = $12, enrollment_status = $13, created_by = $14, is_bootstrap = $15, crk_signature = $16
 		 WHERE id = $1`,
 		id, admin.Email, admin.Name, admin.Role, admin.MFAEnabled, mfaSecret, admin.Active, admin.UpdatedAt, lastLoginAt,
+		certSerial, certExpiry, certCN, admin.EnrollmentStatus, createdBy, admin.IsBootstrap, admin.CRKSignature,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update admin identity: %w", err)

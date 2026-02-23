@@ -1640,9 +1640,30 @@ func NewIdentityHandler(manager *identity.Manager) *IdentityHandler {
 
 // CreateAdminRequest represents an admin creation request.
 type CreateAdminRequest struct {
-	Email string           `json:"email"`
-	Name  string           `json:"name"`
-	Role  models.AdminRole `json:"role"`
+	Email        string           `json:"email"`
+	Name         string           `json:"name"`
+	Role         models.AdminRole `json:"role"`
+	CRKSignature []byte           `json:"crk_signature"`
+}
+
+// BootstrapAdminRequest represents a bootstrap admin creation request.
+type BootstrapAdminRequest struct {
+	OrgID        string           `json:"org_id"`
+	Email        string           `json:"email"`
+	Name         string           `json:"name"`
+	Role         models.AdminRole `json:"role"`
+	CRKSignature []byte           `json:"crk_signature"`
+}
+
+// EnrollAdminRequest represents an admin enrollment request.
+type EnrollAdminRequest struct {
+	EnrollmentToken string `json:"enrollment_token"`
+	TOTPCode        string `json:"totp_code"`
+}
+
+// RenewAdminCertRequest represents a certificate renewal request.
+type RenewAdminCertRequest struct {
+	TOTPCode string `json:"totp_code"`
 }
 
 // UpdateAdminRequest represents an admin update request.
@@ -1739,15 +1760,150 @@ func (h *IdentityHandler) CreateAdmin(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "name is required")
 		return
 	}
+	if len(req.CRKSignature) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "crk_signature is required")
+		return
+	}
+
+	// Extract caller admin ID from context (set by AdminCertMiddleware)
+	callerAdminID, ok := r.Context().Value(ContextKeyAdminID).(string)
+	if !ok || callerAdminID == "" {
+		writeJSONError(w, http.StatusForbidden, "FORBIDDEN", "admin certificate authentication required")
+		return
+	}
 
 	orgID := getOrgID(r)
-	admin, err := h.manager.CreateAdmin(r.Context(), orgID, req.Email, req.Name, req.Role)
+	admin, enrollmentToken, err := h.manager.CreateAdmin(r.Context(), orgID, callerAdminID, req.Email, req.Name, req.Role, req.CRKSignature)
 	if err != nil {
 		handleError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, admin)
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"admin":            admin,
+		"enrollment_token": enrollmentToken,
+	})
+}
+
+// BootstrapAdmin handles POST /api/v1/bootstrap/admin.
+func (h *IdentityHandler) BootstrapAdmin(w http.ResponseWriter, r *http.Request) {
+	var req BootstrapAdminRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.OrgID == "" || req.Email == "" || req.Name == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "org_id, email and name are required")
+		return
+	}
+	if len(req.CRKSignature) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "crk_signature is required")
+		return
+	}
+
+	admin, enrollmentToken, err := h.manager.BootstrapAdmin(r.Context(), req.OrgID, req.Email, req.Name, req.Role, req.CRKSignature)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"admin":            admin,
+		"enrollment_token": enrollmentToken,
+	})
+}
+
+// GetEnrollmentSetup handles GET /api/v1/enrollment/admins/{id}/setup.
+func (h *IdentityHandler) GetEnrollmentSetup(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "admin id is required")
+		return
+	}
+
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "token is required")
+		return
+	}
+
+	provisioningURL, err := h.manager.GetEnrollmentSetup(r.Context(), id, token)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"provisioning_url": provisioningURL,
+	})
+}
+
+// EnrollAdmin handles POST /api/v1/enrollment/admins/{id}.
+func (h *IdentityHandler) EnrollAdmin(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "admin id is required")
+		return
+	}
+
+	var req EnrollAdminRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.EnrollmentToken == "" || req.TOTPCode == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "enrollment_token and totp_code are required")
+		return
+	}
+
+	admin, certResult, err := h.manager.EnrollAdmin(r.Context(), id, req.EnrollmentToken, req.TOTPCode)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"admin":       admin,
+		"certificate": certResult.Certificate,
+		"private_key": certResult.CertKey,
+		"serial":      certResult.SerialNumber,
+		"expiration":  certResult.Expiration,
+	})
+}
+
+// RenewAdminCertificate handles POST /api/v1/identities/admins/{id}/certificate/renew.
+func (h *IdentityHandler) RenewAdminCertificate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "admin id is required")
+		return
+	}
+
+	var req RenewAdminCertRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.TOTPCode == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "totp_code is required")
+		return
+	}
+
+	certResult, err := h.manager.RenewAdminCertificate(r.Context(), id, req.TOTPCode)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"certificate": certResult.Certificate,
+		"private_key": certResult.CertKey,
+		"serial":      certResult.SerialNumber,
+		"expiration":  certResult.Expiration,
+	})
 }
 
 // ListAdmins handles GET /api/v1/identities/admins.
