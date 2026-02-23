@@ -706,6 +706,36 @@ Cancel an in-progress generation ceremony.
 sovra crk generate-ceremony cancel <ceremony-id>
 ```
 
+### crk generate-ceremony prepare-seed
+
+Prepare an offline seed file for an air-gap ceremony. The custodian runs this on their own machine — no server connection is needed. The CLI prompts for a password, derives a key via Argon2id, and writes a JSON seed file.
+
+```bash
+sovra crk generate-ceremony prepare-seed --index 1 --custodian-name "Alice" --output seed-alice.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--index` | Share index (1-based, required) |
+| `--custodian-name` | Name of the custodian (required) |
+| `--output` | Output file path for the seed JSON (required) |
+
+The seed file is written with `0600` permissions. Securely delete it after transferring to the admin.
+
+### crk generate-ceremony import-seed
+
+Import one or more offline seed files (created by `prepare-seed`) into an active generation ceremony. Run by the admin on a server-connected machine.
+
+```bash
+sovra crk generate-ceremony import-seed <ceremony-id> \
+  --seed-file seed-alice.json \
+  --seed-file seed-bob.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--seed-file` | Path to a seed file (repeatable, at least one required) |
+
 ---
 
 ## identity

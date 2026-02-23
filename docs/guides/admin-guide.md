@@ -71,6 +71,35 @@ custodian). Each share can only be decrypted with the password the custodian
 chose during seeding. Distribute the encrypted share files to the respective
 custodians.
 
+#### Air-Gap Ceremony (Offline Seed Files)
+
+When custodians cannot reach the API server (air-gap deployments), they can
+prepare seed files offline and the admin imports them:
+
+```bash
+# 1. Admin starts the ceremony (server-connected)
+sovra crk generate-ceremony start --org-id my-org --shares 5 --threshold 3
+
+# 2. Each custodian prepares a seed file OFFLINE (no server needed)
+sovra crk generate-ceremony prepare-seed --index 1 --custodian-name "Alice" --output seed-alice.json
+sovra crk generate-ceremony prepare-seed --index 2 --custodian-name "Bob" --output seed-bob.json
+sovra crk generate-ceremony prepare-seed --index 3 --custodian-name "Charlie" --output seed-charlie.json
+
+# 3. Transfer seed files to the admin via USB / secure courier
+
+# 4. Admin imports all seeds (server-connected)
+sovra crk generate-ceremony import-seed <ceremony-id> \
+  --seed-file seed-alice.json \
+  --seed-file seed-bob.json \
+  --seed-file seed-charlie.json
+
+# 5. Admin completes the ceremony
+sovra crk generate-ceremony complete <ceremony-id> --output crk.json
+
+# 6. Securely delete seed files
+shred -u seed-*.json
+```
+
 > **Dev/testing only:** `sovra crk generate` still exists but outputs plaintext
 > shares and prints a deprecation warning. Do not use it in production.
 

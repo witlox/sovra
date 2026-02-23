@@ -2,6 +2,7 @@ package crk
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 )
 
@@ -100,6 +101,58 @@ func TestDecryptShareTooShort(t *testing.T) {
 	_, err := DecryptShare(key, []byte{1, 2})
 	if err == nil {
 		t.Fatal("DecryptShare with short data should fail")
+	}
+}
+
+func TestOfflineSeedFileRoundTrip(t *testing.T) {
+	password := []byte("offline-ceremony-test")
+	salt, err := GenerateSalt()
+	if err != nil {
+		t.Fatalf("GenerateSalt: %v", err)
+	}
+
+	key := DeriveKey(password, salt, DefaultKDFTime, DefaultKDFMemory, DefaultKDFThreads)
+
+	seed := OfflineSeedFile{
+		FormatVersion: 1,
+		Type:          "sovra-ceremony-seed",
+		Index:         3,
+		EncryptionKey: key,
+		Salt:          salt,
+		KDFParams:     KDFParams{Time: DefaultKDFTime, Memory: DefaultKDFMemory, Threads: DefaultKDFThreads},
+		CustodianName: "Alice",
+	}
+
+	data, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got OfflineSeedFile
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got.FormatVersion != 1 {
+		t.Fatalf("format_version = %d, want 1", got.FormatVersion)
+	}
+	if got.Type != "sovra-ceremony-seed" {
+		t.Fatalf("type = %q, want sovra-ceremony-seed", got.Type)
+	}
+	if got.Index != 3 {
+		t.Fatalf("index = %d, want 3", got.Index)
+	}
+	if got.CustodianName != "Alice" {
+		t.Fatalf("custodian_name = %q, want Alice", got.CustodianName)
+	}
+	if !bytes.Equal(got.EncryptionKey, key) {
+		t.Fatal("encryption key mismatch after roundtrip")
+	}
+	if !bytes.Equal(got.Salt, salt) {
+		t.Fatal("salt mismatch after roundtrip")
+	}
+	if got.KDFParams.Time != DefaultKDFTime || got.KDFParams.Memory != DefaultKDFMemory || got.KDFParams.Threads != DefaultKDFThreads {
+		t.Fatal("KDF params mismatch after roundtrip")
 	}
 }
 

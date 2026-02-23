@@ -161,12 +161,18 @@ func init() {
 	crkGenCeremonySeedCmd.Flags().Int("index", 0, "Share index (1-based)")
 	crkGenCeremonySeedCmd.Flags().String("custodian-name", "", "Custodian name")
 	crkGenCeremonyCompleteCmd.Flags().String("output", "", "Output file for encrypted shares")
+	crkGenCeremonyPrepareSeedCmd.Flags().Int("index", 0, "Share index (1-based)")
+	crkGenCeremonyPrepareSeedCmd.Flags().String("custodian-name", "", "Custodian name")
+	crkGenCeremonyPrepareSeedCmd.Flags().String("output", "", "Output file path for seed JSON")
+	crkGenCeremonyImportSeedCmd.Flags().StringArray("seed-file", nil, "Seed file path (repeatable)")
 
 	crkGenCeremonyCmd.AddCommand(crkGenCeremonyStartCmd)
 	crkGenCeremonyCmd.AddCommand(crkGenCeremonySeedCmd)
 	crkGenCeremonyCmd.AddCommand(crkGenCeremonyStatusCmd)
 	crkGenCeremonyCmd.AddCommand(crkGenCeremonyCompleteCmd)
 	crkGenCeremonyCmd.AddCommand(crkGenCeremonyCancelCmd)
+	crkGenCeremonyCmd.AddCommand(crkGenCeremonyPrepareSeedCmd)
+	crkGenCeremonyCmd.AddCommand(crkGenCeremonyImportSeedCmd)
 
 	crkCmd.AddCommand(crkGenerateCmd)
 	crkCmd.AddCommand(crkSignCmd)
@@ -700,6 +706,150 @@ var crkGenCeremonyCompleteCmd = &cobra.Command{
 		} else {
 			fmt.Println(string(data))
 		}
+		return nil
+	},
+}
+
+var crkGenCeremonyPrepareSeedCmd = &cobra.Command{
+	Use:   "prepare-seed",
+	Short: "Prepare an offline seed file (no server needed)",
+	Long:  `Custodian runs this on their own machine to prepare seed material for an air-gap ceremony. Prompts for a password, derives a key via Argon2id, and writes a JSON seed file.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		index, _ := cmd.Flags().GetInt("index")
+		custodianName, _ := cmd.Flags().GetString("custodian-name")
+		output, _ := cmd.Flags().GetString("output")
+
+		if index < 1 {
+			return fmt.Errorf("--index is required (1-based)")
+		}
+		if custodianName == "" {
+			return fmt.Errorf("--custodian-name is required")
+		}
+		if output == "" {
+			return fmt.Errorf("--output is required")
+		}
+
+		// Prompt for password (hidden input)
+		fmt.Fprint(os.Stderr, "Enter password for share encryption: ")
+		password, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return fmt.Errorf("read password: %w", err)
+		}
+
+		fmt.Fprint(os.Stderr, "Confirm password: ")
+		confirm, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return fmt.Errorf("read password confirmation: %w", err)
+		}
+
+		if string(password) != string(confirm) {
+			crk.ZeroBytes(password)
+			crk.ZeroBytes(confirm)
+			return fmt.Errorf("passwords do not match")
+		}
+
+		// Generate salt and derive key
+		salt, err := crk.GenerateSalt()
+		if err != nil {
+			crk.ZeroBytes(password)
+			crk.ZeroBytes(confirm)
+			return fmt.Errorf("generate salt: %w", err)
+		}
+
+		key := crk.DeriveKey(password, salt, crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+		crk.ZeroBytes(password)
+		crk.ZeroBytes(confirm)
+
+		seedFile := crk.OfflineSeedFile{
+			FormatVersion: 1,
+			Type:          "sovra-ceremony-seed",
+			Index:         index,
+			EncryptionKey: key,
+			Salt:          salt,
+			KDFParams: crk.KDFParams{
+				Time:    crk.DefaultKDFTime,
+				Memory:  crk.DefaultKDFMemory,
+				Threads: crk.DefaultKDFThreads,
+			},
+			CustodianName: custodianName,
+		}
+
+		data, err := json.MarshalIndent(seedFile, "", "  ")
+		if err != nil {
+			crk.ZeroBytes(key)
+			return fmt.Errorf("marshal seed file: %w", err)
+		}
+
+		if err := os.WriteFile(output, data, 0600); err != nil {
+			crk.ZeroBytes(key)
+			return fmt.Errorf("write seed file: %w", err)
+		}
+
+		crk.ZeroBytes(key)
+
+		fmt.Printf("Seed file written to %s (share %d, custodian %q)\n", output, index, custodianName)
+		fmt.Fprintln(os.Stderr, "WARNING: Securely delete this file after transferring it to the admin (e.g. shred -u).")
+		return nil
+	},
+}
+
+var crkGenCeremonyImportSeedCmd = &cobra.Command{
+	Use:   "import-seed [ceremony-id]",
+	Short: "Import offline seed files into a ceremony",
+	Long:  `Admin imports one or more offline seed files (created by prepare-seed) into an active generation ceremony.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		seedFiles, _ := cmd.Flags().GetStringArray("seed-file")
+		if len(seedFiles) == 0 {
+			return fmt.Errorf("at least one --seed-file is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		for _, path := range seedFiles {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("read seed file %s: %w", path, err)
+			}
+
+			var seed crk.OfflineSeedFile
+			if err := json.Unmarshal(data, &seed); err != nil {
+				return fmt.Errorf("parse seed file %s: %w", path, err)
+			}
+
+			if seed.Type != "sovra-ceremony-seed" || seed.FormatVersion != 1 {
+				return fmt.Errorf("invalid seed file %s: unexpected type %q or version %d", path, seed.Type, seed.FormatVersion)
+			}
+			if seed.Index < 1 {
+				return fmt.Errorf("invalid seed file %s: index must be >= 1", path)
+			}
+			if len(seed.EncryptionKey) != crk.KeySize {
+				return fmt.Errorf("invalid seed file %s: encryption key must be %d bytes", path, crk.KeySize)
+			}
+
+			req := client.SeedGenerationShareRequest{
+				Index:         seed.Index,
+				EncryptionKey: seed.EncryptionKey,
+				Salt:          seed.Salt,
+				CustodianName: seed.CustodianName,
+			}
+			req.KDFParams.Time = seed.KDFParams.Time
+			req.KDFParams.Memory = seed.KDFParams.Memory
+			req.KDFParams.Threads = seed.KDFParams.Threads
+
+			if err := c.SeedGenerationShare(ctx, args[0], req); err != nil {
+				crk.ZeroBytes(seed.EncryptionKey)
+				return fmt.Errorf("seed share from %s: %w", path, err)
+			}
+
+			crk.ZeroBytes(seed.EncryptionKey)
+			fmt.Printf("Imported seed from %s (share %d, custodian %q)\n", path, seed.Index, seed.CustodianName)
+		}
+
+		fmt.Fprintln(os.Stderr, "WARNING: Securely delete seed files now (e.g. shred -u seed-*.json).")
 		return nil
 	},
 }

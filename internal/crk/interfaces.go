@@ -94,6 +94,20 @@ type SeedEntry struct {
 	CustodianName string    `json:"custodian_name"`
 }
 
+// OfflineSeedFile is the JSON format written by `prepare-seed` and read by `import-seed`.
+// It carries the derived encryption key so the admin can import it into an active ceremony
+// without the custodian needing network access. Deliberately separate from SeedEntry
+// (which has json:"-" on EncryptionKey).
+type OfflineSeedFile struct {
+	FormatVersion int       `json:"format_version"` // 1
+	Type          string    `json:"type"`           // "sovra-ceremony-seed"
+	Index         int       `json:"index"`
+	EncryptionKey []byte    `json:"encryption_key"` // 32-byte derived key
+	Salt          []byte    `json:"salt"`           // 16-byte salt
+	KDFParams     KDFParams `json:"kdf_params"`
+	CustodianName string    `json:"custodian_name"`
+}
+
 // GenerationCeremony represents an in-progress password-protected CRK generation ceremony.
 type GenerationCeremony struct {
 	ID              string                     `json:"id"`
