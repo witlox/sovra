@@ -823,6 +823,20 @@ Auth methods: `approle`, `kubernetes`, `cert`
 }
 ```
 
+**GET /api/v1/identities/groups/{id}:**
+```json
+{
+  "id": "group-123",
+  "name": "researchers",
+  "description": "Research team",
+  "vault_policies": ["read-genomics"],
+  "members": [
+    {"identity_id": "user-456", "identity_type": "user"}
+  ],
+  "created_at": "2026-01-01T00:00:00Z"
+}
+```
+
 **POST /api/v1/identities/groups/{id}/members:**
 ```json
 {
@@ -849,6 +863,20 @@ Identity types: `admin`, `user`, `service`, `device`
   "name": "data-reader",
   "description": "Read-only data access",
   "permissions": [{"resource": "workspace", "action": "read"}]
+}
+```
+
+**GET /api/v1/identities/roles/{id}:**
+```json
+{
+  "id": "role-123",
+  "name": "data-reader",
+  "description": "Read-only data access",
+  "permissions": [{"resource": "workspace", "action": "read"}],
+  "assignments": [
+    {"identity_id": "user-456", "identity_type": "user", "assigned_by": "admin-123"}
+  ],
+  "created_at": "2026-01-01T00:00:00Z"
 }
 ```
 

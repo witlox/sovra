@@ -86,7 +86,9 @@ func (s *serviceImpl) Create(ctx context.Context, req CreateRequest) (*models.Po
 	// Upload to OPA
 	if err := s.opa.UploadPolicy(ctx, s.opaPolicyID(policy), policy.Rego); err != nil {
 		// Rollback database creation on OPA failure
-		_ = s.repo.Delete(ctx, policy.ID)
+		if delErr := s.repo.Delete(ctx, policy.ID); delErr != nil {
+			return nil, fmt.Errorf("failed to upload policy to OPA: %w (rollback also failed: %w)", err, delErr)
+		}
 		return nil, fmt.Errorf("failed to upload policy to OPA: %w", err)
 	}
 

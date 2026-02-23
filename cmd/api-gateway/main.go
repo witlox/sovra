@@ -131,7 +131,7 @@ func main() {
 		GetByOrgIDFn: crkRepo.GetByOrgID,
 		VerifyFn:     crkMgr.Verify,
 	}
-	emergencyMgr := identity.NewEmergencyAccessManager(emergencyRepo, crkProvider, identity.NewSimpleTokenGenerator())
+	emergencyMgr := identity.NewEmergencyAccessManagerWithAudit(emergencyRepo, crkProvider, identity.NewSimpleTokenGenerator(), auditSvc)
 	recoveryMgr := identity.NewAccountRecoveryManager(recoveryRepo, crkProvider)
 
 	// Compliance report generator

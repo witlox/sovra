@@ -85,13 +85,15 @@ func (s *productionService) Create(ctx context.Context, req CreateRequest) (*mod
 	}
 
 	// Wrap DEK for each participant using their org's KEK
+	wrappedKeys := make(map[string][]byte, len(req.Participants))
 	for _, orgID := range req.Participants {
 		wrappedDEK, err := s.wrapDEKForOrg(ctx, dek, orgID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to wrap DEK for org %s: %w", orgID, err)
 		}
-		ws.DEKWrapped[orgID] = wrappedDEK
+		wrappedKeys[orgID] = wrappedDEK
 	}
+	ws.DEKWrapped = wrappedKeys
 
 	// Store workspace in Postgres
 	if err := s.repo.Create(ctx, ws); err != nil {
