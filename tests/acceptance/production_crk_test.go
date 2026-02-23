@@ -386,7 +386,7 @@ func TestProductionPasswordProtectedCRKCeremony(t *testing.T) {
 
 		crkManager := crk.NewManager()
 		encShareRepo := postgres.NewEncryptedShareRepository(db)
-		genCeremonyMgr := crk.NewGenerationCeremonyManagerWithRepo(crkManager, encShareRepo)
+		genCeremonyMgr := crk.NewGenerationCeremonyManager(crkManager)
 		crkRepo := postgres.NewCRKRepository(db)
 
 		t.Run("Scenario: Full password-protected generation ceremony with persistence", func(t *testing.T) {
