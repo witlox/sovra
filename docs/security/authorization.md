@@ -227,16 +227,16 @@ Use the Sovra CLI to test policies:
 
 ```bash
 # Test a specific request
-sovra-cli policy test \
+sovra policy test \
   --user alice \
   --action encrypt \
   --resource key:key-123
 
 # Run policy test suite
-sovra-cli policy test --suite tests/policies/
+sovra policy test --suite tests/policies/
 
 # Validate policy syntax
-sovra-cli policy validate /etc/sovra/policies/
+sovra policy validate /etc/sovra/policies/
 ```
 
 Or use OPA directly:
@@ -264,12 +264,12 @@ View authorization decisions:
 
 ```bash
 # Query recent decisions
-sovra-cli audit query \
+sovra audit query \
   --event-type authorization.decision \
   --limit 10
 
 # Filter denied requests
-sovra-cli audit query \
+sovra audit query \
   --event-type authorization.denied
 ```
 

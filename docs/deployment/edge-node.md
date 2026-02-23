@@ -157,18 +157,18 @@ ui = true
 
 ```bash
 # Get edge node certificate from control plane
-sovra-cli edge-node cert-request \
+sovra edge-node cert-request \
   --node-id edge-1 \
   --output edge-1-csr.json
 
 # Sign certificate with CRK
-sovra-cli edge-node cert-sign \
+sovra edge-node cert-sign \
   --csr edge-1-csr.json \
   --crk-sign org-a-crk.json \
   --output edge-1-cert.json
 
 # Register edge node
-sovra-cli edge-node register \
+sovra edge-node register \
   --node-id edge-1 \
   --cert edge-1-cert.json \
   --vault-addr https://vault-edge-1.example.org:8200
@@ -230,7 +230,7 @@ vault operator raft list-peers
 kubectl logs -n sovra-edge -l app=edge-agent
 
 # Check control plane registration
-sovra-cli edge-node status edge-1
+sovra edge-node status edge-1
 ```
 
 ## Scaling
@@ -242,14 +242,14 @@ sovra-cli edge-node status edge-1
 terraform apply -var="node_count=4"
 
 # Register with control plane
-sovra-cli edge-node register --node-id edge-2 ...
+sovra edge-node register --node-id edge-2 ...
 ```
 
 ### Remove Edge Node
 
 ```bash
 # Deregister from control plane
-sovra-cli edge-node deregister edge-1
+sovra edge-node deregister edge-1
 
 # Remove Vault from Raft cluster
 vault operator raft remove-peer vault-1

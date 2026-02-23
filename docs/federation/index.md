@@ -13,22 +13,22 @@ Sovra enables organizations to securely share data through federated control pla
 
 ```bash
 # Org A: Initialize federation
-sovra-cli federation init --org-id org-a
+sovra federation init --org-id org-a
 
 # Org B: Initialize federation
-sovra-cli federation init --org-id org-b
+sovra federation init --org-id org-b
 
 # Exchange certificates (out-of-band)
 # Copy org-a-federation.crt to Org B
 # Copy org-b-federation.crt to Org A
 
 # Org A: Establish
-sovra-cli federation import --cert org-b-federation.crt
-sovra-cli federation establish --partner https://org-b.example.org
+sovra federation import --cert org-b-federation.crt
+sovra federation establish --partner https://org-b.example.org
 
 # Org B: Establish
-sovra-cli federation import --cert org-a-federation.crt
-sovra-cli federation establish --partner https://org-a.example.org
+sovra federation import --cert org-a-federation.crt
+sovra federation establish --partner https://org-a.example.org
 ```
 
 ## Architecture
@@ -43,7 +43,7 @@ Federation uses bilateral mTLS:
 Create shared workspace:
 
 ```bash
-sovra-cli workspace create \
+sovra workspace create \
   --name research-project \
   --participants org-a,org-b,org-c \
   --classification CONFIDENTIAL

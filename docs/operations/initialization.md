@@ -259,7 +259,7 @@ After successful initialization:
    curl https://sovra.example.com/health
    
    # Login as admin
-   sovra-cli login --email admin@example.com
+   sovra login --email admin@example.com
    ```
 
 ## Security Considerations

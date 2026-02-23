@@ -186,16 +186,16 @@ curl -H "Authorization: Bearer $TOKEN" \
   https://api.sovra.local/v1/workspaces
 ```
 
-### Using sovra-cli
+### Using sovra
 
 ```bash
 # Configure authentication
-sovra-cli config set auth.type mtls
-sovra-cli config set auth.cert /path/to/client.pem
-sovra-cli config set auth.key /path/to/client-key.pem
+sovra config set auth.type mtls
+sovra config set auth.cert /path/to/client.pem
+sovra config set auth.key /path/to/client-key.pem
 
 # Or use OIDC
-sovra-cli login --provider azure
+sovra login --provider azure
 ```
 
 ## Troubleshooting
@@ -221,7 +221,7 @@ openssl s_client -connect api.sovra.local:443 \
 echo $TOKEN | cut -d. -f2 | base64 -d | jq
 
 # Check token expiry
-sovra-cli auth check
+sovra auth check
 ```
 
 ### Common Errors

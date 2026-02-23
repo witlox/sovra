@@ -47,7 +47,7 @@ The **CRK** is the cryptographic root of trust for an organization.
 **Example:**
 ```bash
 # Generate CRK
-sovra-cli crk generate --org-id eth-zurich
+sovra crk generate --org-id eth-zurich
 
 Output:
   CRK created successfully
@@ -64,7 +64,7 @@ Output:
 **Usage:**
 ```bash
 # Sign operation (requires 3 shares)
-sovra-cli workspace create \
+sovra workspace create \
   --crk-sign crk-shares.json \
   ...
 ```
@@ -172,10 +172,10 @@ Workspace: cancer-research
 **Operations:**
 ```bash
 # Any participant can encrypt
-sovra-cli workspace encrypt --workspace cancer-research ...
+sovra workspace encrypt --workspace cancer-research ...
 
 # Any participant can decrypt (subject to policies)
-sovra-cli workspace decrypt --workspace cancer-research ...
+sovra workspace decrypt --workspace cancer-research ...
 ```
 
 **Audit:** ALL participants see ALL operations.
@@ -243,13 +243,13 @@ is_business_hours(time) {
 **Queries:**
 ```bash
 # All operations in workspace
-sovra-cli audit query --workspace cancer-research
+sovra audit query --workspace cancer-research
 
 # Failed operations
-sovra-cli audit query --result error
+sovra audit query --result error
 
 # Specific user
-sovra-cli audit query --actor researcher@ethz.ch
+sovra audit query --actor researcher@ethz.ch
 ```
 
 ---

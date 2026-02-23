@@ -81,7 +81,7 @@ curl -s https://api.github.com/repos/witlox/sovra/releases/latest \
 tar xzf sovra_*_darwin_arm64.tar.gz
 
 # Add to PATH
-sudo mv sovra /usr/local/bin/sovra-cli
+sudo mv sovra /usr/local/bin/sovra
 ```
 
 ### Build from Source
@@ -104,10 +104,10 @@ kubectl apply -k infrastructure/kubernetes/base
 ./scripts/init-control-plane.sh
 
 # Connect edge node
-sovra-cli edge-node register --control-plane https://sovra.example.org
+sovra edge-node register --control-plane https://sovra.example.org
 
 # Federate with partner
-sovra-cli federation establish --partner https://partner.example.org
+sovra federation establish --partner https://partner.example.org
 ```
 ---
 

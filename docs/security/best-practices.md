@@ -109,10 +109,10 @@ path "workspace/cancer-research/decrypt" {
 **3. Multi-Factor Authentication:**
 ```bash
 # Enable MFA for admin operations
-sovra-cli config set mfa-required true
+sovra config set mfa-required true
 
 # Require CRK signatures for high-risk ops
-sovra-cli workspace create --crk-sign required
+sovra workspace create --crk-sign required
 ```
 
 ### Certificate Management
@@ -357,13 +357,13 @@ kubectl exec -n sovra sovra-api-gateway-xxx -- \
 **Data Subject Rights:**
 ```bash
 # Right to access
-sovra-cli audit export --user researcher@example.com
+sovra audit export --user researcher@example.com
 
 # Right to erasure
-sovra-cli user delete researcher@example.com --confirm
+sovra user delete researcher@example.com --confirm
 
 # Data portability
-sovra-cli data export --workspace cancer-research
+sovra data export --workspace cancer-research
 ```
 
 ### ISO 27001 procedures
@@ -378,10 +378,10 @@ sovra-cli data export --workspace cancer-research
 **Evidence collection:**
 ```bash
 # Audit logs
-sovra-cli audit query --since "30 days ago"
+sovra audit query --since "30 days ago"
 
 # Access reviews
-sovra-cli user list --last-login "90 days ago"
+sovra user list --last-login "90 days ago"
 
 # Security patches
 kubectl get pods -n sovra -o json | jq '.items[].spec.containers[].image'

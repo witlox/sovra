@@ -84,7 +84,7 @@ docker save -o /tmp/sovra-airgap/images/sovra-images.tar \
 cp -r infrastructure/kubernetes/airgap/* /tmp/sovra-airgap/manifests/
 
 # Copy binaries
-cp bin/sovra-cli /tmp/sovra-airgap/binaries/
+cp bin/sovra /tmp/sovra-airgap/binaries/
 ```
 
 ### Step 3: Generate Certificates
@@ -228,7 +228,7 @@ kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=sovra -n sovra 
 ```bash
 # On connected machine
 mkdir /tmp/edge-node-package
-cp binaries/sovra-cli /tmp/edge-node-package/
+cp binaries/sovra /tmp/edge-node-package/
 cp certs/edge-node-1.crt /tmp/edge-node-package/
 cp certs/edge-node-1-key.pem /tmp/edge-node-package/
 cp manifests/edge-node/* /tmp/edge-node-package/
@@ -294,7 +294,7 @@ POLICYEOF
 # Transfer to air-gap via USB
 
 # On air-gap: apply policy
-sovra-cli policy create \
+sovra policy create \
   --workspace classified-project \
   --policy new-policy.rego \
   --crk-sign crk-shares.json
@@ -304,7 +304,7 @@ sovra-cli policy create \
 
 ```bash
 # Export audit logs
-sovra-cli audit export \
+sovra audit export \
   --since "2026-01-01" \
   --output /media/usb-secret/audit-export-2026-Q1.json
 
@@ -329,7 +329,7 @@ Two air-gapped organizations can federate via manual certificate exchange.
 
 ```bash
 # Org A: Generate federation cert
-sovra-cli federation init \
+sovra federation init \
   --org-id org-a \
   --output org-a-federation-cert.json
 
@@ -337,19 +337,19 @@ sovra-cli federation init \
 # (classified courier with appropriate clearance)
 
 # Org B: Import and establish
-sovra-cli federation import \
+sovra federation import \
   --cert org-a-federation-cert.json \
   --crk-sign org-b-crk.json
 
 # Org B: Generate response
-sovra-cli federation respond \
+sovra federation respond \
   --partner org-a \
   --output org-b-federation-response.json
 
 # Transfer org-b-federation-response.json back to Org A
 
 # Org A: Finalize
-sovra-cli federation finalize \
+sovra federation finalize \
   --cert org-b-federation-response.json \
   --crk-sign org-a-crk.json
 ```
@@ -358,7 +358,7 @@ sovra-cli federation finalize \
 
 ```bash
 # Org A: Create workspace
-sovra-cli workspace create \
+sovra workspace create \
   --name classified-intel \
   --participants org-a,org-b \
   --classification SECRET \
@@ -368,7 +368,7 @@ sovra-cli workspace create \
 # Transfer workspace-package/ to Org B via courier
 
 # Org B: Import workspace
-sovra-cli workspace import \
+sovra workspace import \
   --input workspace-package/ \
   --crk-sign org-b-crk.json
 ```

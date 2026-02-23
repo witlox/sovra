@@ -22,7 +22,7 @@ Administrators manage the Sovra platform, including:
 Administrators must have:
 - **Admin identity** with appropriate RBAC roles
 - **CRK share access** for high-risk operations (or ability to coordinate with CRK custodians)
-- **CLI access** to `sovra-cli` tool
+- **CLI access** to `sovra` tool
 
 ## Initial Setup
 
@@ -30,27 +30,27 @@ Administrators must have:
 
 ```bash
 # Generate CRK (requires 3 of 5 custodians for reconstruction)
-sovra-cli crk generate \
+sovra crk generate \
   --org-id eth-zurich \
   --shares 5 \
   --threshold 3 \
   --output crk-shares.json
 
 # Initialize control plane
-sovra-cli init \
+sovra init \
   --org-id eth-zurich \
   --org-name "ETH Zurich" \
   --config sovra.yaml
 
 # Verify initialization
-sovra-cli status
+sovra status
 ```
 
 ### 2. Create Initial Admin
 
 ```bash
 # Create first admin (bootstrap)
-sovra-cli admin create \
+sovra admin create \
   --email admin@eth.ch \
   --name "Platform Admin" \
   --role platform-admin \
@@ -63,13 +63,13 @@ sovra-cli admin create \
 
 ```bash
 # Register edge node
-sovra-cli edge-node register \
+sovra edge-node register \
   --node-id edge-1 \
   --location "Zurich Data Center" \
   --vault-address https://vault.edge-1.internal:8200
 
 # Verify edge node health
-sovra-cli edge-node status edge-1
+sovra edge-node status edge-1
 ```
 
 ## Identity Management
@@ -78,85 +78,85 @@ sovra-cli edge-node status edge-1
 
 ```bash
 # List all admins
-sovra-cli admin list
+sovra admin list
 
 # Create admin with specific roles
-sovra-cli admin create \
+sovra admin create \
   --email security@eth.ch \
   --name "Security Admin" \
   --role security-admin \
   --mfa-required
 
 # Assign additional role
-sovra-cli admin add-role \
+sovra admin add-role \
   --email security@eth.ch \
   --role audit-viewer
 
 # Remove admin role
-sovra-cli admin remove-role \
+sovra admin remove-role \
   --email security@eth.ch \
   --role audit-viewer
 
 # Disable admin (preserves audit trail)
-sovra-cli admin disable --email former-admin@eth.ch
+sovra admin disable --email former-admin@eth.ch
 
 # Delete admin (only if no audit history)
-sovra-cli admin delete --email temp-admin@eth.ch --confirm
+sovra admin delete --email temp-admin@eth.ch --confirm
 ```
 
 ### Managing Users
 
 ```bash
 # Provision user from SSO
-sovra-cli user provision \
+sovra user provision \
   --email researcher@eth.ch \
   --name "Dr. Alice Smith" \
   --department "Computer Science" \
   --sso-provider azure-ad
 
 # List users
-sovra-cli user list
+sovra user list
 
 # Add user to group
-sovra-cli user add-group \
+sovra user add-group \
   --email researcher@eth.ch \
   --group cancer-research-team
 
 # View user permissions
-sovra-cli user permissions --email researcher@eth.ch
+sovra user permissions --email researcher@eth.ch
 ```
 
 ### Managing Service Accounts
 
 ```bash
 # Create service account
-sovra-cli service create \
+sovra service create \
   --name "Data Pipeline" \
   --auth-method approle \
   --allowed-workspaces cancer-research,genomics
 
 # Rotate service credentials
-sovra-cli service rotate-credentials --name "Data Pipeline"
+sovra service rotate-credentials --name "Data Pipeline"
 
 # View service account status
-sovra-cli service status --name "Data Pipeline"
+sovra service status --name "Data Pipeline"
 ```
 
 ### Managing Device Identities
 
 ```bash
 # Register IoT device
-sovra-cli device register \
+sovra device register \
   --device-id sensor-001 \
   --type iot-sensor \
   --location "Lab A" \
   --certificate /path/to/device-cert.pem
 
 # Revoke device certificate
-sovra-cli device revoke --device-id sensor-001
+sovra device revoke --device-id sensor-001
 
 # List devices by location
-sovra-cli device list --location "Lab A"
+sovra device list --location "Lab A"
 ```
 
 ## Workspace Management
@@ -165,49 +165,49 @@ sovra-cli device list --location "Lab A"
 
 ```bash
 # Create workspace (requires CRK signature)
-sovra-cli workspace create \
+sovra workspace create \
   --name cancer-research \
   --description "Collaborative cancer research data" \
   --edge-node edge-1 \
   --crk-sign  # Requires 3 CRK custodians
 
 # Add organization to workspace
-sovra-cli workspace add-org \
+sovra workspace add-org \
   --workspace cancer-research \
   --org-id partner-university
 
 # List workspaces
-sovra-cli workspace list
+sovra workspace list
 ```
 
 ### Managing Workspace Access
 
 ```bash
 # Add user to workspace
-sovra-cli workspace add-user \
+sovra workspace add-user \
   --workspace cancer-research \
   --email researcher@eth.ch \
   --role contributor
 
 # Remove user from workspace
-sovra-cli workspace remove-user \
+sovra workspace remove-user \
   --workspace cancer-research \
   --email former-researcher@eth.ch
 
 # View workspace participants
-sovra-cli workspace participants cancer-research
+sovra workspace participants cancer-research
 ```
 
 ### Workspace Key Rotation
 
 ```bash
 # Rotate workspace DEK (requires CRK signature)
-sovra-cli workspace rotate-key \
+sovra workspace rotate-key \
   --workspace cancer-research \
   --crk-sign
 
 # Schedule automatic rotation
-sovra-cli workspace set-rotation-policy \
+sovra workspace set-rotation-policy \
   --workspace cancer-research \
   --interval 90d  # Rotate every 90 days
 ```
@@ -218,38 +218,38 @@ sovra-cli workspace set-rotation-policy \
 
 ```bash
 # Initialize federation with partner
-sovra-cli federation init \
+sovra federation init \
   --partner-org partner-university \
   --crk-sign  # Requires CRK
 
 # Export federation certificate
-sovra-cli federation export-cert \
+sovra federation export-cert \
   --output eth-zurich-federation.crt
 
 # Import partner certificate
-sovra-cli federation import-cert \
+sovra federation import-cert \
   --partner-org partner-university \
   --cert /path/to/partner-federation.crt
 
 # Establish federation
-sovra-cli federation establish \
+sovra federation establish \
   --partner-org partner-university
 
 # Verify federation
-sovra-cli federation status partner-university
+sovra federation status partner-university
 ```
 
 ### Federation Health
 
 ```bash
 # Check all federations
-sovra-cli federation list
+sovra federation list
 
 # Detailed partner status
-sovra-cli federation status partner-university --verbose
+sovra federation status partner-university --verbose
 
 # Renew federation certificate
-sovra-cli federation renew-cert \
+sovra federation renew-cert \
   --partner-org partner-university \
   --crk-sign
 ```
@@ -276,12 +276,12 @@ require_audit = true
 EOF
 
 # Upload policy
-sovra-cli policy upload \
+sovra policy upload \
   --workspace cancer-research \
   --policy cancer-research-policy.rego
 
 # Validate policy
-sovra-cli policy validate \
+sovra policy validate \
   --policy cancer-research-policy.rego
 ```
 
@@ -289,7 +289,7 @@ sovra-cli policy validate \
 
 ```bash
 # Test policy with sample input
-sovra-cli policy test \
+sovra policy test \
   --workspace cancer-research \
   --input '{"user":{"email":"researcher@eth.ch","groups":["cancer-research-team"]},"action":"encrypt"}'
 
@@ -302,25 +302,25 @@ sovra-cli policy test \
 
 ```bash
 # Recent audit events
-sovra-cli audit query --since "24 hours ago"
+sovra audit query --since "24 hours ago"
 
 # Filter by event type
-sovra-cli audit query \
+sovra audit query \
   --event-type workspace.access \
   --since "7 days ago"
 
 # Filter by user
-sovra-cli audit query \
+sovra audit query \
   --actor researcher@eth.ch \
   --since "30 days ago"
 
 # Failed operations
-sovra-cli audit query \
+sovra audit query \
   --result error \
   --since "7 days ago"
 
 # Export for compliance
-sovra-cli audit export \
+sovra audit export \
   --since "2026-01-01" \
   --until "2026-01-31" \
   --format csv \
@@ -331,17 +331,17 @@ sovra-cli audit export \
 
 ```bash
 # Generate access review report
-sovra-cli compliance access-review \
+sovra compliance access-review \
   --workspace cancer-research \
   --output access-review.pdf
 
 # Generate activity summary
-sovra-cli compliance activity-summary \
+sovra compliance activity-summary \
   --since "90 days ago" \
   --output activity-summary.pdf
 
 # GDPR data subject access request
-sovra-cli compliance dsar \
+sovra compliance dsar \
   --subject researcher@eth.ch \
   --output dsar-response.zip
 ```
@@ -352,26 +352,26 @@ sovra-cli compliance dsar \
 
 ```bash
 # List certificates
-sovra-cli cert list
+sovra cert list
 
 # Check expiring certificates
-sovra-cli cert list --expiring 30d
+sovra cert list --expiring 30d
 
 # Rotate all certificates
-sovra-cli cert rotate --all
+sovra cert rotate --all
 
 # Rotate specific certificate
-sovra-cli cert rotate --name edge-1-tls
+sovra cert rotate --name edge-1-tls
 ```
 
 ### Federation Certificates
 
 ```bash
 # View federation certificate status
-sovra-cli federation cert-status partner-university
+sovra federation cert-status partner-university
 
 # Renew before expiry
-sovra-cli federation cert-renew \
+sovra federation cert-renew \
   --partner partner-university \
   --crk-sign
 ```
@@ -382,16 +382,16 @@ sovra-cli federation cert-renew \
 
 ```bash
 # Full backup
-sovra-cli backup create \
+sovra backup create \
   --output /backup/sovra-$(date +%Y%m%d).tar.gz
 
 # Database only
-sovra-cli backup create \
+sovra backup create \
   --type database \
   --output /backup/db-$(date +%Y%m%d).sql
 
 # Configuration only
-sovra-cli backup create \
+sovra backup create \
   --type config \
   --output /backup/config-$(date +%Y%m%d).tar.gz
 ```
@@ -400,10 +400,10 @@ sovra-cli backup create \
 
 ```bash
 # Verify backup integrity
-sovra-cli backup verify /backup/sovra-20260130.tar.gz
+sovra backup verify /backup/sovra-20260130.tar.gz
 
 # Restore (requires CRK)
-sovra-cli backup restore \
+sovra backup restore \
   --input /backup/sovra-20260130.tar.gz \
   --crk-sign
 ```
@@ -414,26 +414,26 @@ sovra-cli backup restore \
 
 ```bash
 # Overall platform health
-sovra-cli health check
+sovra health check
 
 # Edge node health
-sovra-cli edge-node status --all
+sovra edge-node status --all
 
 # Federation health
-sovra-cli federation status --all
+sovra federation status --all
 
 # Database health
-sovra-cli health check-db
+sovra health check-db
 ```
 
 ### Metrics
 
 ```bash
 # View key metrics
-sovra-cli metrics summary
+sovra metrics summary
 
 # Export metrics
-sovra-cli metrics export --format prometheus
+sovra metrics export --format prometheus
 ```
 
 ## High-Risk Operations (Require CRK)
@@ -454,22 +454,22 @@ The following operations require CRK signatures:
 
 ```bash
 # Option 1: Interactive (prompts for shares)
-sovra-cli workspace create \
+sovra workspace create \
   --name new-workspace \
   --crk-sign
 
 # Option 2: Provide shares directly
-sovra-cli workspace create \
+sovra workspace create \
   --name new-workspace \
   --share-1 <SHARE_1> \
   --share-2 <SHARE_2> \
   --share-3 <SHARE_3>
 
 # Option 3: Key ceremony mode
-sovra-cli crk ceremony start
+sovra crk ceremony start
 # ... custodians enter shares
-sovra-cli workspace create --name new-workspace
-sovra-cli crk ceremony complete
+sovra workspace create --name new-workspace
+sovra crk ceremony complete
 ```
 
 ## Administrative Roles
@@ -486,12 +486,12 @@ sovra-cli crk ceremony complete
 
 ```bash
 # Assign role to admin
-sovra-cli admin add-role \
+sovra admin add-role \
   --email admin@eth.ch \
   --role security-admin
 
 # View admin roles
-sovra-cli admin roles --email admin@eth.ch
+sovra admin roles --email admin@eth.ch
 ```
 
 ## Troubleshooting
@@ -501,24 +501,24 @@ sovra-cli admin roles --email admin@eth.ch
 **Cannot create workspace:**
 ```bash
 # Check CRK availability
-sovra-cli crk status
+sovra crk status
 
 # Verify edge node health
-sovra-cli edge-node status edge-1
+sovra edge-node status edge-1
 
 # Check user permissions
-sovra-cli admin roles --email $(whoami)
+sovra admin roles --email $(whoami)
 ```
 
 **Federation not connecting:**
 ```bash
 # Check connectivity
-sovra-cli federation test-connection partner-university
+sovra federation test-connection partner-university
 
 # Verify certificates
-sovra-cli federation cert-verify partner-university
+sovra federation cert-verify partner-university
 
 # Check audit logs
-sovra-cli audit query --event-type federation.* --since "1 hour ago"
+sovra audit query --event-type federation.* --since "1 hour ago"
 ```
 

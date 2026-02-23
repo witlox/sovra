@@ -50,25 +50,25 @@ kubectl port-forward -n monitoring svc/prometheus 9090:9090
 
 ```bash
 # Control plane health
-sovra-cli health check
+sovra health check
 
 # Edge node status
-sovra-cli edge-node status --all
+sovra edge-node status --all
 
 # Federation status
-sovra-cli federation status --all
+sovra federation status --all
 ```
 
 ### Audit Review
 
 ```bash
 # Failed operations (last 24 hours)
-sovra-cli audit query \
+sovra audit query \
   --since "24 hours ago" \
   --result error
 
 # Policy violations
-sovra-cli audit query \
+sovra audit query \
   --event-type policy.violation
 ```
 
@@ -76,10 +76,10 @@ sovra-cli audit query \
 
 ```bash
 # Check expiring certificates (next 30 days)
-sovra-cli cert list --expiring 30d
+sovra cert list --expiring 30d
 
 # Rotate certificates
-sovra-cli cert rotate --all
+sovra cert rotate --all
 ```
 
 ## Recommended Weekly Operations
@@ -98,12 +98,12 @@ sovra-cli cert rotate --all
 
 ```bash
 # Review access logs
-sovra-cli audit query \
+sovra audit query \
   --since "7 days ago" \
   --event-type auth.*
 
 # Check policy compliance
-sovra-cli policy validate --all
+sovra policy validate --all
 ```
 
 ## Recommended Monthly Operations
@@ -116,17 +116,17 @@ kubectl top nodes
 kubectl top pods -n sovra
 
 # Check database growth
-sovra-cli metrics database-size
+sovra metrics database-size
 
 # Review audit log size
-sovra-cli metrics audit-size
+sovra metrics audit-size
 ```
 
 ### Security Patching
 
 ```bash
 # Check for updates
-sovra-cli version check
+sovra version check
 
 # Review CVEs
 ./scripts/check-cves.sh

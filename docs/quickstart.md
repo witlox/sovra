@@ -138,14 +138,14 @@ curl -s https://api.github.com/repos/witlox/sovra/releases/latest \
   | cut -d '"' -f 4 | xargs curl -LO
 tar xzf sovra_*_linux_amd64.tar.gz
 chmod +x sovra
-sudo mv sovra /usr/local/bin/sovra-cli
+sudo mv sovra /usr/local/bin/sovra
 
 # Configure CLI
-sovra-cli config set control-plane https://sovra.example.org
-sovra-cli login --admin
+sovra config set control-plane https://sovra.example.org
+sovra login --admin
 
 # Register edge node
-sovra-cli edge-node register \
+sovra edge-node register \
   --node-id edge-1 \
   --vault-addr https://vault-edge-1.example.org:8200
 ```
@@ -153,7 +153,7 @@ sovra-cli edge-node register \
 ### Verify Connection
 
 ```bash
-sovra-cli edge-node status edge-1
+sovra edge-node status edge-1
 ```
 
 Expected output:
@@ -174,7 +174,7 @@ Audit: Forwarding
 
 ```bash
 # Generate CRK (Customer Root Key)
-sovra-cli crk generate \
+sovra crk generate \
   --org-id org-a \
   --output org-a-crk.json
 
@@ -186,7 +186,7 @@ sovra-cli crk generate \
 
 ```bash
 # Create workspace for internal use
-sovra-cli workspace create \
+sovra workspace create \
   --name internal-keys \
   --participants org-a \
   --classification CONFIDENTIAL \
@@ -197,12 +197,12 @@ sovra-cli workspace create \
 
 ```bash
 # Encrypt data
-echo "sensitive data" | sovra-cli workspace encrypt \
+echo "sensitive data" | sovra workspace encrypt \
   --workspace internal-keys \
   --output encrypted.dat
 
 # Decrypt data
-sovra-cli workspace decrypt \
+sovra workspace decrypt \
   --workspace internal-keys \
   --input encrypted.dat
 ```
@@ -215,7 +215,7 @@ sensitive data
 ### View Audit Log
 
 ```bash
-sovra-cli audit query \
+sovra audit query \
   --workspace internal-keys \
   --last 10
 ```
@@ -228,7 +228,7 @@ sovra-cli audit query \
 
 ```bash
 # Org A generates federation cert request
-sovra-cli federation init \
+sovra federation init \
   --org-id org-a \
   --output org-a-federation-request.json
 ```
@@ -243,18 +243,18 @@ Receive `org-b-federation-cert.json` from Org B.
 
 ```bash
 # Import partner certificate
-sovra-cli federation import \
+sovra federation import \
   --cert org-b-federation-cert.json \
   --crk-sign org-a-crk.json
 
 # Establish connection
-sovra-cli federation establish \
+sovra federation establish \
   --partner-id org-b \
   --partner-url https://sovra-org-b.example.org \
   --crk-sign org-a-crk.json
 
 # Verify
-sovra-cli federation status org-b
+sovra federation status org-b
 ```
 
 Expected output:
@@ -270,7 +270,7 @@ Shared Workspaces: 0
 
 ```bash
 # Org A creates workspace
-sovra-cli workspace create \
+sovra workspace create \
   --name joint-research \
   --participants org-a,org-b \
   --classification CONFIDENTIAL \
@@ -286,12 +286,12 @@ sovra-cli workspace create \
 Org B can now use the workspace:
 ```bash
 # Org B encrypts
-echo "shared data" | sovra-cli workspace encrypt \
+echo "shared data" | sovra workspace encrypt \
   --workspace joint-research \
   --output shared-encrypted.dat
 
 # Org A decrypts
-sovra-cli workspace decrypt \
+sovra workspace decrypt \
   --workspace joint-research \
   --input shared-encrypted.dat
 ```
@@ -324,7 +324,7 @@ curl -k https://sovra.example.org/health
 kubectl logs -n sovra-edge -l app=edge-agent
 
 # Verify certificates
-sovra-cli edge-node cert verify edge-1
+sovra edge-node cert verify edge-1
 ```
 
 ### Federation establishment fails
@@ -334,7 +334,7 @@ sovra-cli edge-node cert verify edge-1
 curl -k https://sovra-partner.example.org/health
 
 # Verify certificates
-sovra-cli federation cert verify org-b
+sovra federation cert verify org-b
 
 # Check firewall rules (port 8443 for federation)
 ```

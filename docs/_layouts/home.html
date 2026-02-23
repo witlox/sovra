@@ -330,8 +330,10 @@
 <code>docker pull ghcr.io/witlox/sovra:latest</code>
 
 <span style="color:#6b7280"># Binary</span>
-<code>curl -LO https://github.com/witlox/sovra/releases/latest/download/sovra_linux_amd64.tar.gz
-tar xzf sovra_linux_amd64.tar.gz && sudo mv sovra /usr/local/bin/</code>
+<code>curl -s https://api.github.com/repos/witlox/sovra/releases/latest \
+  | grep "browser_download_url.*linux_amd64.tar.gz" \
+  | cut -d '"' -f 4 | xargs curl -LO
+tar xzf sovra_*_linux_amd64.tar.gz && sudo mv sovra /usr/local/bin/</code>
 
 <span style="color:#6b7280"># From source</span>
 <code>go install github.com/witlox/sovra/cmd/...@latest</code></pre>

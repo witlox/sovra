@@ -215,7 +215,7 @@ kubectl exec -n sovra-edge edge-agent-xxx -- \
 openssl x509 -in edge-cert.crt -noout -dates
 
 # Renew certificate
-sovra-cli edge-node cert-renew edge-1
+sovra edge-node cert-renew edge-1
 ```
 
 3. **Wrong control plane URL:**
@@ -266,7 +266,7 @@ kubectl exec -n sovra-edge vault-2 -- \
 curl -k https://partner-sovra.example.org/health
 
 # Check certificates
-sovra-cli federation cert-verify org-b
+sovra federation cert-verify org-b
 
 # Check logs
 kubectl logs -n sovra -l app=sovra-api-gateway --tail=50
@@ -287,7 +287,7 @@ kubectl exec -n sovra sovra-api-gateway-xxx -- \
 2. **Certificate mismatch:**
 ```bash
 # Regenerate federation certificate
-sovra-cli federation cert-regenerate --partner org-b
+sovra federation cert-regenerate --partner org-b
 
 # Exchange with partner
 # Manually transfer new certificate
@@ -302,13 +302,13 @@ sovra-cli federation cert-regenerate --partner org-b
 **Diagnosis:**
 ```bash
 # Check workspace policies
-sovra-cli policy get --workspace cancer-research
+sovra policy get --workspace cancer-research
 
 # Check user membership
-sovra-cli workspace participants cancer-research
+sovra workspace participants cancer-research
 
 # Check audit logs
-sovra-cli audit query \
+sovra audit query \
   --workspace cancer-research \
   --result error
 ```
@@ -317,12 +317,12 @@ sovra-cli audit query \
 
 ```bash
 # Update policy
-sovra-cli policy update \
+sovra policy update \
   --workspace cancer-research \
   --policy updated-policy.rego
 
 # Add user to workspace
-sovra-cli workspace add-user \
+sovra workspace add-user \
   --workspace cancer-research \
   --user researcher@org-b.edu
 ```

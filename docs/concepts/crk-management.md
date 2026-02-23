@@ -48,7 +48,7 @@ Reconstruction requires ANY 3 shares:
 
 ```bash
 # Generate CRK with default 5-of-3 split
-sovra-cli crk generate \
+sovra crk generate \
   --org-id eth-zurich \
   --shares 5 \
   --threshold 3 \
@@ -92,7 +92,7 @@ sovra-cli crk generate \
 
 ```bash
 # Extract individual shares
-sovra-cli crk split-shares \
+sovra crk split-shares \
   --input crk-shares.json \
   --output-dir crk-shares/
 
@@ -218,7 +218,7 @@ CRK (Organization Root of Trust)
 # Share custodians provide their shares
 
 # Reconstruct temporarily in memory
-sovra-cli crk sign \
+sovra crk sign \
   --operation workspace-create \
   --share-1 <SHARE_1_DATA> \
   --share-2 <SHARE_2_DATA> \
@@ -242,21 +242,21 @@ For sensitive operations, conduct a **key ceremony:**
 # 3. Custodians input shares into air-gapped machine
 
 # Custodian 1 enters:
-sovra-cli crk ceremony start --share-1 <SHARE_1_DATA>
+sovra crk ceremony start --share-1 <SHARE_1_DATA>
 
 # Custodian 2 enters:
-sovra-cli crk ceremony add-share --share-2 <SHARE_2_DATA>
+sovra crk ceremony add-share --share-2 <SHARE_2_DATA>
 
 # Custodian 3 enters:
-sovra-cli crk ceremony add-share --share-3 <SHARE_3_DATA>
+sovra crk ceremony add-share --share-3 <SHARE_3_DATA>
 
 # 4. Perform operation
-sovra-cli crk ceremony sign-operation \
+sovra crk ceremony sign-operation \
   --operation workspace-create \
   --workspace-config config.json
 
 # 5. Ceremony complete - CRK destroyed
-sovra-cli crk ceremony complete
+sovra crk ceremony complete
 
 # 6. Auditor witnesses and logs ceremony
 ```
@@ -321,14 +321,14 @@ sovra-cli crk ceremony complete
 
 ```bash
 # Day 1: Generate CRK
-sovra-cli crk generate \
+sovra crk generate \
   --org-id eth-zurich \
   --shares 5 \
   --threshold 3 \
   --output crk-shares.json
 
 # Split shares
-sovra-cli crk split-shares \
+sovra crk split-shares \
   --input crk-shares.json \
   --output-dir shares/
 
@@ -353,13 +353,13 @@ done
 
 # Option 2: Regenerate all shares (more secure)
 # 1. Reconstruct CRK with old shares
-sovra-cli crk reconstruct \
+sovra crk reconstruct \
   --share-1 <SHARE_1> \
   --share-2 <SHARE_2> \
   --share-3 <SHARE_3>
 
 # 2. Generate new shares
-sovra-cli crk regenerate-shares \
+sovra crk regenerate-shares \
   --shares 5 \
   --threshold 3 \
   --output new-crk-shares.json
@@ -371,7 +371,7 @@ sovra-cli crk regenerate-shares \
 # Hand-deliver new encrypted shares
 
 # 5. Verify old shares are revoked
-sovra-cli crk verify-revocation --old-share <OLD_SHARE>
+sovra crk verify-revocation --old-share <OLD_SHARE>
 ```
 
 ---
@@ -382,7 +382,7 @@ sovra-cli crk verify-revocation --old-share <OLD_SHARE>
 
 ```bash
 # More shares, higher threshold
-sovra-cli crk generate \
+sovra crk generate \
   --org-id defense-agency \
   --shares 7 \
   --threshold 4 \
@@ -396,7 +396,7 @@ sovra-cli crk generate \
 
 ```bash
 # Lower threshold (less secure but more available)
-sovra-cli crk generate \
+sovra crk generate \
   --org-id small-startup \
   --shares 5 \
   --threshold 2 \
@@ -411,14 +411,14 @@ sovra-cli crk generate \
 
 ```bash
 # Level 1: Board members (3 shares, need 2)
-sovra-cli crk generate \
+sovra crk generate \
   --shares 3 \
   --threshold 2 \
   --output board-shares.json
 
 # Level 2: Each board share becomes input for next level
 # Share 1 from Level 1 → Generate Level 2 shares
-sovra-cli crk generate \
+sovra crk generate \
   --seed-share board-share-1.json \
   --shares 3 \
   --threshold 2 \
@@ -438,7 +438,7 @@ sovra-cli crk generate \
 
 ```bash
 # 1. Verify remaining shares
-sovra-cli crk verify-shares \
+sovra crk verify-shares \
   --share-1 <SHARE_1> \
   --share-3 <SHARE_3> \
   --share-5 <SHARE_5>
@@ -446,14 +446,14 @@ sovra-cli crk verify-shares \
 # Status: ✓ Can reconstruct (have 3, need 3)
 
 # 2. Reconstruct CRK
-sovra-cli crk reconstruct \
+sovra crk reconstruct \
   --share-1 <SHARE_1> \
   --share-3 <SHARE_3> \
   --share-5 <SHARE_5> \
   --output reconstructed-crk.json
 
 # 3. Generate new shares immediately
-sovra-cli crk regenerate-shares \
+sovra crk regenerate-shares \
   --crk reconstructed-crk.json \
   --shares 5 \
   --threshold 3 \
@@ -470,23 +470,23 @@ sovra-cli crk regenerate-shares \
 ```bash
 # 1. Emergency regeneration
 # Collect threshold shares EXCLUDING compromised share
-sovra-cli crk reconstruct \
+sovra crk reconstruct \
   --share-1 <SHARE_1> \
   --share-3 <SHARE_3> \
   --share-4 <SHARE_4>
 
 # 2. Generate new shares with different split
-sovra-cli crk regenerate-shares \
+sovra crk regenerate-shares \
   --shares 5 \
   --threshold 3 \
   --output emergency-shares.json
 
 # 3. Immediate distribution to new custodians
 # 4. Revoke all old shares
-sovra-cli crk revoke-old-shares
+sovra crk revoke-old-shares
 
 # 5. Audit all operations signed with old CRK
-sovra-cli audit query --crk-operations
+sovra audit query --crk-operations
 ```
 
 ---
@@ -497,7 +497,7 @@ sovra-cli audit query --crk-operations
 
 ```bash
 # Test without exposing CRK
-sovra-cli crk test-recovery \
+sovra crk test-recovery \
   --share-1 <SHARE_1> \
   --share-2 <SHARE_2> \
   --share-3 <SHARE_3> \
@@ -514,7 +514,7 @@ sovra-cli crk test-recovery \
 
 ```bash
 # Verify each share independently
-sovra-cli crk verify-share \
+sovra crk verify-share \
   --share <SHARE_DATA> \
   --public-key <CRK_PUBLIC_KEY>
 
@@ -614,14 +614,14 @@ CRK management meets GDPR requirements:
 
 ```bash
 # 1. Verify share format
-sovra-cli crk verify-share --share <SHARE_DATA>
+sovra crk verify-share --share <SHARE_DATA>
 
 # 2. Check share numbers (no duplicates)
 # Share 1, Share 3, Share 5 ✓
 # Share 1, Share 1, Share 3 ✗ (duplicate)
 
 # 3. Verify shares belong to same CRK
-sovra-cli crk verify-shares \
+sovra crk verify-shares \
   --share-1 <SHARE_1> \
   --share-3 <SHARE_3> \
   --share-5 <SHARE_5> \
@@ -640,7 +640,7 @@ sovra-cli crk verify-shares \
 
 ```bash
 # If you have paper backup
-sovra-cli crk import-paper-backup \
+sovra crk import-paper-backup \
   --qr-code /path/to/qr-code.png \
   --output recovered-share.json
 
@@ -655,25 +655,25 @@ sovra-cli crk import-paper-backup \
 
 ### Generate CRK
 ```bash
-sovra-cli crk generate --org-id <ORG> --shares 5 --threshold 3
+sovra crk generate --org-id <ORG> --shares 5 --threshold 3
 ```
 
 ### Sign Operation
 ```bash
-sovra-cli crk sign \
+sovra crk sign \
   --operation <OP> \
   --share-1 <S1> --share-2 <S2> --share-3 <S3>
 ```
 
 ### Test Recovery
 ```bash
-sovra-cli crk test-recovery \
+sovra crk test-recovery \
   --share-1 <S1> --share-2 <S2> --share-3 <S3> --verify-only
 ```
 
 ### Regenerate Shares
 ```bash
-sovra-cli crk regenerate-shares --shares 5 --threshold 3
+sovra crk regenerate-shares --shares 5 --threshold 3
 ```
 
 ---

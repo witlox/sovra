@@ -6,7 +6,7 @@ parent: Reference
 
 # CLI Reference
 
-Complete reference for the `sovra-cli` command-line tool.
+Complete reference for the `sovra` command-line tool.
 
 ## Global Flags
 
@@ -24,7 +24,7 @@ Complete reference for the `sovra-cli` command-line tool.
 Check API health status.
 
 ```bash
-sovra-cli health
+sovra health
 ```
 
 ---
@@ -34,7 +34,7 @@ sovra-cli health
 Authenticate with the Sovra API.
 
 ```bash
-sovra-cli login --email admin@example.org --password SECRET
+sovra login --email admin@example.org --password SECRET
 ```
 
 | Flag | Description |
@@ -49,7 +49,7 @@ sovra-cli login --email admin@example.org --password SECRET
 Log out from the Sovra API.
 
 ```bash
-sovra-cli logout
+sovra logout
 ```
 
 ---
@@ -61,13 +61,13 @@ Show and validate CLI configuration.
 ### config show
 
 ```bash
-sovra-cli config show
+sovra config show
 ```
 
 ### config validate
 
 ```bash
-sovra-cli config validate
+sovra config validate
 ```
 
 ---
@@ -77,7 +77,7 @@ sovra-cli config validate
 Encrypt data in a workspace.
 
 ```bash
-sovra-cli encrypt --workspace ws-123 --data-file input.json --output encrypted.bin
+sovra encrypt --workspace ws-123 --data-file input.json --output encrypted.bin
 ```
 
 | Flag | Description |
@@ -97,7 +97,7 @@ sovra-cli encrypt --workspace ws-123 --data-file input.json --output encrypted.b
 Decrypt data from a workspace.
 
 ```bash
-sovra-cli decrypt --workspace ws-123 --data-file encrypted.bin --output output.json
+sovra decrypt --workspace ws-123 --data-file encrypted.bin --output output.json
 ```
 
 | Flag | Description |
@@ -117,7 +117,7 @@ sovra-cli decrypt --workspace ws-123 --data-file encrypted.bin --output output.j
 Retrieve Prometheus metrics from the API gateway.
 
 ```bash
-sovra-cli metrics
+sovra metrics
 ```
 
 ---
@@ -127,7 +127,7 @@ sovra-cli metrics
 View activity log for an actor.
 
 ```bash
-sovra-cli activity actor-123 --since 2026-01-01T00:00:00Z --limit 50
+sovra activity actor-123 --since 2026-01-01T00:00:00Z --limit 50
 ```
 
 | Flag | Description | Default |
@@ -145,7 +145,7 @@ Manage shared cryptographic workspaces.
 ### workspace create
 
 ```bash
-sovra-cli workspace create \
+sovra workspace create \
   --name genomics-data \
   --participants org-a,org-b \
   --classification CONFIDENTIAL \
@@ -162,7 +162,7 @@ sovra-cli workspace create \
 ### workspace list
 
 ```bash
-sovra-cli workspace list --limit 20
+sovra workspace list --limit 20
 ```
 
 | Flag | Description | Default |
@@ -173,13 +173,13 @@ sovra-cli workspace list --limit 20
 ### workspace get
 
 ```bash
-sovra-cli workspace get ws-123
+sovra workspace get ws-123
 ```
 
 ### workspace update
 
 ```bash
-sovra-cli workspace update ws-123 --purpose "Updated purpose"
+sovra workspace update ws-123 --purpose "Updated purpose"
 ```
 
 | Flag | Description |
@@ -193,7 +193,7 @@ sovra-cli workspace update ws-123 --purpose "Updated purpose"
 Rotate the Data Encryption Key for a workspace.
 
 ```bash
-sovra-cli workspace rotate-dek ws-123
+sovra workspace rotate-dek ws-123
 ```
 
 ### workspace extend
@@ -201,7 +201,7 @@ sovra-cli workspace rotate-dek ws-123
 Extend workspace expiration.
 
 ```bash
-sovra-cli workspace extend ws-123 --expires-at 2027-01-01T00:00:00Z
+sovra workspace extend ws-123 --expires-at 2027-01-01T00:00:00Z
 ```
 
 | Flag | Description |
@@ -211,7 +211,7 @@ sovra-cli workspace extend ws-123 --expires-at 2027-01-01T00:00:00Z
 ### workspace invite
 
 ```bash
-sovra-cli workspace invite ws-123 --org-id org-b
+sovra workspace invite ws-123 --org-id org-b
 ```
 
 | Flag | Description |
@@ -221,37 +221,37 @@ sovra-cli workspace invite ws-123 --org-id org-b
 ### workspace accept-invitation
 
 ```bash
-sovra-cli workspace accept-invitation ws-123 --org-id org-b
+sovra workspace accept-invitation ws-123 --org-id org-b
 ```
 
 ### workspace decline-invitation
 
 ```bash
-sovra-cli workspace decline-invitation ws-123 --org-id org-b
+sovra workspace decline-invitation ws-123 --org-id org-b
 ```
 
 ### workspace add-participant
 
 ```bash
-sovra-cli workspace add-participant ws-123 --org-id org-c
+sovra workspace add-participant ws-123 --org-id org-c
 ```
 
 ### workspace remove-participant
 
 ```bash
-sovra-cli workspace remove-participant ws-123 --org-id org-c
+sovra workspace remove-participant ws-123 --org-id org-c
 ```
 
 ### workspace archive
 
 ```bash
-sovra-cli workspace archive ws-123
+sovra workspace archive ws-123
 ```
 
 ### workspace delete
 
 ```bash
-sovra-cli workspace delete ws-123
+sovra workspace delete ws-123
 ```
 
 ### workspace export
@@ -259,7 +259,7 @@ sovra-cli workspace delete ws-123
 Export a workspace as a portable bundle.
 
 ```bash
-sovra-cli workspace export ws-123 --output backup.json
+sovra workspace export ws-123 --output backup.json
 ```
 
 | Flag | Description |
@@ -271,7 +271,7 @@ sovra-cli workspace export ws-123 --output backup.json
 Import a workspace from a bundle.
 
 ```bash
-sovra-cli workspace import --input backup.json
+sovra workspace import --input backup.json
 ```
 
 | Flag | Description |
@@ -287,13 +287,13 @@ Manage federation relationships with partner organizations.
 ### federation list
 
 ```bash
-sovra-cli federation list
+sovra federation list
 ```
 
 ### federation status
 
 ```bash
-sovra-cli federation status partner-org-id
+sovra federation status partner-org-id
 ```
 
 ### federation init
@@ -301,13 +301,13 @@ sovra-cli federation status partner-org-id
 Initialize federation for the organization.
 
 ```bash
-sovra-cli federation init
+sovra federation init
 ```
 
 ### federation establish
 
 ```bash
-sovra-cli federation establish \
+sovra federation establish \
   --partner-org org-b \
   --partner-url https://partner.example.org
 ```
@@ -320,19 +320,19 @@ sovra-cli federation establish \
 ### federation revoke
 
 ```bash
-sovra-cli federation revoke partner-org-id
+sovra federation revoke partner-org-id
 ```
 
 ### federation health
 
 ```bash
-sovra-cli federation health
+sovra federation health
 ```
 
 ### federation import-cert
 
 ```bash
-sovra-cli federation import-cert \
+sovra federation import-cert \
   --partner-org org-b \
   --cert-file partner-cert.pem
 ```
@@ -351,7 +351,7 @@ Manage OPA Rego policies for access control.
 ### policy list
 
 ```bash
-sovra-cli policy list --workspace ws-123
+sovra policy list --workspace ws-123
 ```
 
 | Flag | Description |
@@ -361,13 +361,13 @@ sovra-cli policy list --workspace ws-123
 ### policy get
 
 ```bash
-sovra-cli policy get policy-123
+sovra policy get policy-123
 ```
 
 ### policy create
 
 ```bash
-sovra-cli policy create \
+sovra policy create \
   --name data-access \
   --workspace ws-123 \
   --rego-file policy.rego
@@ -382,7 +382,7 @@ sovra-cli policy create \
 ### policy update
 
 ```bash
-sovra-cli policy update policy-123 --rego-file updated-policy.rego
+sovra policy update policy-123 --rego-file updated-policy.rego
 ```
 
 | Flag | Description |
@@ -392,13 +392,13 @@ sovra-cli policy update policy-123 --rego-file updated-policy.rego
 ### policy delete
 
 ```bash
-sovra-cli policy delete policy-123
+sovra policy delete policy-123
 ```
 
 ### policy evaluate
 
 ```bash
-sovra-cli policy evaluate --workspace ws-123 --input-file eval-input.json
+sovra policy evaluate --workspace ws-123 --input-file eval-input.json
 ```
 
 | Flag | Description |
@@ -409,7 +409,7 @@ sovra-cli policy evaluate --workspace ws-123 --input-file eval-input.json
 ### policy validate
 
 ```bash
-sovra-cli policy validate policy.rego
+sovra policy validate policy.rego
 ```
 
 ---
@@ -421,7 +421,7 @@ Query and export audit logs.
 ### audit query
 
 ```bash
-sovra-cli audit query \
+sovra audit query \
   --since 2026-01-01T00:00:00Z \
   --event-type workspace.access \
   --limit 50
@@ -437,13 +437,13 @@ sovra-cli audit query \
 ### audit get
 
 ```bash
-sovra-cli audit get event-123
+sovra audit get event-123
 ```
 
 ### audit export
 
 ```bash
-sovra-cli audit export \
+sovra audit export \
   --format json \
   --output audit-export.json \
   --since 2026-01-01T00:00:00Z
@@ -459,7 +459,7 @@ sovra-cli audit export \
 ### audit stats
 
 ```bash
-sovra-cli audit stats --since 2026-01-01T00:00:00Z
+sovra audit stats --since 2026-01-01T00:00:00Z
 ```
 
 | Flag | Description |
@@ -471,7 +471,7 @@ sovra-cli audit stats --since 2026-01-01T00:00:00Z
 Verify audit log integrity.
 
 ```bash
-sovra-cli audit verify \
+sovra audit verify \
   --since 2026-01-01T00:00:00Z \
   --until 2026-02-01T00:00:00Z
 ```
@@ -492,7 +492,7 @@ Customer Root Key management.
 Generate a new CRK with Shamir secret sharing.
 
 ```bash
-sovra-cli crk generate --shares 5 --threshold 3 --output crk-shares.json
+sovra crk generate --shares 5 --threshold 3 --output crk-shares.json
 ```
 
 | Flag | Description | Default |
@@ -506,7 +506,7 @@ sovra-cli crk generate --shares 5 --threshold 3 --output crk-shares.json
 Sign data using CRK shares.
 
 ```bash
-sovra-cli crk sign \
+sovra crk sign \
   --shares-file crk-shares.json \
   --public-key BASE64_KEY \
   --data-file message.txt
@@ -524,7 +524,7 @@ sovra-cli crk sign \
 Verify a signature against a CRK public key.
 
 ```bash
-sovra-cli crk verify \
+sovra crk verify \
   --public-key BASE64_KEY \
   --signature BASE64_SIG \
   --data-file message.txt
@@ -542,7 +542,7 @@ sovra-cli crk verify \
 Start a CRK rotation ceremony.
 
 ```bash
-sovra-cli crk rotate --threshold 3
+sovra crk rotate --threshold 3
 ```
 
 | Flag | Description |
@@ -552,7 +552,7 @@ sovra-cli crk rotate --threshold 3
 ### crk ceremony start
 
 ```bash
-sovra-cli crk ceremony start --shares 5 --threshold 3
+sovra crk ceremony start --shares 5 --threshold 3
 ```
 
 | Flag | Description | Default |
@@ -563,7 +563,7 @@ sovra-cli crk ceremony start --shares 5 --threshold 3
 ### crk ceremony add-share
 
 ```bash
-sovra-cli crk ceremony add-share ceremony-123 \
+sovra crk ceremony add-share ceremony-123 \
   --share-file share.json \
   --share-index 1
 ```
@@ -577,13 +577,13 @@ sovra-cli crk ceremony add-share ceremony-123 \
 ### crk ceremony complete
 
 ```bash
-sovra-cli crk ceremony complete ceremony-123
+sovra crk ceremony complete ceremony-123
 ```
 
 ### crk ceremony cancel
 
 ```bash
-sovra-cli crk ceremony cancel ceremony-123
+sovra crk ceremony cancel ceremony-123
 ```
 
 ---
@@ -595,7 +595,7 @@ Manage admin, user, service, and device identities.
 ### identity list
 
 ```bash
-sovra-cli identity list --type admin
+sovra identity list --type admin
 ```
 
 | Flag | Description |
@@ -605,7 +605,7 @@ sovra-cli identity list --type admin
 ### identity get
 
 ```bash
-sovra-cli identity get identity-123 --type admin
+sovra identity get identity-123 --type admin
 ```
 
 | Flag | Description |
@@ -615,7 +615,7 @@ sovra-cli identity get identity-123 --type admin
 ### identity create admin
 
 ```bash
-sovra-cli identity create admin \
+sovra identity create admin \
   --email admin@example.org \
   --name "Admin User" \
   --role security_admin
@@ -632,7 +632,7 @@ Roles: `super_admin`, `security_admin`, `operations_admin`, `auditor`
 ### identity create service
 
 ```bash
-sovra-cli identity create service \
+sovra identity create service \
   --name data-pipeline \
   --auth-method approle
 ```
@@ -647,7 +647,7 @@ Auth methods: `approle`, `kubernetes`, `cert`
 ### identity create user-sso
 
 ```bash
-sovra-cli identity create user-sso \
+sovra identity create user-sso \
   --email user@example.org \
   --name "User Name" \
   --sso-provider azure_ad \
@@ -664,7 +664,7 @@ sovra-cli identity create user-sso \
 ### identity delete
 
 ```bash
-sovra-cli identity delete identity-123 --type admin
+sovra identity delete identity-123 --type admin
 ```
 
 | Flag | Description |
@@ -674,13 +674,13 @@ sovra-cli identity delete identity-123 --type admin
 ### identity admin disable
 
 ```bash
-sovra-cli identity admin disable admin-123
+sovra identity admin disable admin-123
 ```
 
 ### identity admin enable
 
 ```bash
-sovra-cli identity admin enable admin-123
+sovra identity admin enable admin-123
 ```
 
 ### identity service rotate
@@ -688,13 +688,13 @@ sovra-cli identity admin enable admin-123
 Rotate credentials for a service identity.
 
 ```bash
-sovra-cli identity service rotate service-123
+sovra identity service rotate service-123
 ```
 
 ### identity enroll-device
 
 ```bash
-sovra-cli identity enroll-device --name "edge-sensor-1" --device-type sensor
+sovra identity enroll-device --name "edge-sensor-1" --device-type sensor
 ```
 
 | Flag | Description |
@@ -705,19 +705,19 @@ sovra-cli identity enroll-device --name "edge-sensor-1" --device-type sensor
 ### identity revoke-device
 
 ```bash
-sovra-cli identity revoke-device device-123
+sovra identity revoke-device device-123
 ```
 
 ### identity mfa enable
 
 ```bash
-sovra-cli identity mfa enable admin-123
+sovra identity mfa enable admin-123
 ```
 
 ### identity mfa verify
 
 ```bash
-sovra-cli identity mfa verify admin-123 --code 123456
+sovra identity mfa verify admin-123 --code 123456
 ```
 
 | Flag | Description |
@@ -727,7 +727,7 @@ sovra-cli identity mfa verify admin-123 --code 123456
 ### identity group create
 
 ```bash
-sovra-cli identity group create --name researchers --description "Research team"
+sovra identity group create --name researchers --description "Research team"
 ```
 
 | Flag | Description |
@@ -738,13 +738,13 @@ sovra-cli identity group create --name researchers --description "Research team"
 ### identity group list
 
 ```bash
-sovra-cli identity group list
+sovra identity group list
 ```
 
 ### identity group add-member
 
 ```bash
-sovra-cli identity group add-member group-123 \
+sovra identity group add-member group-123 \
   --identity-id user-456 \
   --identity-type user
 ```
@@ -757,7 +757,7 @@ sovra-cli identity group add-member group-123 \
 ### identity group remove-member
 
 ```bash
-sovra-cli identity group remove-member group-123 --identity-id user-456
+sovra identity group remove-member group-123 --identity-id user-456
 ```
 
 | Flag | Description |
@@ -767,7 +767,7 @@ sovra-cli identity group remove-member group-123 --identity-id user-456
 ### identity role create
 
 ```bash
-sovra-cli identity role create --name data-reader --description "Read-only data access"
+sovra identity role create --name data-reader --description "Read-only data access"
 ```
 
 | Flag | Description |
@@ -778,13 +778,13 @@ sovra-cli identity role create --name data-reader --description "Read-only data 
 ### identity role list
 
 ```bash
-sovra-cli identity role list
+sovra identity role list
 ```
 
 ### identity role assign
 
 ```bash
-sovra-cli identity role assign role-123 \
+sovra identity role assign role-123 \
   --identity-id user-456 \
   --identity-type user
 ```
@@ -797,7 +797,7 @@ sovra-cli identity role assign role-123 \
 ### identity role unassign
 
 ```bash
-sovra-cli identity role unassign role-123 --identity-id user-456
+sovra identity role unassign role-123 --identity-id user-456
 ```
 
 | Flag | Description |
@@ -813,19 +813,19 @@ Manage edge nodes (Vault clusters).
 ### edge list
 
 ```bash
-sovra-cli edge list
+sovra edge list
 ```
 
 ### edge get
 
 ```bash
-sovra-cli edge get edge-123
+sovra edge get edge-123
 ```
 
 ### edge register
 
 ```bash
-sovra-cli edge register \
+sovra edge register \
   --name edge-eu-west \
   --vault-addr https://vault.eu-west.example.org:8200 \
   --region eu-west
@@ -840,25 +840,25 @@ sovra-cli edge register \
 ### edge unregister
 
 ```bash
-sovra-cli edge unregister edge-123
+sovra edge unregister edge-123
 ```
 
 ### edge health
 
 ```bash
-sovra-cli edge health edge-123
+sovra edge health edge-123
 ```
 
 ### edge sync-policies
 
 ```bash
-sovra-cli edge sync-policies edge-123
+sovra edge sync-policies edge-123
 ```
 
 ### edge sync-keys
 
 ```bash
-sovra-cli edge sync-keys edge-123 --workspace ws-123
+sovra edge sync-keys edge-123 --workspace ws-123
 ```
 
 | Flag | Description |
@@ -868,7 +868,7 @@ sovra-cli edge sync-keys edge-123 --workspace ws-123
 ### edge sync-status
 
 ```bash
-sovra-cli edge sync-status edge-123
+sovra edge sync-status edge-123
 ```
 
 ---
@@ -880,7 +880,7 @@ Manage certificates issued by the Vault PKI engine.
 ### cert issue
 
 ```bash
-sovra-cli cert issue \
+sovra cert issue \
   --common-name api.example.org \
   --role default \
   --ttl 8760h \
@@ -897,25 +897,25 @@ sovra-cli cert issue \
 ### cert revoke
 
 ```bash
-sovra-cli cert revoke AA:BB:CC:DD
+sovra cert revoke AA:BB:CC:DD
 ```
 
 ### cert get
 
 ```bash
-sovra-cli cert get AA:BB:CC:DD
+sovra cert get AA:BB:CC:DD
 ```
 
 ### cert list
 
 ```bash
-sovra-cli cert list
+sovra cert list
 ```
 
 ### cert ca-chain
 
 ```bash
-sovra-cli cert ca-chain
+sovra cert ca-chain
 ```
 
 ### cert tidy
@@ -923,7 +923,7 @@ sovra-cli cert ca-chain
 Clean up expired certificates.
 
 ```bash
-sovra-cli cert tidy --safety-buffer 72h
+sovra cert tidy --safety-buffer 72h
 ```
 
 | Flag | Description |
@@ -939,7 +939,7 @@ Manage break-glass emergency access requests.
 ### emergency-access request
 
 ```bash
-sovra-cli emergency-access request \
+sovra emergency-access request \
   --org-id org-a \
   --reason "Critical security incident requiring immediate access"
 ```
@@ -952,19 +952,19 @@ sovra-cli emergency-access request \
 ### emergency-access approve
 
 ```bash
-sovra-cli emergency-access approve request-123
+sovra emergency-access approve request-123
 ```
 
 ### emergency-access deny
 
 ```bash
-sovra-cli emergency-access deny request-123
+sovra emergency-access deny request-123
 ```
 
 ### emergency-access complete
 
 ```bash
-sovra-cli emergency-access complete request-123
+sovra emergency-access complete request-123
 ```
 
 ### emergency-access verify
@@ -972,7 +972,7 @@ sovra-cli emergency-access complete request-123
 Verify emergency access with CRK signature.
 
 ```bash
-sovra-cli emergency-access verify request-123 --signature BASE64_SIG
+sovra emergency-access verify request-123 --signature BASE64_SIG
 ```
 
 | Flag | Description |
@@ -982,7 +982,7 @@ sovra-cli emergency-access verify request-123 --signature BASE64_SIG
 ### emergency-access list
 
 ```bash
-sovra-cli emergency-access list --org-id org-a
+sovra emergency-access list --org-id org-a
 ```
 
 | Flag | Description |
@@ -992,7 +992,7 @@ sovra-cli emergency-access list --org-id org-a
 ### emergency-access get
 
 ```bash
-sovra-cli emergency-access get request-123
+sovra emergency-access get request-123
 ```
 
 ---
@@ -1004,7 +1004,7 @@ Account recovery using CRK share reconstruction.
 ### account-recovery initiate
 
 ```bash
-sovra-cli account-recovery initiate \
+sovra account-recovery initiate \
   --admin-id admin-123 \
   --reason "Lost credentials" \
   --type lost_credentials
@@ -1023,13 +1023,13 @@ Types: `lost_credentials`, `locked_account`
 Submit a CRK share for account recovery.
 
 ```bash
-sovra-cli account-recovery share recovery-123
+sovra account-recovery share recovery-123
 ```
 
 ### account-recovery complete
 
 ```bash
-sovra-cli account-recovery complete recovery-123
+sovra account-recovery complete recovery-123
 ```
 
 ---
@@ -1041,7 +1041,7 @@ Generate compliance reports.
 ### compliance summary
 
 ```bash
-sovra-cli compliance summary \
+sovra compliance summary \
   --since 2026-01-01T00:00:00Z \
   --until 2026-02-01T00:00:00Z
 ```
@@ -1056,7 +1056,7 @@ sovra-cli compliance summary \
 Generate a GDPR Data Subject Access Request report.
 
 ```bash
-sovra-cli compliance gdpr-dsar --subject-id user-123
+sovra compliance gdpr-dsar --subject-id user-123
 ```
 
 | Flag | Description |
@@ -1066,7 +1066,7 @@ sovra-cli compliance gdpr-dsar --subject-id user-123
 ### compliance access-review
 
 ```bash
-sovra-cli compliance access-review \
+sovra compliance access-review \
   --since 2026-01-01T00:00:00Z \
   --until 2026-02-01T00:00:00Z
 ```
@@ -1085,7 +1085,7 @@ Manage automatic key rotation policies for workspaces.
 ### rotation-policy set
 
 ```bash
-sovra-cli rotation-policy set ws-123 --max-age 720h --enabled
+sovra rotation-policy set ws-123 --max-age 720h --enabled
 ```
 
 | Flag | Description | Default |
@@ -1096,17 +1096,17 @@ sovra-cli rotation-policy set ws-123 --max-age 720h --enabled
 ### rotation-policy get
 
 ```bash
-sovra-cli rotation-policy get ws-123
+sovra rotation-policy get ws-123
 ```
 
 ### rotation-policy delete
 
 ```bash
-sovra-cli rotation-policy delete ws-123
+sovra rotation-policy delete ws-123
 ```
 
 ### rotation-policy list
 
 ```bash
-sovra-cli rotation-policy list
+sovra rotation-policy list
 ```

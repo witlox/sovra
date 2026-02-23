@@ -292,17 +292,17 @@ Validate configuration before deployment:
 
 ```bash
 # Validate config file
-sovra-cli config validate --config /path/to/sovra.yaml
+sovra config validate --config /path/to/sovra.yaml
 
 # Show effective configuration (merged from all sources)
-sovra-cli config show
+sovra config show
 
 # Test database connection
-sovra-cli config test-db
+sovra config test-db
 
 # Test Vault connection
-sovra-cli config test-vault
+sovra config test-vault
 
 # Test OPA connection
-sovra-cli config test-opa
+sovra config test-opa
 ```

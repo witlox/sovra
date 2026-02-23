@@ -24,7 +24,7 @@ Sovra supports multiple authentication methods depending on your identity type:
 **SSO Users (most common):**
 ```bash
 # Login via your organization's SSO
-sovra-cli login
+sovra login
 
 # Opens browser for SSO authentication
 # After successful login: "Authenticated as researcher@eth.ch"
@@ -33,7 +33,7 @@ sovra-cli login
 **Service Accounts:**
 ```bash
 # Using AppRole authentication
-sovra-cli login \
+sovra login \
   --auth-method approle \
   --role-id <ROLE_ID> \
   --secret-id <SECRET_ID>
@@ -42,7 +42,7 @@ sovra-cli login \
 **Device/Certificate Authentication:**
 ```bash
 # Using mTLS certificate
-sovra-cli login \
+sovra login \
   --auth-method cert \
   --cert /path/to/client.crt \
   --key /path/to/client.key
@@ -52,7 +52,7 @@ sovra-cli login \
 
 ```bash
 # View your workspaces
-sovra-cli workspace list
+sovra workspace list
 
 # Output:
 # NAME              ROLE         ORG            CREATED
@@ -68,18 +68,18 @@ Encrypt data before sharing or storing:
 
 ```bash
 # Encrypt a file
-sovra-cli encrypt \
+sovra encrypt \
   --workspace cancer-research \
   --input patient-data.json \
   --output patient-data.enc
 
 # Encrypt from stdin
-echo "sensitive data" | sovra-cli encrypt \
+echo "sensitive data" | sovra encrypt \
   --workspace cancer-research \
   --output data.enc
 
 # Encrypt with metadata
-sovra-cli encrypt \
+sovra encrypt \
   --workspace cancer-research \
   --input data.json \
   --output data.enc \
@@ -92,18 +92,18 @@ Decrypt data you have access to:
 
 ```bash
 # Decrypt a file
-sovra-cli decrypt \
+sovra decrypt \
   --workspace cancer-research \
   --input patient-data.enc \
   --output patient-data.json
 
 # Decrypt to stdout
-sovra-cli decrypt \
+sovra decrypt \
   --workspace cancer-research \
   --input data.enc
 
 # Decrypt with context verification
-sovra-cli decrypt \
+sovra decrypt \
   --workspace cancer-research \
   --input data.enc \
   --context '{"purpose":"analysis"}'
@@ -113,13 +113,13 @@ sovra-cli decrypt \
 
 ```bash
 # Encrypt multiple files
-sovra-cli encrypt \
+sovra encrypt \
   --workspace cancer-research \
   --input-dir /data/raw/ \
   --output-dir /data/encrypted/
 
 # Decrypt multiple files
-sovra-cli decrypt \
+sovra decrypt \
   --workspace cancer-research \
   --input-dir /data/encrypted/ \
   --output-dir /data/decrypted/
@@ -131,7 +131,7 @@ sovra-cli decrypt \
 
 ```bash
 # View workspace info
-sovra-cli workspace info cancer-research
+sovra workspace info cancer-research
 
 # Output:
 # Name: cancer-research
@@ -147,7 +147,7 @@ sovra-cli workspace info cancer-research
 
 ```bash
 # List workspace participants (if you have permission)
-sovra-cli workspace participants cancer-research
+sovra workspace participants cancer-research
 
 # Output:
 # EMAIL                    ORG               ROLE
@@ -160,13 +160,13 @@ sovra-cli workspace participants cancer-research
 
 ```bash
 # Request access to a workspace
-sovra-cli workspace request-access \
+sovra workspace request-access \
   --workspace genomics-data \
   --role contributor \
   --justification "Need access for project XYZ"
 
 # Check request status
-sovra-cli workspace access-requests
+sovra workspace access-requests
 
 # Output:
 # WORKSPACE      STATUS    REQUESTED    REVIEWED_BY
@@ -179,7 +179,7 @@ sovra-cli workspace access-requests
 
 ```bash
 # View your recent activity
-sovra-cli activity list
+sovra activity list
 
 # Output:
 # TIMESTAMP            ACTION     WORKSPACE         RESULT
@@ -192,7 +192,7 @@ sovra-cli activity list
 
 ```bash
 # Export your activity for a time period
-sovra-cli activity export \
+sovra activity export \
   --since "30 days ago" \
   --format json \
   --output my-activity.json
@@ -206,7 +206,7 @@ Share data with collaborators in a federated workspace:
 
 ```bash
 # 1. Encrypt data for the workspace
-sovra-cli encrypt \
+sovra encrypt \
   --workspace cancer-research \
   --input research-results.json \
   --output research-results.enc
@@ -216,7 +216,7 @@ aws s3 cp research-results.enc s3://shared-bucket/
 
 # 3. Collaborator downloads and decrypts
 aws s3 cp s3://shared-bucket/research-results.enc .
-sovra-cli decrypt \
+sovra decrypt \
   --workspace cancer-research \
   --input research-results.enc \
   --output research-results.json
@@ -229,7 +229,7 @@ sovra-cli decrypt \
 # data-pipeline.sh
 
 # Decrypt input data
-sovra-cli decrypt \
+sovra decrypt \
   --workspace genomics-data \
   --input /data/input/samples.enc \
   --output /tmp/samples.json
@@ -238,7 +238,7 @@ sovra-cli decrypt \
 ./process_samples /tmp/samples.json /tmp/results.json
 
 # Encrypt output
-sovra-cli encrypt \
+sovra encrypt \
   --workspace genomics-data \
   --input /tmp/results.json \
   --output /data/output/results.enc
@@ -251,7 +251,7 @@ shred -u /tmp/samples.json /tmp/results.json
 
 ```bash
 # Cron job to encrypt daily backups
-0 2 * * * /usr/local/bin/sovra-cli encrypt \
+0 2 * * * /usr/local/bin/sovra encrypt \
   --workspace backup-data \
   --input /backup/daily-$(date +\%Y\%m\%d).tar \
   --output /backup/encrypted/daily-$(date +\%Y\%m\%d).enc
@@ -271,7 +271,7 @@ Possible causes:
 - Policy restrictions apply
 
 Solution:
-1. Request access: sovra-cli workspace request-access --workspace restricted-data
+1. Request access: sovra workspace request-access --workspace restricted-data
 2. Contact workspace administrator
 ```
 
@@ -280,7 +280,7 @@ Solution:
 Error: authentication session expired
 
 Solution:
-sovra-cli login
+sovra login
 ```
 
 **Workspace Not Found:**
@@ -288,7 +288,7 @@ sovra-cli login
 Error: workspace 'wrong-name' not found
 
 Solution:
-1. Check workspace name: sovra-cli workspace list
+1. Check workspace name: sovra workspace list
 2. Use correct workspace name
 ```
 
@@ -316,13 +316,13 @@ Solution:
 
 2. **Use meaningful context**
    ```bash
-   sovra-cli encrypt \
+   sovra encrypt \
      --context '{"purpose":"analysis","date":"2026-01-30"}'
    ```
 
 3. **Verify decryption context**
    ```bash
-   sovra-cli decrypt \
+   sovra decrypt \
      --require-context '{"purpose":"analysis"}'
    ```
 
@@ -333,7 +333,7 @@ Solution:
    
 2. **Log out when done**
    ```bash
-   sovra-cli logout
+   sovra logout
    ```
 
 3. **Report suspicious activity**
@@ -344,17 +344,17 @@ Solution:
 
 ```bash
 # CLI help
-sovra-cli help
+sovra help
 
 # Command-specific help
-sovra-cli encrypt --help
-sovra-cli workspace --help
+sovra encrypt --help
+sovra workspace --help
 
 # View version
-sovra-cli version
+sovra version
 
 # Verbose output for debugging
-sovra-cli encrypt \
+sovra encrypt \
   --workspace cancer-research \
   --input data.json \
   --output data.enc \

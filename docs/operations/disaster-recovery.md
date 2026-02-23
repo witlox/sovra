@@ -81,7 +81,7 @@ psql -U sovra sovra -c "SELECT COUNT(*) FROM workspaces;"
 kubectl rollout restart deployment -n sovra
 
 # 5. Verify health
-sovra-cli health check
+sovra health check
 ```
 
 ### Scenario 2: Control Plane Total Loss
@@ -114,7 +114,7 @@ vault operator init -recovery-shares=5 -recovery-threshold=3
 vault operator raft snapshot restore /backup/vault-latest.snap
 
 # 7. Verify all services
-sovra-cli health check --all
+sovra health check --all
 ```
 
 ### Scenario 3: Edge Node Failure
@@ -136,10 +136,10 @@ vault operator raft snapshot restore /backup/edge-vault-latest.snap
 vault operator unseal
 
 # 4. Re-register with control plane
-sovra-cli edge-node register --node-id edge-1 ...
+sovra edge-node register --node-id edge-1 ...
 
 # 5. Verify health
-sovra-cli edge-node status edge-1
+sovra edge-node status edge-1
 ```
 
 ### Scenario 4: Federation Link Failure
@@ -155,16 +155,16 @@ sovra-cli edge-node status edge-1
 curl -k https://partner-sovra.example.org/health
 
 # 2. Regenerate federation certificate
-sovra-cli federation cert-renew --partner org-b
+sovra federation cert-renew --partner org-b
 
 # 3. Exchange with partner (secure channel)
 # Transfer new certificate to partner
 
 # 4. Re-establish federation
-sovra-cli federation establish --partner org-b
+sovra federation establish --partner org-b
 
 # 5. Verify shared workspaces
-sovra-cli workspace list
+sovra workspace list
 ```
 
 ## Disaster Recovery Testing
