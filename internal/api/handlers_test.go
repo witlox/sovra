@@ -4431,4 +4431,75 @@ func TestGenerationCeremonyHandlerCancel(t *testing.T) {
 
 		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
+
+	t.Run("returns error for unknown ceremony", func(t *testing.T) {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "nonexistent")
+		req := httptest.NewRequest("DELETE", "/api/v1/crk/generate-ceremony/nonexistent", nil)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+
+		handler.Cancel(w, req)
+
+		assert.GreaterOrEqual(t, w.Code, 400)
+	})
+}
+
+func TestGenerationCeremonyHandlerGetEncryptedShare(t *testing.T) {
+	crkMgr := newRealCRKManager()
+	genMgr := crk.NewGenerationCeremonyManager(crkMgr)
+	handler := api.NewGenerationCeremonyHandler(genMgr)
+
+	t.Run("returns encrypted share", func(t *testing.T) {
+		// Complete a ceremony first to have encrypted shares
+		ceremony, err := genMgr.StartGenerationCeremony("org-eth", 2, 2)
+		require.NoError(t, err)
+		for i := 1; i <= 2; i++ {
+			salt, _ := crk.GenerateSalt()
+			key := crk.DeriveKey([]byte("pw"), salt, crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+			err := genMgr.SeedShare(ceremony.ID, i, key, salt, crk.KDFParams{
+				Time: crk.DefaultKDFTime, Memory: crk.DefaultKDFMemory, Threads: crk.DefaultKDFThreads,
+			}, "")
+			require.NoError(t, err)
+		}
+		result, err := genMgr.CompleteGenerationCeremony(ceremony.ID)
+		require.NoError(t, err)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("crkId", result.CRK.ID)
+		rctx.URLParams.Add("index", "1")
+		req := httptest.NewRequest("GET", "/api/v1/crk/shares/"+result.CRK.ID+"/1", nil)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+
+		handler.GetEncryptedShare(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("returns error for invalid index", func(t *testing.T) {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("crkId", "some-crk")
+		rctx.URLParams.Add("index", "abc")
+		req := httptest.NewRequest("GET", "/api/v1/crk/shares/some-crk/abc", nil)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+
+		handler.GetEncryptedShare(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns error for nonexistent share", func(t *testing.T) {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("crkId", "nonexistent")
+		rctx.URLParams.Add("index", "1")
+		req := httptest.NewRequest("GET", "/api/v1/crk/shares/nonexistent/1", nil)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+
+		handler.GetEncryptedShare(w, req)
+
+		assert.GreaterOrEqual(t, w.Code, 400)
+	})
 }
