@@ -546,6 +546,8 @@ Customer Root Key management.
 
 ### crk generate
 
+> **Deprecated:** Outputs plaintext shares. Use `crk generate-ceremony` for production deployments with password-protected shares.
+
 Generate a new CRK with Shamir secret sharing.
 
 ```bash
@@ -575,6 +577,8 @@ sovra crk sign \
 | `--public-key` | Public key (base64) |
 | `--data` | Data to sign (inline) |
 | `--data-file` | File containing data to sign |
+
+Supports both plaintext and password-encrypted shares. If the shares file contains encrypted shares, the CLI prompts for each custodian's password to decrypt their share locally before signing.
 
 ### crk verify
 
@@ -631,6 +635,8 @@ sovra crk ceremony add-share ceremony-123 \
 | `--share-data` | Base64-encoded share data |
 | `--share-index` | Share index |
 
+Supports both plaintext and password-encrypted shares. If the share file contains encrypted data (with `encrypted_data`, `salt`, and KDF fields), the CLI prompts for the custodian's password to decrypt the share locally before submitting it to the ceremony.
+
 ### crk ceremony complete
 
 ```bash
@@ -641,6 +647,63 @@ sovra crk ceremony complete ceremony-123
 
 ```bash
 sovra crk ceremony cancel ceremony-123
+```
+
+---
+
+### crk generate-ceremony start
+
+Start a password-protected CRK generation ceremony. Each shareholder will independently seed their share with a password before the CRK is generated.
+
+```bash
+sovra crk generate-ceremony start --org-id org-123 --shares 5 --threshold 3
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--org-id` | Organization ID | |
+| `--shares` | Total number of shares | `5` |
+| `--threshold` | Threshold required to reconstruct | `3` |
+
+### crk generate-ceremony seed
+
+Seed a share index with a password. Run by each shareholder independently. The CLI prompts for a password (hidden input, with confirmation), derives an encryption key locally via Argon2id, and sends the derived key to the server. The password never leaves the shareholder's machine.
+
+```bash
+sovra crk generate-ceremony seed <ceremony-id> --index 1 --custodian-name "Alice"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--index` | Share index (1-based, required) |
+| `--custodian-name` | Name of the custodian (required) |
+
+### crk generate-ceremony status
+
+Check the status of a generation ceremony.
+
+```bash
+sovra crk generate-ceremony status <ceremony-id>
+```
+
+### crk generate-ceremony complete
+
+Complete the ceremony. The server generates the Ed25519 keypair, splits via Shamir, encrypts each share with the corresponding shareholder's derived key, zeroes all plaintext material, and returns the CRK metadata with encrypted share blobs.
+
+```bash
+sovra crk generate-ceremony complete <ceremony-id> --output crk.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--output` | Output file for CRK + encrypted shares (default: stdout) |
+
+### crk generate-ceremony cancel
+
+Cancel an in-progress generation ceremony.
+
+```bash
+sovra crk generate-ceremony cancel <ceremony-id>
 ```
 
 ---

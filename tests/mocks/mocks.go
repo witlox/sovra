@@ -2453,6 +2453,34 @@ func (m *MockCRKProvider) Verify(publicKey []byte, data []byte, signature []byte
 }
 
 // =============================================================================
+// Generation Ceremony Mocks
+// =============================================================================
+
+// MockGenerationCeremonyManager is a mock for crk.GenerationCeremonyManager.
+type MockGenerationCeremonyManager struct {
+	mu         sync.Mutex
+	Ceremonies map[string]*MockGenerationCeremony
+	FailNext   bool
+}
+
+// MockGenerationCeremony represents a mock ceremony state.
+type MockGenerationCeremony struct {
+	ID          string
+	OrgID       string
+	TotalShares int
+	Threshold   int
+	Status      string
+	SeededCount int
+}
+
+// NewMockGenerationCeremonyManager creates a new mock.
+func NewMockGenerationCeremonyManager() *MockGenerationCeremonyManager {
+	return &MockGenerationCeremonyManager{
+		Ceremonies: make(map[string]*MockGenerationCeremony),
+	}
+}
+
+// =============================================================================
 // Direct Message Mocks
 // =============================================================================
 

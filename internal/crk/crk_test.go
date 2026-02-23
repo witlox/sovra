@@ -764,3 +764,190 @@ func TestContextReconstructor(t *testing.T) {
 		assert.ErrorIs(t, err, errors.ErrCRKThresholdNotMet)
 	})
 }
+
+func TestGenerationCeremonyManager(t *testing.T) {
+	t.Run("full ceremony lifecycle", func(t *testing.T) {
+		manager := crk.NewManager()
+		genMgr := crk.NewGenerationCeremonyManager(manager)
+
+		// Start ceremony
+		ceremony, err := genMgr.StartGenerationCeremony("org-1", 3, 2)
+		require.NoError(t, err)
+		assert.Equal(t, "pending", string(ceremony.Status))
+		assert.Equal(t, 3, ceremony.TotalShares)
+		assert.Equal(t, 2, ceremony.Threshold)
+
+		// Seed all shares
+		for i := 1; i <= 3; i++ {
+			salt, err := crk.GenerateSalt()
+			require.NoError(t, err)
+			key := crk.DeriveKey([]byte("password"+string(rune('0'+i))), salt,
+				crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+
+			err = genMgr.SeedShare(ceremony.ID, i, key, salt, crk.KDFParams{
+				Time:    crk.DefaultKDFTime,
+				Memory:  crk.DefaultKDFMemory,
+				Threads: crk.DefaultKDFThreads,
+			}, "custodian-"+string(rune('0'+i)))
+			require.NoError(t, err)
+		}
+
+		// Check status
+		status, err := genMgr.GetGenerationCeremony(ceremony.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "seeded", string(status.Status))
+
+		// Complete ceremony
+		result, err := genMgr.CompleteGenerationCeremony(ceremony.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "complete", string(result.Status))
+		assert.NotNil(t, result.CRK)
+		assert.Len(t, result.EncryptedShares, 3)
+
+		// Verify encrypted shares can be decrypted with correct passwords
+		for i, encShare := range result.EncryptedShares {
+			salt := encShare.Salt
+			key := crk.DeriveKey([]byte("password"+string(rune('0'+i+1))), salt,
+				encShare.KDFTime, encShare.KDFMemory, encShare.KDFThreads)
+			plaintext, err := crk.DecryptShare(key, encShare.EncryptedData)
+			require.NoError(t, err, "share %d should decrypt", i+1)
+			assert.NotEmpty(t, plaintext)
+		}
+	})
+
+	t.Run("wrong password fails decryption", func(t *testing.T) {
+		manager := crk.NewManager()
+		genMgr := crk.NewGenerationCeremonyManager(manager)
+
+		ceremony, err := genMgr.StartGenerationCeremony("org-1", 2, 2)
+		require.NoError(t, err)
+
+		for i := 1; i <= 2; i++ {
+			salt, _ := crk.GenerateSalt()
+			key := crk.DeriveKey([]byte("correct-password"), salt, crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+			err = genMgr.SeedShare(ceremony.ID, i, key, salt, crk.KDFParams{
+				Time: crk.DefaultKDFTime, Memory: crk.DefaultKDFMemory, Threads: crk.DefaultKDFThreads,
+			}, "")
+			require.NoError(t, err)
+		}
+
+		result, err := genMgr.CompleteGenerationCeremony(ceremony.ID)
+		require.NoError(t, err)
+
+		// Try decrypting with wrong password
+		wrongKey := crk.DeriveKey([]byte("wrong-password"), result.EncryptedShares[0].Salt,
+			crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+		_, err = crk.DecryptShare(wrongKey, result.EncryptedShares[0].EncryptedData)
+		assert.Error(t, err)
+	})
+
+	t.Run("duplicate seed index rejected", func(t *testing.T) {
+		manager := crk.NewManager()
+		genMgr := crk.NewGenerationCeremonyManager(manager)
+
+		ceremony, _ := genMgr.StartGenerationCeremony("org-1", 3, 2)
+		salt, _ := crk.GenerateSalt()
+		key := crk.DeriveKey([]byte("pw"), salt, crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+
+		err := genMgr.SeedShare(ceremony.ID, 1, key, salt, crk.KDFParams{
+			Time: crk.DefaultKDFTime, Memory: crk.DefaultKDFMemory, Threads: crk.DefaultKDFThreads,
+		}, "")
+		require.NoError(t, err)
+
+		err = genMgr.SeedShare(ceremony.ID, 1, key, salt, crk.KDFParams{
+			Time: crk.DefaultKDFTime, Memory: crk.DefaultKDFMemory, Threads: crk.DefaultKDFThreads,
+		}, "")
+		assert.Error(t, err)
+	})
+
+	t.Run("complete before all seeded fails", func(t *testing.T) {
+		manager := crk.NewManager()
+		genMgr := crk.NewGenerationCeremonyManager(manager)
+
+		ceremony, _ := genMgr.StartGenerationCeremony("org-1", 3, 2)
+		salt, _ := crk.GenerateSalt()
+		key := crk.DeriveKey([]byte("pw"), salt, crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+		_ = genMgr.SeedShare(ceremony.ID, 1, key, salt, crk.KDFParams{
+			Time: crk.DefaultKDFTime, Memory: crk.DefaultKDFMemory, Threads: crk.DefaultKDFThreads,
+		}, "")
+
+		_, err := genMgr.CompleteGenerationCeremony(ceremony.ID)
+		assert.Error(t, err)
+	})
+
+	t.Run("cancel ceremony", func(t *testing.T) {
+		manager := crk.NewManager()
+		genMgr := crk.NewGenerationCeremonyManager(manager)
+
+		ceremony, _ := genMgr.StartGenerationCeremony("org-1", 3, 2)
+		err := genMgr.CancelGenerationCeremony(ceremony.ID)
+		require.NoError(t, err)
+
+		_, err = genMgr.GetGenerationCeremony(ceremony.ID)
+		assert.Error(t, err)
+	})
+
+	t.Run("get encrypted share", func(t *testing.T) {
+		manager := crk.NewManager()
+		genMgr := crk.NewGenerationCeremonyManager(manager)
+
+		ceremony, _ := genMgr.StartGenerationCeremony("org-1", 2, 2)
+		for i := 1; i <= 2; i++ {
+			salt, _ := crk.GenerateSalt()
+			key := crk.DeriveKey([]byte("pw"), salt, crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+			_ = genMgr.SeedShare(ceremony.ID, i, key, salt, crk.KDFParams{
+				Time: crk.DefaultKDFTime, Memory: crk.DefaultKDFMemory, Threads: crk.DefaultKDFThreads,
+			}, "")
+		}
+
+		result, err := genMgr.CompleteGenerationCeremony(ceremony.ID)
+		require.NoError(t, err)
+
+		share, err := genMgr.GetEncryptedShare(result.CRK.ID, 1)
+		require.NoError(t, err)
+		assert.Equal(t, 1, share.Index)
+		assert.NotEmpty(t, share.EncryptedData)
+
+		_, err = genMgr.GetEncryptedShare(result.CRK.ID, 999)
+		assert.Error(t, err)
+	})
+
+	t.Run("reconstructed shares match original CRK", func(t *testing.T) {
+		manager := crk.NewManager()
+		genMgr := crk.NewGenerationCeremonyManager(manager)
+
+		ceremony, err := genMgr.StartGenerationCeremony("org-1", 3, 2)
+		require.NoError(t, err)
+
+		passwords := []string{"alice-pass", "bob-pass", "charlie-pass"}
+		for i := 1; i <= 3; i++ {
+			salt, _ := crk.GenerateSalt()
+			key := crk.DeriveKey([]byte(passwords[i-1]), salt, crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+			_ = genMgr.SeedShare(ceremony.ID, i, key, salt, crk.KDFParams{
+				Time: crk.DefaultKDFTime, Memory: crk.DefaultKDFMemory, Threads: crk.DefaultKDFThreads,
+			}, passwords[i-1])
+		}
+
+		result, err := genMgr.CompleteGenerationCeremony(ceremony.ID)
+		require.NoError(t, err)
+
+		// Decrypt 2 of 3 shares and reconstruct
+		var decryptedShares []models.CRKShare
+		for _, idx := range []int{0, 2} {
+			encShare := result.EncryptedShares[idx]
+			key := crk.DeriveKey([]byte(passwords[idx]), encShare.Salt,
+				encShare.KDFTime, encShare.KDFMemory, encShare.KDFThreads)
+			plaintext, err := crk.DecryptShare(key, encShare.EncryptedData)
+			require.NoError(t, err)
+			decryptedShares = append(decryptedShares, models.CRKShare{
+				Index: encShare.Index,
+				Data:  plaintext,
+			})
+		}
+
+		// Reconstruct should succeed with 2-of-3 threshold
+		privKey, err := manager.Reconstruct(decryptedShares, result.CRK.PublicKey)
+		require.NoError(t, err)
+		assert.NotNil(t, privKey)
+	})
+}

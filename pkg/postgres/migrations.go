@@ -492,6 +492,25 @@ func Migrations() []Migration {
 			CREATE INDEX IF NOT EXISTS idx_dm_sender ON direct_messages(sender_org_id, sender_id, direction) WHERE direction = 'sent';
 			CREATE INDEX IF NOT EXISTS idx_dm_conversation ON direct_messages(conversation_id)`,
 		},
+		{
+			Version:     35,
+			Description: "Create crk_encrypted_shares table",
+			SQL: `CREATE TABLE IF NOT EXISTS crk_encrypted_shares (
+				id UUID PRIMARY KEY,
+				crk_id UUID NOT NULL REFERENCES crks(id) ON DELETE CASCADE,
+				index INT NOT NULL,
+				encrypted_data BYTEA NOT NULL,
+				salt BYTEA NOT NULL,
+				kdf_time INT NOT NULL DEFAULT 3,
+				kdf_memory INT NOT NULL DEFAULT 65536,
+				kdf_threads SMALLINT NOT NULL DEFAULT 4,
+				custodian_id VARCHAR(255),
+				custodian_name VARCHAR(255),
+				created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+				UNIQUE(crk_id, index)
+			);
+			CREATE INDEX IF NOT EXISTS idx_encrypted_shares_crk ON crk_encrypted_shares(crk_id)`,
+		},
 	}
 }
 

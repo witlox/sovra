@@ -627,3 +627,242 @@ func (r *ContextReconstructor) Reconstruct(ctx context.Context, shares []*models
 
 	return key, nil
 }
+
+// =============================================================================
+// Generation Ceremony Manager
+// =============================================================================
+
+// NewGenerationCeremonyManager creates a new generation ceremony manager.
+func NewGenerationCeremonyManager(manager Manager) GenerationCeremonyManager {
+	return &generationCeremonyManagerImpl{
+		ceremonies:     make(map[string]*GenerationCeremony),
+		manager:        manager,
+		encryptedStore: make(map[string][]models.EncryptedCRKShare),
+	}
+}
+
+// NewGenerationCeremonyManagerWithRepo creates a generation ceremony manager with persistence.
+func NewGenerationCeremonyManagerWithRepo(manager Manager, repo EncryptedShareRepository) GenerationCeremonyManager {
+	return &generationCeremonyManagerImpl{
+		ceremonies:     make(map[string]*GenerationCeremony),
+		manager:        manager,
+		encryptedStore: make(map[string][]models.EncryptedCRKShare),
+		repo:           repo,
+	}
+}
+
+type generationCeremonyManagerImpl struct {
+	mu             sync.Mutex
+	ceremonies     map[string]*GenerationCeremony
+	manager        Manager
+	encryptedStore map[string][]models.EncryptedCRKShare // crkID -> shares (in-memory fallback)
+	repo           EncryptedShareRepository
+}
+
+func (g *generationCeremonyManagerImpl) StartGenerationCeremony(orgID string, totalShares, threshold int) (*GenerationCeremony, error) {
+	if totalShares < 2 || threshold < 1 || threshold > totalShares {
+		return nil, errors.ErrInvalidInput
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ceremony := &GenerationCeremony{
+		ID:          uuid.New().String(),
+		OrgID:       orgID,
+		TotalShares: totalShares,
+		Threshold:   threshold,
+		Status:      GenerationCeremonyStatusPending,
+		SeedEntries: make([]SeedEntry, 0),
+		StartedAt:   time.Now(),
+	}
+	g.ceremonies[ceremony.ID] = ceremony
+	return ceremony, nil
+}
+
+func (g *generationCeremonyManagerImpl) SeedShare(ceremonyID string, index int, encryptionKey, salt []byte, kdfParams KDFParams, custodianName string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ceremony, ok := g.ceremonies[ceremonyID]
+	if !ok {
+		return errors.ErrNotFound
+	}
+	if ceremony.Status == GenerationCeremonyStatusComplete {
+		return errors.ErrInvalidInput
+	}
+	if index < 1 || index > ceremony.TotalShares {
+		return errors.ErrInvalidInput
+	}
+
+	// Check for duplicate index
+	for _, entry := range ceremony.SeedEntries {
+		if entry.Index == index {
+			return fmt.Errorf("index %d already seeded: %w", index, errors.ErrInvalidInput)
+		}
+	}
+
+	ceremony.SeedEntries = append(ceremony.SeedEntries, SeedEntry{
+		Index:         index,
+		EncryptionKey: encryptionKey,
+		Salt:          salt,
+		KDFParams:     kdfParams,
+		CustodianName: custodianName,
+	})
+
+	if len(ceremony.SeedEntries) == ceremony.TotalShares {
+		ceremony.Status = GenerationCeremonyStatusSeeded
+	}
+
+	return nil
+}
+
+func (g *generationCeremonyManagerImpl) CompleteGenerationCeremony(ceremonyID string) (*GenerationCeremony, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ceremony, ok := g.ceremonies[ceremonyID]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	if len(ceremony.SeedEntries) != ceremony.TotalShares {
+		return nil, fmt.Errorf("need %d seed entries, have %d: %w",
+			ceremony.TotalShares, len(ceremony.SeedEntries), errors.ErrInvalidInput)
+	}
+
+	// Generate CRK with Shamir split
+	crk, err := g.manager.Generate(ceremony.OrgID, ceremony.TotalShares, ceremony.Threshold)
+	if err != nil {
+		return nil, fmt.Errorf("generate CRK: %w", err)
+	}
+
+	// Get plaintext shares
+	shares, err := g.manager.GetShares(crk.ID)
+	if err != nil {
+		return nil, fmt.Errorf("get shares: %w", err)
+	}
+
+	// Build index-to-seed lookup
+	seedByIndex := make(map[int]*SeedEntry, len(ceremony.SeedEntries))
+	for i := range ceremony.SeedEntries {
+		seedByIndex[ceremony.SeedEntries[i].Index] = &ceremony.SeedEntries[i]
+	}
+
+	// Encrypt each share with the corresponding seed's encryption key
+	encryptedShares := make([]models.EncryptedCRKShare, 0, len(shares))
+	for i, share := range shares {
+		shareIndex := i + 1
+		seed, ok := seedByIndex[shareIndex]
+		if !ok {
+			return nil, fmt.Errorf("no seed entry for share index %d: %w", shareIndex, errors.ErrInvalidInput)
+		}
+
+		encrypted, err := EncryptShare(seed.EncryptionKey, share.Data)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt share %d: %w", shareIndex, err)
+		}
+
+		encShare := models.EncryptedCRKShare{
+			ID:            uuid.New().String(),
+			CRKID:         crk.ID,
+			CustodianName: seed.CustodianName,
+			Index:         shareIndex,
+			EncryptedData: encrypted,
+			Salt:          seed.Salt,
+			KDFTime:       seed.KDFParams.Time,
+			KDFMemory:     seed.KDFParams.Memory,
+			KDFThreads:    seed.KDFParams.Threads,
+			CreatedAt:     time.Now(),
+		}
+		encryptedShares = append(encryptedShares, encShare)
+
+		// Persist if repo available
+		if g.repo != nil {
+			if err := g.repo.CreateEncryptedShare(context.Background(), &encShare); err != nil {
+				return nil, fmt.Errorf("persist encrypted share %d: %w", shareIndex, err)
+			}
+		}
+	}
+
+	// Store in memory
+	g.encryptedStore[crk.ID] = encryptedShares
+
+	// Zero all encryption keys
+	for i := range ceremony.SeedEntries {
+		ZeroBytes(ceremony.SeedEntries[i].EncryptionKey)
+	}
+
+	ceremony.EncryptedShares = encryptedShares
+	ceremony.CRK = crk
+	ceremony.Status = GenerationCeremonyStatusComplete
+
+	return ceremony, nil
+}
+
+func (g *generationCeremonyManagerImpl) GetGenerationCeremony(ceremonyID string) (*GenerationCeremony, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ceremony, ok := g.ceremonies[ceremonyID]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+
+	// Return a copy without encryption keys
+	result := *ceremony
+	safeSeedEntries := make([]SeedEntry, len(ceremony.SeedEntries))
+	for i, e := range ceremony.SeedEntries {
+		safeSeedEntries[i] = SeedEntry{
+			Index:         e.Index,
+			Salt:          e.Salt,
+			KDFParams:     e.KDFParams,
+			CustodianName: e.CustodianName,
+		}
+	}
+	result.SeedEntries = safeSeedEntries
+	return &result, nil
+}
+
+func (g *generationCeremonyManagerImpl) CancelGenerationCeremony(ceremonyID string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ceremony, ok := g.ceremonies[ceremonyID]
+	if !ok {
+		return errors.ErrNotFound
+	}
+
+	// Zero any stored encryption keys
+	for i := range ceremony.SeedEntries {
+		ZeroBytes(ceremony.SeedEntries[i].EncryptionKey)
+	}
+
+	delete(g.ceremonies, ceremonyID)
+	return nil
+}
+
+func (g *generationCeremonyManagerImpl) GetEncryptedShare(crkID string, index int) (*models.EncryptedCRKShare, error) {
+	// Try repo first
+	if g.repo != nil {
+		share, err := g.repo.GetEncryptedShareByIndex(context.Background(), crkID, index)
+		if err == nil {
+			return share, nil
+		}
+	}
+
+	// Fallback to in-memory
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	shares, ok := g.encryptedStore[crkID]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+
+	for i := range shares {
+		if shares[i].Index == index {
+			return &shares[i], nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}

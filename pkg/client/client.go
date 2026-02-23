@@ -504,6 +504,88 @@ func (c *Client) CancelCRKCeremony(ctx context.Context, ceremonyID string) error
 	return c.request(ctx, http.MethodDelete, "/api/v1/crk/ceremony/"+ceremonyID, nil, nil)
 }
 
+// Generation Ceremony API (password-protected shares)
+
+// StartGenerationCeremonyRequest represents a generation ceremony start request.
+type StartGenerationCeremonyRequest struct {
+	OrgID       string `json:"org_id"`
+	TotalShares int    `json:"total_shares"`
+	Threshold   int    `json:"threshold"`
+}
+
+// GenerationCeremonyResponse represents a generation ceremony response.
+type GenerationCeremonyResponse struct {
+	ID              string                     `json:"id"`
+	OrgID           string                     `json:"org_id"`
+	TotalShares     int                        `json:"total_shares"`
+	Threshold       int                        `json:"threshold"`
+	Status          string                     `json:"status"`
+	SeedEntries     json.RawMessage            `json:"seed_entries,omitempty"`
+	EncryptedShares []models.EncryptedCRKShare `json:"encrypted_shares,omitempty"`
+	CRK             *models.CRK                `json:"crk,omitempty"`
+}
+
+// StartGenerationCeremony starts a password-protected CRK generation ceremony.
+func (c *Client) StartGenerationCeremony(ctx context.Context, orgID string, totalShares, threshold int) (*GenerationCeremonyResponse, error) {
+	var result GenerationCeremonyResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/crk/generate-ceremony/start",
+		StartGenerationCeremonyRequest{OrgID: orgID, TotalShares: totalShares, Threshold: threshold}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SeedGenerationShareRequest represents a seed share request.
+type SeedGenerationShareRequest struct {
+	Index         int    `json:"index"`
+	EncryptionKey []byte `json:"encryption_key"`
+	Salt          []byte `json:"salt"`
+	KDFParams     struct {
+		Time    uint32 `json:"time"`
+		Memory  uint32 `json:"memory"`
+		Threads uint8  `json:"threads"`
+	} `json:"kdf_params"`
+	CustodianName string `json:"custodian_name"`
+}
+
+// SeedGenerationShare seeds a shareholder's encryption key for a generation ceremony.
+func (c *Client) SeedGenerationShare(ctx context.Context, ceremonyID string, req SeedGenerationShareRequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/crk/generate-ceremony/"+ceremonyID+"/seed", req, nil)
+}
+
+// CompleteGenerationCeremony completes a generation ceremony and returns the CRK with encrypted shares.
+func (c *Client) CompleteGenerationCeremony(ctx context.Context, ceremonyID string) (*GenerationCeremonyResponse, error) {
+	var result GenerationCeremonyResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/crk/generate-ceremony/"+ceremonyID+"/complete", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetGenerationCeremony retrieves the status of a generation ceremony.
+func (c *Client) GetGenerationCeremony(ctx context.Context, ceremonyID string) (*GenerationCeremonyResponse, error) {
+	var result GenerationCeremonyResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/crk/generate-ceremony/"+ceremonyID, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// CancelGenerationCeremony cancels an in-progress generation ceremony.
+func (c *Client) CancelGenerationCeremony(ctx context.Context, ceremonyID string) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/crk/generate-ceremony/"+ceremonyID, nil, nil)
+}
+
+// GetEncryptedShare retrieves a specific encrypted share.
+func (c *Client) GetEncryptedShare(ctx context.Context, crkID string, index int) (*models.EncryptedCRKShare, error) {
+	var result models.EncryptedCRKShare
+	path := fmt.Sprintf("/api/v1/crk/shares/%s/%d", crkID, index)
+	if err := c.request(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Health checks
 
 // HealthResponse represents a health check response.

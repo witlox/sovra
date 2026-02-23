@@ -357,6 +357,178 @@ func TestProductionCRKCeremony(t *testing.T) {
 	})
 }
 
+// TestProductionPasswordProtectedCRKCeremony tests password-protected CRK generation with real PostgreSQL.
+func TestProductionPasswordProtectedCRKCeremony(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping acceptance test in short mode")
+	}
+
+	ctx := context.Background()
+
+	integration.WithPostgres(t, func(t *testing.T, pgc *integration.PostgresContainer) {
+		db, err := postgres.NewFromDSN(ctx, pgc.ConnectionString())
+		require.NoError(t, err)
+		defer db.Close()
+
+		err = postgres.Migrate(ctx, db)
+		require.NoError(t, err)
+
+		// Create organization
+		orgRepo := postgres.NewOrganizationRepository(db)
+		org := &models.Organization{
+			ID:        uuid.New().String(),
+			Name:      "ETH Zurich - Password Protected",
+			PublicKey: []byte("eth-public-key"),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		require.NoError(t, orgRepo.Create(ctx, org))
+
+		crkManager := crk.NewManager()
+		encShareRepo := postgres.NewEncryptedShareRepository(db)
+		genCeremonyMgr := crk.NewGenerationCeremonyManagerWithRepo(crkManager, encShareRepo)
+		crkRepo := postgres.NewCRKRepository(db)
+
+		t.Run("Scenario: Full password-protected generation ceremony with persistence", func(t *testing.T) {
+			passwords := []string{"alice-pass", "bob-pass", "charlie-pass"}
+			var result *crk.GenerationCeremony
+
+			testutil.NewScenario(t, "Production Password-Protected CRK Generation").
+				Given("an organization with 3 custodians", func() {
+					// Organization exists
+				}).
+				When("a password-protected generation ceremony completes", func() {
+					ceremony, err := genCeremonyMgr.StartGenerationCeremony(org.ID, 3, 2)
+					require.NoError(t, err)
+					assert.Equal(t, crk.GenerationCeremonyStatusPending, ceremony.Status)
+
+					for i := 1; i <= 3; i++ {
+						salt, err := crk.GenerateSalt()
+						require.NoError(t, err)
+						key := crk.DeriveKey([]byte(passwords[i-1]), salt,
+							crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+						err = genCeremonyMgr.SeedShare(ceremony.ID, i, key, salt, crk.KDFParams{
+							Time: crk.DefaultKDFTime, Memory: crk.DefaultKDFMemory, Threads: crk.DefaultKDFThreads,
+						}, "custodian-"+passwords[i-1])
+						require.NoError(t, err)
+					}
+
+					result, err = genCeremonyMgr.CompleteGenerationCeremony(ceremony.ID)
+					require.NoError(t, err)
+				}).
+				Then("the CRK should be persisted in database", func() {
+					// Store the CRK
+					err := crkRepo.Create(ctx, result.CRK)
+					require.NoError(t, err)
+
+					// Verify it can be retrieved
+					retrieved, err := crkRepo.Get(ctx, result.CRK.ID)
+					require.NoError(t, err)
+					assert.Equal(t, result.CRK.ID, retrieved.ID)
+					assert.Equal(t, org.ID, retrieved.OrgID)
+				}).
+				And("encrypted shares should be persisted", func() {
+					// Store encrypted shares
+					for _, encShare := range result.EncryptedShares {
+						encShare.CRKID = result.CRK.ID
+						err := encShareRepo.CreateEncryptedShare(ctx, &encShare)
+						require.NoError(t, err)
+					}
+
+					// Retrieve and verify
+					storedShares, err := encShareRepo.GetEncryptedShares(ctx, result.CRK.ID)
+					require.NoError(t, err)
+					assert.Len(t, storedShares, 3)
+
+					for _, share := range storedShares {
+						assert.NotEmpty(t, share.EncryptedData)
+						assert.NotEmpty(t, share.Salt)
+						assert.Equal(t, uint32(crk.DefaultKDFTime), share.KDFTime)
+					}
+				}).
+				And("individual shares should be retrievable by index", func() {
+					share, err := encShareRepo.GetEncryptedShareByIndex(ctx, result.CRK.ID, 1)
+					require.NoError(t, err)
+					assert.Equal(t, 1, share.Index)
+					assert.NotEmpty(t, share.EncryptedData)
+				}).
+				And("shares should decrypt with correct passwords and reconstruct CRK", func() {
+					// Decrypt 2 shares (threshold) using correct passwords
+					var decryptedShares []models.CRKShare
+					for _, idx := range []int{0, 2} { // shares 1 and 3
+						stored, err := encShareRepo.GetEncryptedShareByIndex(ctx, result.CRK.ID, idx+1)
+						require.NoError(t, err)
+
+						key := crk.DeriveKey([]byte(passwords[idx]), stored.Salt,
+							stored.KDFTime, stored.KDFMemory, stored.KDFThreads)
+						plaintext, err := crk.DecryptShare(key, stored.EncryptedData)
+						require.NoError(t, err)
+						decryptedShares = append(decryptedShares, models.CRKShare{
+							Index: stored.Index,
+							Data:  plaintext,
+						})
+					}
+
+					// Reconstruct and verify
+					privKey, err := crkManager.Reconstruct(decryptedShares, result.CRK.PublicKey)
+					require.NoError(t, err)
+					assert.NotNil(t, privKey)
+
+					// Sign and verify to confirm key is correct
+					data := []byte("test-data-for-signing")
+					signature, err := crkManager.Sign(decryptedShares, result.CRK.PublicKey, data)
+					require.NoError(t, err)
+					valid, err := crkManager.Verify(result.CRK.PublicKey, data, signature)
+					require.NoError(t, err)
+					assert.True(t, valid)
+				})
+		})
+
+		t.Run("Scenario: Wrong password fails to decrypt stored share", func(t *testing.T) {
+			passwords := []string{"pass-x", "pass-y"}
+			var result *crk.GenerationCeremony
+
+			testutil.NewScenario(t, "Wrong Password Decryption Failure").
+				Given("a completed password-protected ceremony with persisted shares", func() {
+					ceremony, err := genCeremonyMgr.StartGenerationCeremony(org.ID, 2, 2)
+					require.NoError(t, err)
+					for i := 1; i <= 2; i++ {
+						salt, _ := crk.GenerateSalt()
+						key := crk.DeriveKey([]byte(passwords[i-1]), salt,
+							crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+						err := genCeremonyMgr.SeedShare(ceremony.ID, i, key, salt, crk.KDFParams{
+							Time: crk.DefaultKDFTime, Memory: crk.DefaultKDFMemory, Threads: crk.DefaultKDFThreads,
+						}, "")
+						require.NoError(t, err)
+					}
+					result, err = genCeremonyMgr.CompleteGenerationCeremony(ceremony.ID)
+					require.NoError(t, err)
+
+					// Persist
+					err = crkRepo.Create(ctx, result.CRK)
+					require.NoError(t, err)
+					for _, encShare := range result.EncryptedShares {
+						encShare.CRKID = result.CRK.ID
+						err := encShareRepo.CreateEncryptedShare(ctx, &encShare)
+						require.NoError(t, err)
+					}
+				}).
+				When("retrieving a stored share", func() {
+					// Retrieved in Then
+				}).
+				Then("decryption with wrong password should fail", func() {
+					stored, err := encShareRepo.GetEncryptedShareByIndex(ctx, result.CRK.ID, 1)
+					require.NoError(t, err)
+
+					wrongKey := crk.DeriveKey([]byte("wrong-password"), stored.Salt,
+						stored.KDFTime, stored.KDFMemory, stored.KDFThreads)
+					_, err = crk.DecryptShare(wrongKey, stored.EncryptedData)
+					assert.Error(t, err)
+				})
+		})
+	})
+}
+
 // TestProductionCRKThresholdValidation tests threshold requirements.
 func TestProductionCRKThresholdValidation(t *testing.T) {
 	if testing.Short() {

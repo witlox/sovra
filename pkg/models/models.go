@@ -33,6 +33,22 @@ type CRKShare struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// EncryptedCRKShare represents a password-protected CRK share.
+// The share data is encrypted with a key derived from the custodian's password via Argon2id.
+type EncryptedCRKShare struct {
+	ID            string    `json:"id"`
+	CRKID         string    `json:"crk_id"`
+	CustodianID   string    `json:"custodian_id,omitempty"`
+	CustodianName string    `json:"custodian_name,omitempty"`
+	Index         int       `json:"index"`
+	EncryptedData []byte    `json:"encrypted_data"` // AES-256-GCM(nonce || ciphertext)
+	Salt          []byte    `json:"salt"`           // Argon2id salt (16 bytes)
+	KDFTime       uint32    `json:"kdf_time"`
+	KDFMemory     uint32    `json:"kdf_memory"` // KiB
+	KDFThreads    uint8     `json:"kdf_threads"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 // CRK represents a Customer Root Key - the cryptographic root of trust for an organization.
 type CRK struct {
 	ID          string    `json:"id"`

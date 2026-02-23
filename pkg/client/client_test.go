@@ -1636,3 +1636,163 @@ func TestDeleteMessageNotFound(t *testing.T) {
 	err := c.DeleteMessage(context.Background(), "nonexistent")
 	require.Error(t, err)
 }
+
+// ==========================================================================
+// Generation Ceremony Client Tests
+// ==========================================================================
+
+func TestStartGenerationCeremony(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/crk/generate-ceremony/start", func(w http.ResponseWriter, r *http.Request) {
+			var req StartGenerationCeremonyRequest
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			assert.Equal(t, "org-1", req.OrgID)
+			assert.Equal(t, 5, req.TotalShares)
+			assert.Equal(t, 3, req.Threshold)
+			writeJSONResponse(w, http.StatusOK, GenerationCeremonyResponse{
+				ID:          "cer-1",
+				OrgID:       "org-1",
+				TotalShares: 5,
+				Threshold:   3,
+				Status:      "pending",
+			})
+		})
+	})
+	resp, err := c.StartGenerationCeremony(context.Background(), "org-1", 5, 3)
+	require.NoError(t, err)
+	assert.Equal(t, "cer-1", resp.ID)
+	assert.Equal(t, "pending", resp.Status)
+	assert.Equal(t, 5, resp.TotalShares)
+	assert.Equal(t, 3, resp.Threshold)
+}
+
+func TestStartGenerationCeremonyError(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/crk/generate-ceremony/start", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusBadRequest, ErrorResponse{Error: "invalid threshold"})
+		})
+	})
+	_, err := c.StartGenerationCeremony(context.Background(), "org-1", 3, 5)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid threshold")
+}
+
+func TestSeedGenerationShare(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/crk/generate-ceremony/{id}/seed", func(w http.ResponseWriter, r *http.Request) {
+			id := chi.URLParam(r, "id")
+			assert.Equal(t, "cer-1", id)
+			var req SeedGenerationShareRequest
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			assert.Equal(t, 1, req.Index)
+			assert.NotEmpty(t, req.EncryptionKey)
+			assert.NotEmpty(t, req.Salt)
+			writeJSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+		})
+	})
+	err := c.SeedGenerationShare(context.Background(), "cer-1", SeedGenerationShareRequest{
+		Index:         1,
+		EncryptionKey: []byte("test-key-32-bytes-long-for-aes!!"),
+		Salt:          []byte("16-byte-salt!!!!"),
+		KDFParams: struct {
+			Time    uint32 `json:"time"`
+			Memory  uint32 `json:"memory"`
+			Threads uint8  `json:"threads"`
+		}{Time: 3, Memory: 65536, Threads: 4},
+		CustodianName: "alice",
+	})
+	require.NoError(t, err)
+}
+
+func TestCompleteGenerationCeremony(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/crk/generate-ceremony/{id}/complete", func(w http.ResponseWriter, r *http.Request) {
+			id := chi.URLParam(r, "id")
+			assert.Equal(t, "cer-1", id)
+			writeJSONResponse(w, http.StatusOK, GenerationCeremonyResponse{
+				ID:     "cer-1",
+				Status: "completed",
+				CRK:    &models.CRK{ID: "crk-1", OrgID: "org-1"},
+				EncryptedShares: []models.EncryptedCRKShare{
+					{ID: "es-1", Index: 1, EncryptedData: []byte("enc1"), Salt: []byte("salt1")},
+				},
+			})
+		})
+	})
+	resp, err := c.CompleteGenerationCeremony(context.Background(), "cer-1")
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	assert.NotNil(t, resp.CRK)
+	assert.Len(t, resp.EncryptedShares, 1)
+}
+
+func TestGetGenerationCeremony(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/crk/generate-ceremony/{id}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, GenerationCeremonyResponse{
+				ID:     "cer-1",
+				Status: "pending",
+			})
+		})
+	})
+	resp, err := c.GetGenerationCeremony(context.Background(), "cer-1")
+	require.NoError(t, err)
+	assert.Equal(t, "cer-1", resp.ID)
+	assert.Equal(t, "pending", resp.Status)
+}
+
+func TestGetGenerationCeremonyNotFound(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/crk/generate-ceremony/{id}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusNotFound, ErrorResponse{Error: "not found"})
+		})
+	})
+	_, err := c.GetGenerationCeremony(context.Background(), "nonexistent")
+	require.Error(t, err)
+}
+
+func TestCancelGenerationCeremony(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Delete("/api/v1/crk/generate-ceremony/{id}", func(w http.ResponseWriter, r *http.Request) {
+			id := chi.URLParam(r, "id")
+			assert.Equal(t, "cer-1", id)
+			writeJSONResponse(w, http.StatusOK, map[string]string{"status": "cancelled"})
+		})
+	})
+	err := c.CancelGenerationCeremony(context.Background(), "cer-1")
+	require.NoError(t, err)
+}
+
+func TestGetEncryptedShare(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/crk/shares/{crkId}/{index}", func(w http.ResponseWriter, r *http.Request) {
+			crkID := chi.URLParam(r, "crkId")
+			assert.Equal(t, "crk-1", crkID)
+			writeJSONResponse(w, http.StatusOK, models.EncryptedCRKShare{
+				ID:            "es-1",
+				CRKID:         "crk-1",
+				Index:         1,
+				EncryptedData: []byte("encrypted"),
+				Salt:          []byte("salt"),
+				KDFTime:       3,
+				KDFMemory:     65536,
+				KDFThreads:    4,
+			})
+		})
+	})
+	share, err := c.GetEncryptedShare(context.Background(), "crk-1", 1)
+	require.NoError(t, err)
+	assert.Equal(t, "crk-1", share.CRKID)
+	assert.Equal(t, 1, share.Index)
+	assert.NotEmpty(t, share.EncryptedData)
+}
+
+func TestGetEncryptedShareNotFound(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/crk/shares/{crkId}/{index}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusNotFound, ErrorResponse{Error: "share not found"})
+		})
+	})
+	_, err := c.GetEncryptedShare(context.Background(), "nonexistent", 99)
+	require.Error(t, err)
+}

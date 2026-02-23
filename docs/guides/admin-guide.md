@@ -211,6 +211,12 @@ sovra --cert admin.crt --key admin.key identity group create \
 sovra --cert admin.crt --key admin.key identity group list
 ```
 
+### Getting Group Details
+
+```bash
+sovra --cert admin.crt --key admin.key identity group get <group-id>
+```
+
 ### Adding and Removing Members (Air-Gap Mode)
 
 In air-gap deployments (no IdP configured), manage group membership manually:
@@ -875,6 +881,33 @@ sovra crk ceremony complete <ceremony-id>
 
 # Cancel if needed
 sovra crk ceremony cancel <ceremony-id>
+```
+
+### Password-Protected CRK Generation
+
+For production deployments, use the generation ceremony flow to ensure the admin
+never sees plaintext share data. Each shareholder provides a password before the
+CRK is generated.
+
+```bash
+# 1. Admin starts the ceremony
+sovra crk generate-ceremony start --org-id <ORG_ID> --shares 5 --threshold 3
+
+# 2. Each shareholder seeds their index (prompts for password)
+sovra crk generate-ceremony seed <ceremony-id> --index 1 --custodian-name "Alice"
+sovra crk generate-ceremony seed <ceremony-id> --index 2 --custodian-name "Bob"
+# ... repeat for all shareholders
+
+# 3. Admin completes the ceremony
+sovra crk generate-ceremony complete <ceremony-id> --output crk.json
+```
+
+The output file contains only encrypted share blobs, salts, and KDF parameters.
+To use an encrypted share in a ceremony, `add-share` auto-detects the format:
+
+```bash
+sovra crk ceremony add-share <ceremony-id> --share-file share.json
+# CLI prompts for password, decrypts locally, submits plaintext over mTLS
 ```
 
 ### CRK Rotation

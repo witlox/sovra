@@ -48,22 +48,23 @@ func DefaultRouterConfig() *RouterConfig {
 
 // Services holds all service dependencies for the API.
 type Services struct {
-	Workspace         workspace.Service
-	Federation        federation.Service
-	Policy            policy.Service
-	Audit             audit.Service
-	Edge              edge.Service
-	CRKManager        crk.Manager
-	CRKCeremony       crk.CeremonyManager
-	Identity          *identity.Manager
-	PKI               *vault.PKIClient
-	EmergencyAccess   *identity.EmergencyAccessManager
-	AccountRecovery   *identity.AccountRecoveryManager
-	Compliance        *compliance.ReportGenerator
-	RotationScheduler *rotation.Scheduler
-	GroupBindingRepo  workspace.GroupBindingRepository
-	Backup            backup.Service
-	Messaging         messaging.Service
+	Workspace             workspace.Service
+	Federation            federation.Service
+	Policy                policy.Service
+	Audit                 audit.Service
+	Edge                  edge.Service
+	CRKManager            crk.Manager
+	CRKCeremony           crk.CeremonyManager
+	CRKGenerationCeremony crk.GenerationCeremonyManager
+	Identity              *identity.Manager
+	PKI                   *vault.PKIClient
+	EmergencyAccess       *identity.EmergencyAccessManager
+	AccountRecovery       *identity.AccountRecoveryManager
+	Compliance            *compliance.ReportGenerator
+	RotationScheduler     *rotation.Scheduler
+	GroupBindingRepo      workspace.GroupBindingRepository
+	Backup                backup.Service
+	Messaging             messaging.Service
 }
 
 // NewRouter creates a new chi router with all middleware and routes.
@@ -303,6 +304,17 @@ func registerCRKRoutes(r chi.Router, services *Services) {
 		r.Post("/ceremony/{id}/share", handler.AddShare)
 		r.Post("/ceremony/{id}/complete", handler.CompleteCeremony)
 		r.Delete("/ceremony/{id}", handler.CancelCeremony)
+
+		// Generation ceremony (password-protected shares)
+		if services.CRKGenerationCeremony != nil {
+			genHandler := NewGenerationCeremonyHandler(services.CRKGenerationCeremony)
+			r.Post("/generate-ceremony/start", genHandler.Start)
+			r.Post("/generate-ceremony/{id}/seed", genHandler.Seed)
+			r.Post("/generate-ceremony/{id}/complete", genHandler.Complete)
+			r.Get("/generate-ceremony/{id}", genHandler.Status)
+			r.Delete("/generate-ceremony/{id}", genHandler.Cancel)
+			r.Get("/shares/{crkId}/{index}", genHandler.GetEncryptedShare)
+		}
 	})
 }
 

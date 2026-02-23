@@ -23,6 +23,7 @@ import (
 	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/pkg/client"
 	"github.com/witlox/sovra/pkg/models"
+	"golang.org/x/term"
 )
 
 var version = "dev"
@@ -153,14 +154,30 @@ func init() {
 
 	crkRotateCmd.Flags().Int("threshold", 3, "Threshold for rotation ceremony")
 
+	// Generate ceremony (password-protected shares)
+	crkGenCeremonyStartCmd.Flags().Int("shares", 5, "Total number of shares")
+	crkGenCeremonyStartCmd.Flags().Int("threshold", 3, "Threshold required to reconstruct")
+	crkGenCeremonyStartCmd.Flags().String("org-id", "", "Organization ID")
+	crkGenCeremonySeedCmd.Flags().Int("index", 0, "Share index (1-based)")
+	crkGenCeremonySeedCmd.Flags().String("custodian-name", "", "Custodian name")
+	crkGenCeremonyCompleteCmd.Flags().String("output", "", "Output file for encrypted shares")
+
+	crkGenCeremonyCmd.AddCommand(crkGenCeremonyStartCmd)
+	crkGenCeremonyCmd.AddCommand(crkGenCeremonySeedCmd)
+	crkGenCeremonyCmd.AddCommand(crkGenCeremonyStatusCmd)
+	crkGenCeremonyCmd.AddCommand(crkGenCeremonyCompleteCmd)
+	crkGenCeremonyCmd.AddCommand(crkGenCeremonyCancelCmd)
+
 	crkCmd.AddCommand(crkGenerateCmd)
 	crkCmd.AddCommand(crkSignCmd)
 	crkCmd.AddCommand(crkVerifyCmd)
 	crkCmd.AddCommand(crkCeremonyCmd)
 	crkCmd.AddCommand(crkRotateCmd)
+	crkCmd.AddCommand(crkGenCeremonyCmd)
 }
 
 func runCRKGenerate(cmd *cobra.Command, args []string) error {
+	fmt.Fprintln(os.Stderr, "WARNING: 'crk generate' outputs plaintext shares. Consider using 'crk generate-ceremony' for password-protected shares.")
 	orgID, _ := cmd.Flags().GetString("org-id")
 	if orgID == "" {
 		orgID, _ = cmd.Root().PersistentFlags().GetString("org-id")
@@ -252,10 +269,28 @@ func runCRKSign(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read shares file: %w", err)
 	}
 
+	// Try encrypted shares format first
+	var encSharesInput struct {
+		EncryptedShares []models.EncryptedCRKShare `json:"encrypted_shares"`
+	}
 	var sharesInput struct {
 		Shares []models.CRKShare `json:"shares"`
 	}
-	if err := json.Unmarshal(sharesData, &sharesInput); err != nil {
+
+	if json.Unmarshal(sharesData, &encSharesInput) == nil && len(encSharesInput.EncryptedShares) > 0 {
+		// Decrypt each share with password
+		for i := range encSharesInput.EncryptedShares {
+			plaintext, err := readPasswordForShare(&encSharesInput.EncryptedShares[i])
+			if err != nil {
+				return fmt.Errorf("decrypt share %d: %w", encSharesInput.EncryptedShares[i].Index, err)
+			}
+			sharesInput.Shares = append(sharesInput.Shares, models.CRKShare{
+				Index: encSharesInput.EncryptedShares[i].Index,
+				Data:  plaintext,
+				CRKID: encSharesInput.EncryptedShares[i].CRKID,
+			})
+		}
+	} else if err := json.Unmarshal(sharesData, &sharesInput); err != nil {
 		return fmt.Errorf("failed to parse shares: %w", err)
 	}
 
@@ -380,7 +415,21 @@ var crkCeremonyAddShareCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("read share file: %w", err)
 			}
-			if err := json.Unmarshal(content, &share); err != nil {
+
+			// Auto-detect encrypted share format
+			var encShare models.EncryptedCRKShare
+			if json.Unmarshal(content, &encShare) == nil && len(encShare.EncryptedData) > 0 && len(encShare.Salt) > 0 {
+				// Encrypted share — prompt for password and decrypt locally
+				plaintext, err := readPasswordForShare(&encShare)
+				if err != nil {
+					return fmt.Errorf("decrypt share: %w", err)
+				}
+				share = models.CRKShare{
+					Index: encShare.Index,
+					Data:  plaintext,
+					CRKID: encShare.CRKID,
+				}
+			} else if err := json.Unmarshal(content, &share); err != nil {
 				return fmt.Errorf("parse share file: %w", err)
 			}
 		} else if shareData != "" {
@@ -481,6 +530,221 @@ var crkRotateCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// Generate Ceremony Commands (password-protected shares)
+
+var crkGenCeremonyCmd = &cobra.Command{
+	Use:   "generate-ceremony",
+	Short: "Password-protected CRK generation ceremony",
+	Long:  `Manage CRK generation ceremonies where each shareholder provides a password to encrypt their share.`,
+}
+
+var crkGenCeremonyStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start a generation ceremony",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Flags().GetString("org-id")
+		if orgID == "" {
+			orgID, _ = cmd.Root().PersistentFlags().GetString("org-id")
+		}
+		if orgID == "" {
+			return fmt.Errorf("--org-id is required")
+		}
+
+		shares, _ := cmd.Flags().GetInt("shares")
+		threshold, _ := cmd.Flags().GetInt("threshold")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.StartGenerationCeremony(ctx, orgID, shares, threshold)
+		if err != nil {
+			return fmt.Errorf("start generation ceremony: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Generation ceremony started: %s\nShares: %d\nThreshold: %d\nStatus: %s\n",
+				resp.ID, resp.TotalShares, resp.Threshold, resp.Status)
+			fmt.Println("\nEach shareholder should now run:")
+			fmt.Printf("  sovra crk generate-ceremony seed %s --index N --custodian-name \"Name\"\n", resp.ID)
+		}
+		return nil
+	},
+}
+
+var crkGenCeremonySeedCmd = &cobra.Command{
+	Use:   "seed [ceremony-id]",
+	Short: "Seed a share with a password (run by each shareholder)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		index, _ := cmd.Flags().GetInt("index")
+		custodianName, _ := cmd.Flags().GetString("custodian-name")
+
+		if index < 1 {
+			return fmt.Errorf("--index is required (1-based)")
+		}
+		if custodianName == "" {
+			return fmt.Errorf("--custodian-name is required")
+		}
+
+		// Prompt for password (hidden input)
+		fmt.Fprint(os.Stderr, "Enter password for share encryption: ")
+		password, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return fmt.Errorf("read password: %w", err)
+		}
+
+		fmt.Fprint(os.Stderr, "Confirm password: ")
+		confirm, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return fmt.Errorf("read password confirmation: %w", err)
+		}
+
+		if string(password) != string(confirm) {
+			return fmt.Errorf("passwords do not match")
+		}
+
+		// Generate salt and derive key client-side
+		salt, err := crk.GenerateSalt()
+		if err != nil {
+			return fmt.Errorf("generate salt: %w", err)
+		}
+
+		key := crk.DeriveKey(password, salt, crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+
+		// Send derived key + salt to server
+		req := client.SeedGenerationShareRequest{
+			Index:         index,
+			EncryptionKey: key,
+			Salt:          salt,
+			CustodianName: custodianName,
+		}
+		req.KDFParams.Time = crk.DefaultKDFTime
+		req.KDFParams.Memory = crk.DefaultKDFMemory
+		req.KDFParams.Threads = crk.DefaultKDFThreads
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.SeedGenerationShare(ctx, args[0], req); err != nil {
+			return fmt.Errorf("seed share: %w", err)
+		}
+
+		// Zero sensitive data
+		crk.ZeroBytes(password)
+		crk.ZeroBytes(confirm)
+		crk.ZeroBytes(key)
+
+		fmt.Printf("Share %d seeded for custodian %q\n", index, custodianName)
+		return nil
+	},
+}
+
+var crkGenCeremonyStatusCmd = &cobra.Command{
+	Use:   "status [ceremony-id]",
+	Short: "Check status of a generation ceremony",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.GetGenerationCeremony(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("get ceremony status: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Ceremony: %s\nStatus: %s\nShares: %d\nThreshold: %d\n",
+				resp.ID, resp.Status, resp.TotalShares, resp.Threshold)
+		}
+		return nil
+	},
+}
+
+var crkGenCeremonyCompleteCmd = &cobra.Command{
+	Use:   "complete [ceremony-id]",
+	Short: "Complete the generation ceremony (generates CRK with encrypted shares)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		output, _ := cmd.Flags().GetString("output")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.CompleteGenerationCeremony(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("complete generation ceremony: %w", err)
+		}
+
+		data, _ := json.MarshalIndent(resp, "", "  ")
+
+		if output != "" {
+			if err := os.WriteFile(output, data, 0600); err != nil {
+				return fmt.Errorf("write output: %w", err)
+			}
+			fmt.Printf("CRK generated with encrypted shares. Written to %s\n", output)
+			if resp.CRK != nil {
+				fmt.Printf("Public Key: %x\n", resp.CRK.PublicKey)
+			}
+		} else {
+			fmt.Println(string(data))
+		}
+		return nil
+	},
+}
+
+var crkGenCeremonyCancelCmd = &cobra.Command{
+	Use:   "cancel [ceremony-id]",
+	Short: "Cancel a generation ceremony",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.CancelGenerationCeremony(ctx, args[0]); err != nil {
+			return fmt.Errorf("cancel generation ceremony: %w", err)
+		}
+
+		fmt.Printf("Generation ceremony cancelled: %s\n", args[0])
+		return nil
+	},
+}
+
+// readPasswordForShare prompts for a password and decrypts an encrypted share.
+func readPasswordForShare(encShare *models.EncryptedCRKShare) ([]byte, error) {
+	fmt.Fprintf(os.Stderr, "Enter password for share %d", encShare.Index)
+	if encShare.CustodianName != "" {
+		fmt.Fprintf(os.Stderr, " (custodian: %s)", encShare.CustodianName)
+	}
+	fmt.Fprint(os.Stderr, ": ")
+
+	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return nil, fmt.Errorf("read password: %w", err)
+	}
+
+	key := crk.DeriveKey(password, encShare.Salt, encShare.KDFTime, encShare.KDFMemory, encShare.KDFThreads)
+	crk.ZeroBytes(password)
+
+	plaintext, err := crk.DecryptShare(key, encShare.EncryptedData)
+	crk.ZeroBytes(key)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt share (wrong password?): %w", err)
+	}
+
+	return plaintext, nil
 }
 
 // ============================================================================

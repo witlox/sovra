@@ -69,6 +69,67 @@ type Ceremony struct {
 	Completed     bool
 }
 
+// GenerationCeremonyStatus represents the state of a generation ceremony.
+type GenerationCeremonyStatus string
+
+const (
+	GenerationCeremonyStatusPending  GenerationCeremonyStatus = "pending"
+	GenerationCeremonyStatusSeeded   GenerationCeremonyStatus = "seeded"
+	GenerationCeremonyStatusComplete GenerationCeremonyStatus = "complete"
+)
+
+// KDFParams holds Argon2id key derivation parameters.
+type KDFParams struct {
+	Time    uint32 `json:"time"`
+	Memory  uint32 `json:"memory"` // KiB
+	Threads uint8  `json:"threads"`
+}
+
+// SeedEntry holds a shareholder's encryption key and metadata for a generation ceremony.
+type SeedEntry struct {
+	Index         int       `json:"index"`
+	EncryptionKey []byte    `json:"-"` // derived key, never serialized
+	Salt          []byte    `json:"salt"`
+	KDFParams     KDFParams `json:"kdf_params"`
+	CustodianName string    `json:"custodian_name"`
+}
+
+// GenerationCeremony represents an in-progress password-protected CRK generation ceremony.
+type GenerationCeremony struct {
+	ID              string                     `json:"id"`
+	OrgID           string                     `json:"org_id"`
+	TotalShares     int                        `json:"total_shares"`
+	Threshold       int                        `json:"threshold"`
+	Status          GenerationCeremonyStatus   `json:"status"`
+	SeedEntries     []SeedEntry                `json:"seed_entries,omitempty"`
+	EncryptedShares []models.EncryptedCRKShare `json:"encrypted_shares,omitempty"`
+	CRK             *models.CRK                `json:"crk,omitempty"`
+	StartedAt       time.Time                  `json:"started_at"`
+}
+
+// GenerationCeremonyManager handles password-protected CRK generation ceremonies.
+type GenerationCeremonyManager interface {
+	// StartGenerationCeremony initiates a new generation ceremony.
+	StartGenerationCeremony(orgID string, totalShares, threshold int) (*GenerationCeremony, error)
+	// SeedShare registers a shareholder's encryption key for a specific share index.
+	SeedShare(ceremonyID string, index int, encryptionKey, salt []byte, kdfParams KDFParams, custodianName string) error
+	// CompleteGenerationCeremony generates the CRK and encrypts shares with the seeded keys.
+	CompleteGenerationCeremony(ceremonyID string) (*GenerationCeremony, error)
+	// GetGenerationCeremony returns the current state of a generation ceremony.
+	GetGenerationCeremony(ceremonyID string) (*GenerationCeremony, error)
+	// CancelGenerationCeremony cancels an in-progress generation ceremony.
+	CancelGenerationCeremony(ceremonyID string) error
+	// GetEncryptedShare retrieves a specific encrypted share.
+	GetEncryptedShare(crkID string, index int) (*models.EncryptedCRKShare, error)
+}
+
+// EncryptedShareRepository handles encrypted CRK share persistence.
+type EncryptedShareRepository interface {
+	CreateEncryptedShare(ctx context.Context, share *models.EncryptedCRKShare) error
+	GetEncryptedShares(ctx context.Context, crkID string) ([]models.EncryptedCRKShare, error)
+	GetEncryptedShareByIndex(ctx context.Context, crkID string, index int) (*models.EncryptedCRKShare, error)
+}
+
 // CeremonyManager handles key ceremony operations.
 type CeremonyManager interface {
 	// StartCeremony initiates a new key ceremony.

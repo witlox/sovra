@@ -1241,6 +1241,121 @@ func (r *CRKRepository) GetShares(ctx context.Context, crkID string) ([]models.C
 }
 
 // =============================================================================
+// Encrypted CRK Share Repository
+// =============================================================================
+
+// EncryptedShareRepository handles encrypted CRK share persistence.
+type EncryptedShareRepository struct {
+	db *DB
+}
+
+// NewEncryptedShareRepository creates a new encrypted share repository.
+func NewEncryptedShareRepository(db *DB) *EncryptedShareRepository {
+	return &EncryptedShareRepository{db: db}
+}
+
+// CreateEncryptedShare persists an encrypted CRK share.
+func (r *EncryptedShareRepository) CreateEncryptedShare(ctx context.Context, share *models.EncryptedCRKShare) error {
+	id, err := uuid.Parse(share.ID)
+	if err != nil {
+		return fmt.Errorf("invalid share ID: %w", err)
+	}
+	crkID, err := uuid.Parse(share.CRKID)
+	if err != nil {
+		return fmt.Errorf("invalid CRK ID: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO crk_encrypted_shares (id, crk_id, index, encrypted_data, salt, kdf_time, kdf_memory, kdf_threads, custodian_id, custodian_name, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		id, crkID, share.Index, share.EncryptedData, share.Salt,
+		share.KDFTime, share.KDFMemory, share.KDFThreads,
+		share.CustodianID, share.CustodianName, share.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create encrypted share: %w", err)
+	}
+	return nil
+}
+
+// GetEncryptedShares retrieves all encrypted shares for a CRK.
+func (r *EncryptedShareRepository) GetEncryptedShares(ctx context.Context, crkID string) ([]models.EncryptedCRKShare, error) {
+	uid, err := uuid.Parse(crkID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid CRK ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, crk_id, index, encrypted_data, salt, kdf_time, kdf_memory, kdf_threads, custodian_id, custodian_name, created_at
+		 FROM crk_encrypted_shares WHERE crk_id = $1 ORDER BY index`,
+		uid,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get encrypted shares: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var shares []models.EncryptedCRKShare
+	for rows.Next() {
+		var share models.EncryptedCRKShare
+		var custodianID, custodianName sql.NullString
+		if err := rows.Scan(
+			&share.ID, &share.CRKID, &share.Index,
+			&share.EncryptedData, &share.Salt,
+			&share.KDFTime, &share.KDFMemory, &share.KDFThreads,
+			&custodianID, &custodianName, &share.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan encrypted share: %w", err)
+		}
+		if custodianID.Valid {
+			share.CustodianID = custodianID.String
+		}
+		if custodianName.Valid {
+			share.CustodianName = custodianName.String
+		}
+		shares = append(shares, share)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate encrypted shares: %w", err)
+	}
+	return shares, nil
+}
+
+// GetEncryptedShareByIndex retrieves a specific encrypted share by CRK ID and index.
+func (r *EncryptedShareRepository) GetEncryptedShareByIndex(ctx context.Context, crkID string, index int) (*models.EncryptedCRKShare, error) {
+	uid, err := uuid.Parse(crkID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid CRK ID: %w", err)
+	}
+
+	var share models.EncryptedCRKShare
+	var custodianID, custodianName sql.NullString
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, crk_id, index, encrypted_data, salt, kdf_time, kdf_memory, kdf_threads, custodian_id, custodian_name, created_at
+		 FROM crk_encrypted_shares WHERE crk_id = $1 AND index = $2`,
+		uid, index,
+	).Scan(
+		&share.ID, &share.CRKID, &share.Index,
+		&share.EncryptedData, &share.Salt,
+		&share.KDFTime, &share.KDFMemory, &share.KDFThreads,
+		&custodianID, &custodianName, &share.CreatedAt,
+	)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get encrypted share: %w", err)
+	}
+	if custodianID.Valid {
+		share.CustodianID = custodianID.String
+	}
+	if custodianName.Valid {
+		share.CustodianName = custodianName.String
+	}
+	return &share, nil
+}
+
+// =============================================================================
 // Edge Node Repository
 // =============================================================================
 

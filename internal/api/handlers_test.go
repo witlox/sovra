@@ -4217,3 +4217,218 @@ func TestDirectMessageRouterIntegration(t *testing.T) {
 		assert.NotEqual(t, http.StatusNotFound, w.Code)
 	})
 }
+
+// =============================================================================
+// Generation Ceremony Handler Tests
+// =============================================================================
+
+func TestGenerationCeremonyHandlerStart(t *testing.T) {
+	crkMgr := newRealCRKManager()
+	genMgr := crk.NewGenerationCeremonyManager(crkMgr)
+	handler := api.NewGenerationCeremonyHandler(genMgr)
+
+	t.Run("starts generation ceremony", func(t *testing.T) {
+		reqBody := map[string]any{
+			"org_id":       "org-eth",
+			"total_shares": 5,
+			"threshold":    3,
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/crk/generate-ceremony/start", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Start(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+
+		var resp map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		assert.NotEmpty(t, resp["id"])
+		assert.Equal(t, "pending", resp["status"])
+	})
+
+	t.Run("returns 400 for invalid shares", func(t *testing.T) {
+		reqBody := map[string]any{
+			"org_id":       "org-eth",
+			"total_shares": 1,
+			"threshold":    3,
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/crk/generate-ceremony/start", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Start(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/crk/generate-ceremony/start", bytes.NewReader([]byte("bad")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Start(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestGenerationCeremonyHandlerSeed(t *testing.T) {
+	crkMgr := newRealCRKManager()
+	genMgr := crk.NewGenerationCeremonyManager(crkMgr)
+	handler := api.NewGenerationCeremonyHandler(genMgr)
+
+	t.Run("seeds share with encryption key", func(t *testing.T) {
+		// First start a ceremony
+		ceremony, err := genMgr.StartGenerationCeremony("org-eth", 3, 2)
+		require.NoError(t, err)
+
+		reqBody := map[string]any{
+			"index":          1,
+			"encryption_key": []byte("01234567890123456789012345678901"),
+			"salt":           []byte("0123456789abcdef"),
+			"kdf_params":     map[string]any{"time": 3, "memory": 65536, "threads": 4},
+			"custodian_name": "Alice",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", ceremony.ID)
+		req := httptest.NewRequest("POST", "/api/v1/crk/generate-ceremony/"+ceremony.ID+"/seed", bytes.NewReader(body))
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Seed(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("returns 400 for missing fields", func(t *testing.T) {
+		reqBody := map[string]any{
+			"index": 0, // invalid
+		}
+		body, _ := json.Marshal(reqBody)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "some-id")
+		req := httptest.NewRequest("POST", "/api/v1/crk/generate-ceremony/some-id/seed", bytes.NewReader(body))
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Seed(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestGenerationCeremonyHandlerComplete(t *testing.T) {
+	crkMgr := newRealCRKManager()
+	genMgr := crk.NewGenerationCeremonyManager(crkMgr)
+	handler := api.NewGenerationCeremonyHandler(genMgr)
+
+	t.Run("completes ceremony with all shares seeded", func(t *testing.T) {
+		ceremony, err := genMgr.StartGenerationCeremony("org-eth", 2, 2)
+		require.NoError(t, err)
+
+		for i := 1; i <= 2; i++ {
+			salt, _ := crk.GenerateSalt()
+			key := crk.DeriveKey([]byte("password"), salt, crk.DefaultKDFTime, crk.DefaultKDFMemory, crk.DefaultKDFThreads)
+			err := genMgr.SeedShare(ceremony.ID, i, key, salt, crk.KDFParams{
+				Time: crk.DefaultKDFTime, Memory: crk.DefaultKDFMemory, Threads: crk.DefaultKDFThreads,
+			}, "custodian")
+			require.NoError(t, err)
+		}
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", ceremony.ID)
+		req := httptest.NewRequest("POST", "/api/v1/crk/generate-ceremony/"+ceremony.ID+"/complete", nil)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Complete(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		assert.Equal(t, "complete", resp["status"])
+		assert.NotNil(t, resp["crk"])
+		assert.NotNil(t, resp["encrypted_shares"])
+	})
+
+	t.Run("returns error for incomplete ceremony", func(t *testing.T) {
+		ceremony, err := genMgr.StartGenerationCeremony("org-eth", 3, 2)
+		require.NoError(t, err)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", ceremony.ID)
+		req := httptest.NewRequest("POST", "/api/v1/crk/generate-ceremony/"+ceremony.ID+"/complete", nil)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+
+		handler.Complete(w, req)
+
+		assert.GreaterOrEqual(t, w.Code, 400)
+	})
+}
+
+func TestGenerationCeremonyHandlerStatus(t *testing.T) {
+	crkMgr := newRealCRKManager()
+	genMgr := crk.NewGenerationCeremonyManager(crkMgr)
+	handler := api.NewGenerationCeremonyHandler(genMgr)
+
+	t.Run("returns ceremony status", func(t *testing.T) {
+		ceremony, err := genMgr.StartGenerationCeremony("org-eth", 3, 2)
+		require.NoError(t, err)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", ceremony.ID)
+		req := httptest.NewRequest("GET", "/api/v1/crk/generate-ceremony/"+ceremony.ID, nil)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+
+		handler.Status(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("returns error for unknown ceremony", func(t *testing.T) {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "nonexistent")
+		req := httptest.NewRequest("GET", "/api/v1/crk/generate-ceremony/nonexistent", nil)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+
+		handler.Status(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+func TestGenerationCeremonyHandlerCancel(t *testing.T) {
+	crkMgr := newRealCRKManager()
+	genMgr := crk.NewGenerationCeremonyManager(crkMgr)
+	handler := api.NewGenerationCeremonyHandler(genMgr)
+
+	t.Run("cancels ceremony", func(t *testing.T) {
+		ceremony, err := genMgr.StartGenerationCeremony("org-eth", 3, 2)
+		require.NoError(t, err)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", ceremony.ID)
+		req := httptest.NewRequest("DELETE", "/api/v1/crk/generate-ceremony/"+ceremony.ID, nil)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+
+		handler.Cancel(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}

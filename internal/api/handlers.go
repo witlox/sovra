@@ -1603,6 +1603,165 @@ func (h *CRKHandler) CancelCeremony(w http.ResponseWriter, r *http.Request) {
 }
 
 // =============================================================================
+// Generation Ceremony Handler (Password-Protected Shares)
+// =============================================================================
+
+// GenerationCeremonyHandler handles generation ceremony API requests.
+type GenerationCeremonyHandler struct {
+	genCeremony crk.GenerationCeremonyManager
+}
+
+// NewGenerationCeremonyHandler creates a new generation ceremony handler.
+func NewGenerationCeremonyHandler(genCeremony crk.GenerationCeremonyManager) *GenerationCeremonyHandler {
+	return &GenerationCeremonyHandler{genCeremony: genCeremony}
+}
+
+// StartGenerationCeremonyRequest represents a generation ceremony start request.
+type StartGenerationCeremonyRequest struct {
+	OrgID       string `json:"org_id"`
+	TotalShares int    `json:"total_shares"`
+	Threshold   int    `json:"threshold"`
+}
+
+// Start handles POST /api/v1/crk/generate-ceremony/start.
+func (h *GenerationCeremonyHandler) Start(w http.ResponseWriter, r *http.Request) {
+	var req StartGenerationCeremonyRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	orgID := req.OrgID
+	if orgID == "" {
+		orgID = getOrgID(r)
+	}
+
+	if req.TotalShares < 2 || req.Threshold < 1 || req.Threshold > req.TotalShares {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid shares configuration")
+		return
+	}
+
+	ceremony, err := h.genCeremony.StartGenerationCeremony(orgID, req.TotalShares, req.Threshold)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, ceremony)
+}
+
+// SeedShareRequest represents a seed share request.
+type SeedShareRequest struct {
+	Index         int           `json:"index"`
+	EncryptionKey []byte        `json:"encryption_key"`
+	Salt          []byte        `json:"salt"`
+	KDFParams     crk.KDFParams `json:"kdf_params"`
+	CustodianName string        `json:"custodian_name"`
+}
+
+// Seed handles POST /api/v1/crk/generate-ceremony/{id}/seed.
+func (h *GenerationCeremonyHandler) Seed(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "ceremony id is required")
+		return
+	}
+
+	var req SeedShareRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.Index < 1 || len(req.EncryptionKey) == 0 || len(req.Salt) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "index, encryption_key, and salt are required")
+		return
+	}
+
+	if err := h.genCeremony.SeedShare(id, req.Index, req.EncryptionKey, req.Salt, req.KDFParams, req.CustodianName); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Complete handles POST /api/v1/crk/generate-ceremony/{id}/complete.
+func (h *GenerationCeremonyHandler) Complete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "ceremony id is required")
+		return
+	}
+
+	ceremony, err := h.genCeremony.CompleteGenerationCeremony(id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ceremony)
+}
+
+// Status handles GET /api/v1/crk/generate-ceremony/{id}.
+func (h *GenerationCeremonyHandler) Status(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "ceremony id is required")
+		return
+	}
+
+	ceremony, err := h.genCeremony.GetGenerationCeremony(id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ceremony)
+}
+
+// Cancel handles DELETE /api/v1/crk/generate-ceremony/{id}.
+func (h *GenerationCeremonyHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "ceremony id is required")
+		return
+	}
+
+	if err := h.genCeremony.CancelGenerationCeremony(id); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetEncryptedShare handles GET /api/v1/crk/shares/{crkId}/{index}.
+func (h *GenerationCeremonyHandler) GetEncryptedShare(w http.ResponseWriter, r *http.Request) {
+	crkID := chi.URLParam(r, "crkId")
+	indexStr := chi.URLParam(r, "index")
+
+	if crkID == "" || indexStr == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "crk_id and index are required")
+		return
+	}
+
+	index, err := strconv.Atoi(indexStr)
+	if err != nil || index < 1 {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid share index")
+		return
+	}
+
+	share, err := h.genCeremony.GetEncryptedShare(crkID, index)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, share)
+}
+
+// =============================================================================
 // Identity Handler
 // =============================================================================
 

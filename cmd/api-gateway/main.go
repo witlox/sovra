@@ -113,6 +113,9 @@ func main() {
 	crkMgr := crk.NewManagerWithRepo(crkRepo)
 	crkCeremony := crk.NewCeremonyManager(crkMgr)
 
+	encShareRepo := postgres.NewEncryptedShareRepository(db)
+	genCeremonyMgr := crk.NewGenerationCeremonyManagerWithRepo(crkMgr, encShareRepo)
+
 	// VaultFactory creates vault clients for edge nodes
 	vaultFactory := func(address, token string) (*vault.Client, error) {
 		return vault.NewClient(vault.Config{Address: address, Token: token})
@@ -265,20 +268,21 @@ func main() {
 	msgSvc := messaging.NewService(msgRepo, fedSvc, msgEncryptor, msgResolver, auditSvc)
 
 	services := &api.Services{
-		Workspace:         wsSvc,
-		Federation:        fedSvc,
-		Policy:            policySvc,
-		Audit:             auditSvc,
-		Edge:              edgeSvc,
-		CRKManager:        crkMgr,
-		CRKCeremony:       crkCeremony,
-		Identity:          identityMgr,
-		PKI:               pkiClient,
-		EmergencyAccess:   emergencyMgr,
-		AccountRecovery:   recoveryMgr,
-		Compliance:        complianceGen,
-		RotationScheduler: rotationScheduler,
-		Messaging:         msgSvc,
+		Workspace:             wsSvc,
+		Federation:            fedSvc,
+		Policy:                policySvc,
+		Audit:                 auditSvc,
+		Edge:                  edgeSvc,
+		CRKManager:            crkMgr,
+		CRKCeremony:           crkCeremony,
+		CRKGenerationCeremony: genCeremonyMgr,
+		Identity:              identityMgr,
+		PKI:                   pkiClient,
+		EmergencyAccess:       emergencyMgr,
+		AccountRecovery:       recoveryMgr,
+		Compliance:            complianceGen,
+		RotationScheduler:     rotationScheduler,
+		Messaging:             msgSvc,
 	}
 
 	routerCfg := api.DefaultRouterConfig()
