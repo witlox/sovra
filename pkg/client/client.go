@@ -927,6 +927,7 @@ func (c *Client) RevokeDevice(ctx context.Context, id string) error {
 type CreateGroupRequest struct {
 	Name          string   `json:"name"`
 	Description   string   `json:"description,omitempty"`
+	IDPGroupID    string   `json:"idp_group_id,omitempty"`
 	VaultPolicies []string `json:"vault_policies,omitempty"`
 }
 
@@ -934,6 +935,23 @@ type CreateGroupRequest struct {
 func (c *Client) CreateGroup(ctx context.Context, req CreateGroupRequest) (*models.IdentityGroup, error) {
 	var result models.IdentityGroup
 	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/groups", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// UpdateGroupRequest represents a request to update an identity group.
+type UpdateGroupRequest struct {
+	Name          string   `json:"name,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	IDPGroupID    *string  `json:"idp_group_id,omitempty"`
+	VaultPolicies []string `json:"vault_policies,omitempty"`
+}
+
+// UpdateGroup updates an identity group.
+func (c *Client) UpdateGroup(ctx context.Context, id string, req UpdateGroupRequest) (*models.IdentityGroup, error) {
+	var result models.IdentityGroup
+	if err := c.request(ctx, http.MethodPut, "/api/v1/identities/groups/"+id, req, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -2088,4 +2106,19 @@ func (c *Client) ReadMessage(ctx context.Context, id string) (*models.DirectMess
 // DeleteMessage deletes a message by ID.
 func (c *Client) DeleteMessage(ctx context.Context, id string) error {
 	return c.request(ctx, http.MethodDelete, "/api/v1/messages/"+id, nil, nil)
+}
+
+// SSOConfigResponse represents SSO configuration from the server.
+type SSOConfigResponse struct {
+	IssuerURL string `json:"issuer_url"`
+	ClientID  string `json:"client_id"`
+}
+
+// GetSSOConfig retrieves SSO configuration from the server (unauthenticated).
+func (c *Client) GetSSOConfig(ctx context.Context) (*SSOConfigResponse, error) {
+	var result SSOConfigResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/sso-config", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }

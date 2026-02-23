@@ -29,11 +29,15 @@ The default login method uses an OAuth2 PKCE flow. Running `sovra login` opens y
 sovra login
 ```
 
+The CLI automatically discovers your organization's SSO configuration from the
+server. No additional flags or environment variables are needed if the server
+has SSO configured.
+
 After successful authentication in the browser, the CLI stores credentials in `~/.sovra/credentials.json`. Subsequent commands use this stored token automatically until it expires.
 
-**Specifying SSO parameters:**
+**Overriding SSO parameters:**
 
-You can pass the IdP issuer URL and client ID as flags or environment variables:
+You can override the auto-discovered configuration with flags or environment variables:
 
 ```bash
 # Using flags
@@ -45,7 +49,7 @@ export SOVRA_SSO_CLIENT_ID=sovra-cli
 sovra login
 ```
 
-If neither flags nor environment variables are set, the CLI will report an error indicating which values are required.
+Flags and environment variables take precedence over server-discovered values.
 
 ### Service Account Authentication
 

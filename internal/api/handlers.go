@@ -1856,6 +1856,15 @@ type EnrollDeviceRequest struct {
 type CreateGroupRequest struct {
 	Name          string   `json:"name"`
 	Description   string   `json:"description,omitempty"`
+	IDPGroupID    string   `json:"idp_group_id,omitempty"`
+	VaultPolicies []string `json:"vault_policies,omitempty"`
+}
+
+// UpdateGroupRequest represents a group update request.
+type UpdateGroupRequest struct {
+	Name          string   `json:"name,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	IDPGroupID    *string  `json:"idp_group_id,omitempty"`
 	VaultPolicies []string `json:"vault_policies,omitempty"`
 }
 
@@ -2450,13 +2459,36 @@ func (h *IdentityHandler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	orgID := getOrgID(r)
-	group, err := h.manager.CreateGroup(r.Context(), orgID, req.Name, req.Description, req.VaultPolicies)
+	group, err := h.manager.CreateGroup(r.Context(), orgID, req.Name, req.Description, req.VaultPolicies, req.IDPGroupID)
 	if err != nil {
 		handleError(w, err)
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, group)
+}
+
+// UpdateGroup handles PUT /api/v1/identities/groups/{id}.
+func (h *IdentityHandler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
+	groupID := chi.URLParam(r, "id")
+	if groupID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "group id is required")
+		return
+	}
+
+	var req UpdateGroupRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	group, err := h.manager.UpdateGroup(r.Context(), groupID, req.Name, req.Description, req.VaultPolicies, req.IDPGroupID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, group)
 }
 
 // ListGroups handles GET /api/v1/identities/groups.

@@ -2367,6 +2367,7 @@ var identityGroupCreateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
 		description, _ := cmd.Flags().GetString("description")
+		idpGroupID, _ := cmd.Flags().GetString("idp-group-id")
 
 		if name == "" {
 			return fmt.Errorf("--name is required")
@@ -2378,6 +2379,7 @@ var identityGroupCreateCmd = &cobra.Command{
 		group, err := c.CreateGroup(ctx, client.CreateGroupRequest{
 			Name:        name,
 			Description: description,
+			IDPGroupID:  idpGroupID,
 		})
 		if err != nil {
 			return fmt.Errorf("create group: %w", err)
@@ -2389,6 +2391,44 @@ var identityGroupCreateCmd = &cobra.Command{
 			fmt.Println(string(data))
 		} else {
 			fmt.Printf("Group created: %s (%s)\n", group.Name, group.ID)
+		}
+		return nil
+	},
+}
+
+var identityGroupUpdateCmd = &cobra.Command{
+	Use:   "update [group-id]",
+	Short: "Update an identity group",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		groupID := args[0]
+		name, _ := cmd.Flags().GetString("name")
+		description, _ := cmd.Flags().GetString("description")
+		idpGroupID, _ := cmd.Flags().GetString("idp-group-id")
+		idpGroupIDChanged := cmd.Flags().Changed("idp-group-id")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		req := client.UpdateGroupRequest{
+			Name:        name,
+			Description: description,
+		}
+		if idpGroupIDChanged {
+			req.IDPGroupID = &idpGroupID
+		}
+
+		group, err := c.UpdateGroup(ctx, groupID, req)
+		if err != nil {
+			return fmt.Errorf("update group: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(group, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Group updated: %s (%s)\n", group.Name, group.ID)
 		}
 		return nil
 	},
@@ -2690,6 +2730,12 @@ func init() {
 	// identity group create flags
 	identityGroupCreateCmd.Flags().String("name", "", "Group name")
 	identityGroupCreateCmd.Flags().String("description", "", "Group description")
+	identityGroupCreateCmd.Flags().String("idp-group-id", "", "IdP group ID for automatic membership sync")
+
+	// identity group update flags
+	identityGroupUpdateCmd.Flags().String("name", "", "New group name")
+	identityGroupUpdateCmd.Flags().String("description", "", "New group description")
+	identityGroupUpdateCmd.Flags().String("idp-group-id", "", "IdP group ID for automatic membership sync (use empty string to clear)")
 
 	// identity group add-member flags
 	identityGroupAddMemberCmd.Flags().String("identity-id", "", "Identity ID to add")
@@ -2732,6 +2778,7 @@ func init() {
 
 	// Wire up group subcommands
 	identityGroupCmd.AddCommand(identityGroupCreateCmd)
+	identityGroupCmd.AddCommand(identityGroupUpdateCmd)
 	identityGroupCmd.AddCommand(identityGroupListCmd)
 	identityGroupCmd.AddCommand(identityGroupAddMemberCmd)
 	identityGroupCmd.AddCommand(identityGroupRemoveMemberCmd)
@@ -3358,16 +3405,31 @@ func runSSOLogin(cmd *cobra.Command) error {
 	if issuerURL == "" {
 		issuerURL = os.Getenv("SOVRA_SSO_ISSUER_URL")
 	}
-	if issuerURL == "" {
-		return fmt.Errorf("SSO issuer URL required: set --issuer-url or SOVRA_SSO_ISSUER_URL")
-	}
 
 	clientID, _ := cmd.Flags().GetString("client-id")
 	if clientID == "" {
 		clientID = os.Getenv("SOVRA_SSO_CLIENT_ID")
 	}
+
+	// Auto-discover from server if not set via flags or env
+	if issuerURL == "" || clientID == "" {
+		c := getClient(cmd)
+		ssoConfig, err := c.GetSSOConfig(context.Background())
+		if err == nil && ssoConfig != nil {
+			if issuerURL == "" && ssoConfig.IssuerURL != "" {
+				issuerURL = ssoConfig.IssuerURL
+			}
+			if clientID == "" && ssoConfig.ClientID != "" {
+				clientID = ssoConfig.ClientID
+			}
+		}
+	}
+
+	if issuerURL == "" {
+		return fmt.Errorf("SSO issuer URL required: set --issuer-url, SOVRA_SSO_ISSUER_URL, or configure server SSO")
+	}
 	if clientID == "" {
-		return fmt.Errorf("SSO client ID required: set --client-id or SOVRA_SSO_CLIENT_ID")
+		return fmt.Errorf("SSO client ID required: set --client-id, SOVRA_SSO_CLIENT_ID, or configure server SSO")
 	}
 
 	// Generate PKCE code verifier and challenge

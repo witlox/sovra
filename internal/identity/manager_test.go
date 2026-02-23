@@ -1024,7 +1024,7 @@ func TestCreateGroup(t *testing.T) {
 		mgr := createManager()
 		ctx := context.Background()
 
-		group, err := mgr.CreateGroup(ctx, "org-123", "developers", "Development team", []string{"secret-read", "transit-encrypt"})
+		group, err := mgr.CreateGroup(ctx, "org-123", "developers", "Development team", []string{"secret-read", "transit-encrypt"}, "")
 		require.NoError(t, err)
 		assert.NotEmpty(t, group.ID)
 		assert.Equal(t, "developers", group.Name)
@@ -1035,7 +1035,7 @@ func TestCreateGroup(t *testing.T) {
 		mgr := createManager()
 		ctx := context.Background()
 
-		_, err := mgr.CreateGroup(ctx, "org-123", "", "Description", nil)
+		_, err := mgr.CreateGroup(ctx, "org-123", "", "Description", nil, "")
 		assert.Error(t, err)
 	})
 }
@@ -1045,7 +1045,7 @@ func TestAddToGroup(t *testing.T) {
 		mgr := createManager()
 		ctx := context.Background()
 
-		group, err := mgr.CreateGroup(ctx, "org-123", "developers", "Development team", nil)
+		group, err := mgr.CreateGroup(ctx, "org-123", "developers", "Development team", nil, "")
 		require.NoError(t, err)
 
 		user, err := mgr.CreateUserFromSSO(ctx, "org-123", models.SSOProviderOkta, "sub-123", "user@test.com", "User", nil)
@@ -1059,7 +1059,7 @@ func TestAddToGroup(t *testing.T) {
 		mgr := createManager()
 		ctx := context.Background()
 
-		group, err := mgr.CreateGroup(ctx, "org-12345678", "backend-services", "Backend apps", nil)
+		group, err := mgr.CreateGroup(ctx, "org-12345678", "backend-services", "Backend apps", nil, "")
 		require.NoError(t, err)
 
 		svc, err := mgr.CreateService(ctx, "org-12345678", "api-service", "API", models.AuthMethodAppRole)
@@ -1075,7 +1075,7 @@ func TestRemoveFromGroup(t *testing.T) {
 		mgr := createManager()
 		ctx := context.Background()
 
-		group, err := mgr.CreateGroup(ctx, "org-123", "developers", "Development team", nil)
+		group, err := mgr.CreateGroup(ctx, "org-123", "developers", "Development team", nil, "")
 		require.NoError(t, err)
 
 		user, err := mgr.CreateUserFromSSO(ctx, "org-123", models.SSOProviderOkta, "sub-123", "user@test.com", "User", nil)
@@ -1259,10 +1259,10 @@ func TestGetIdentityPolicies(t *testing.T) {
 		mgr := createManager()
 		ctx := context.Background()
 
-		group1, err := mgr.CreateGroup(ctx, "org-123", "developers", "Dev team", []string{"secret-read", "transit-encrypt"})
+		group1, err := mgr.CreateGroup(ctx, "org-123", "developers", "Dev team", []string{"secret-read", "transit-encrypt"}, "")
 		require.NoError(t, err)
 
-		group2, err := mgr.CreateGroup(ctx, "org-123", "admins", "Admin team", []string{"secret-write", "pki-admin"})
+		group2, err := mgr.CreateGroup(ctx, "org-123", "admins", "Admin team", []string{"secret-write", "pki-admin"}, "")
 		require.NoError(t, err)
 
 		user, err := mgr.CreateUserFromSSO(ctx, "org-123", models.SSOProviderOkta, "sub-123", "user@test.com", "User", nil)
@@ -1396,7 +1396,7 @@ func TestGetGroupMembers(t *testing.T) {
 		setup := createSecureManager()
 		ctx := context.Background()
 
-		group, err := setup.mgr.CreateGroup(ctx, "org-123", "engineers", "Engineering team", []string{"read"})
+		group, err := setup.mgr.CreateGroup(ctx, "org-123", "engineers", "Engineering team", []string{"read"}, "")
 		require.NoError(t, err)
 
 		admin := createActiveAdmin(setup.adminRepo, "org-123", "member@test.com", "Member", models.AdminRoleSuperAdmin)
@@ -1413,7 +1413,7 @@ func TestGetGroupMembers(t *testing.T) {
 		mgr := createManager()
 		ctx := context.Background()
 
-		group, err := mgr.CreateGroup(ctx, "org-123", "empty-group", "Empty", nil)
+		group, err := mgr.CreateGroup(ctx, "org-123", "empty-group", "Empty", nil, "")
 		require.NoError(t, err)
 
 		members, err := mgr.GetGroupMembers(ctx, group.ID)

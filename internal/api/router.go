@@ -32,6 +32,8 @@ type RouterConfig struct {
 	AdminIdentityResolver AdminIdentityResolver
 	MiddlewareConfig      *MiddlewareConfig
 	HealthCheckers        map[string]func() error
+	SSOIssuerURL          string
+	SSOClientID           string
 }
 
 // DefaultRouterConfig returns a default router configuration.
@@ -82,10 +84,11 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	r.Use(middleware.RealIP)
 	r.Use(ContentTypeMiddleware)
 
-	// Add enrollment/bootstrap paths to skip list for auth/mTLS
+	// Add enrollment/bootstrap/sso-config paths to skip list for auth/mTLS
 	config.MiddlewareConfig.SkipPaths = append(config.MiddlewareConfig.SkipPaths,
 		"/api/v1/enrollment",
 		"/api/v1/bootstrap",
+		"/api/v1/sso-config",
 	)
 
 	// Apply security middleware
@@ -104,6 +107,7 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 
 	// Register routes
 	registerHealthRoutes(r, config.HealthCheckers)
+	registerSSOConfigRoute(r, config)
 	registerWorkspaceRoutes(r, services)
 	registerFederationRoutes(r, services)
 	registerPolicyRoutes(r, services)
@@ -188,6 +192,19 @@ type HealthResponse struct {
 type ComponentHealth struct {
 	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
+}
+
+// registerSSOConfigRoute registers the unauthenticated SSO config discovery endpoint.
+func registerSSOConfigRoute(r chi.Router, config *RouterConfig) {
+	if config.SSOIssuerURL == "" && config.SSOClientID == "" {
+		return
+	}
+	r.Get("/api/v1/sso-config", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"issuer_url": config.SSOIssuerURL,
+			"client_id":  config.SSOClientID,
+		})
+	})
 }
 
 // registerWorkspaceRoutes registers workspace endpoints.
@@ -356,6 +373,7 @@ func registerIdentityRoutes(r chi.Router, services *Services) {
 		r.Post("/groups", handler.CreateGroup)
 		r.Get("/groups", handler.ListGroups)
 		r.Get("/groups/{id}", handler.GetGroup)
+		r.Put("/groups/{id}", handler.UpdateGroup)
 		r.Post("/groups/{id}/members", handler.AddGroupMember)
 		r.Delete("/groups/{id}/members/{identityId}", handler.RemoveGroupMember)
 

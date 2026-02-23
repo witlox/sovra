@@ -33,14 +33,19 @@ sovra health
 
 Authenticate with the Sovra API. Uses SSO by default.
 
+When no `--issuer-url` or `--client-id` is provided, the CLI auto-discovers SSO
+configuration from the server via `GET /api/v1/sso-config`. You can also set
+`SOVRA_SSO_ISSUER_URL` and `SOVRA_SSO_CLIENT_ID` environment variables.
+
 ```bash
+sovra login                                      # auto-discover from server
 sovra login --issuer-url https://idp.example.org --client-id sovra-cli
 ```
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--issuer-url` | OIDC issuer URL | |
-| `--client-id` | OIDC client ID | |
+| `--issuer-url` | OIDC issuer URL (auto-discovered if omitted) | |
+| `--client-id` | OIDC client ID (auto-discovered if omitted) | |
 | `--auth-method` | Authentication method (`sso`, `approle`) | `sso` |
 
 For legacy AppRole authentication:
@@ -882,12 +887,30 @@ sovra identity mfa verify admin-123 --code 123456
 
 ```bash
 sovra identity group create --name researchers --description "Research team"
+sovra identity group create --name engineers --idp-group-id "00g1abc2de" --description "Synced from IdP"
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--name` | Group name |
 | `--description` | Group description |
+| `--idp-group-id` | IdP group ID for automatic membership sync |
+
+### identity group update
+
+Update an existing identity group's name, description, or IdP binding.
+
+```bash
+sovra identity group update group-123 --name "new-name"
+sovra identity group update group-123 --idp-group-id "00g1abc2de"
+sovra identity group update group-123 --idp-group-id ""  # clear IdP binding
+```
+
+| Flag | Description |
+|------|-------------|
+| `--name` | New group name |
+| `--description` | New group description |
+| `--idp-group-id` | IdP group ID (use empty string to clear) |
 
 ### identity group list
 

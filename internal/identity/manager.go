@@ -825,7 +825,7 @@ func (m *Manager) RevokeDevice(ctx context.Context, deviceID string) error {
 }
 
 // CreateGroup creates a new identity group.
-func (m *Manager) CreateGroup(ctx context.Context, orgID, name, description string, vaultPolicies []string) (*models.IdentityGroup, error) {
+func (m *Manager) CreateGroup(ctx context.Context, orgID, name, description string, vaultPolicies []string, idpGroupID string) (*models.IdentityGroup, error) {
 	if name == "" {
 		return nil, errors.ErrInvalidInput
 	}
@@ -835,6 +835,7 @@ func (m *Manager) CreateGroup(ctx context.Context, orgID, name, description stri
 		OrgID:         orgID,
 		Name:          name,
 		Description:   description,
+		IDPGroupID:    idpGroupID,
 		VaultPolicies: vaultPolicies,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
@@ -842,6 +843,34 @@ func (m *Manager) CreateGroup(ctx context.Context, orgID, name, description stri
 
 	if err := m.groups.Create(ctx, group); err != nil {
 		return nil, fmt.Errorf("create group: %w", err)
+	}
+
+	return group, nil
+}
+
+// UpdateGroup updates an existing identity group.
+func (m *Manager) UpdateGroup(ctx context.Context, groupID, name, description string, vaultPolicies []string, idpGroupID *string) (*models.IdentityGroup, error) {
+	group, err := m.groups.Get(ctx, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("get group: %w", err)
+	}
+
+	if name != "" {
+		group.Name = name
+	}
+	if description != "" {
+		group.Description = description
+	}
+	if vaultPolicies != nil {
+		group.VaultPolicies = vaultPolicies
+	}
+	if idpGroupID != nil {
+		group.IDPGroupID = *idpGroupID
+	}
+	group.UpdatedAt = time.Now()
+
+	if err := m.groups.Update(ctx, group); err != nil {
+		return nil, fmt.Errorf("update group: %w", err)
 	}
 
 	return group, nil

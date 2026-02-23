@@ -701,7 +701,7 @@ func TestRBACPermissions(t *testing.T) {
 		mgr := createIdentityManager()
 		ctx := context.Background()
 
-		group, err := mgr.CreateGroup(ctx, "org-acme", "backend-engineers", "Backend team", []string{"secret-read", "transit-encrypt", "pki-issue"})
+		group, err := mgr.CreateGroup(ctx, "org-acme", "backend-engineers", "Backend team", []string{"secret-read", "transit-encrypt", "pki-issue"}, "")
 		require.NoError(t, err)
 
 		user, err := mgr.CreateUserFromSSO(ctx, "org-acme", models.SSOProviderOkta, "okta|eng1", "engineer@acme.com", "Engineer", nil)

@@ -514,6 +514,28 @@ When group sync is active, manual membership changes made via
 next sync cycle. Use the IdP as the source of truth for group membership in
 connected mode.
 
+### Linking Groups to an IdP Group
+
+To enable automatic membership sync for a group, bind it to an IdP group ID
+when creating or updating the group:
+
+```bash
+# Set IdP group ID during creation
+sovra --cert admin.crt --key admin.key identity group create \
+  --name engineers --idp-group-id "00g1abc2de"
+
+# Bind an existing group to an IdP group
+sovra --cert admin.crt --key admin.key identity group update <group-id> \
+  --idp-group-id "00g1abc2de"
+
+# Clear the IdP binding (revert to manual management)
+sovra --cert admin.crt --key admin.key identity group update <group-id> \
+  --idp-group-id ""
+```
+
+Once a group has an `idp_group_id`, the sync scheduler will poll the IdP for
+that group's members and reconcile local membership automatically.
+
 ### SSO Login for Users
 
 Non-admin users authenticate via SSO using the OAuth2 PKCE flow:
