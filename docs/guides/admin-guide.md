@@ -47,20 +47,32 @@ file to avoid repeating these flags.
 
 ### 1. Generate the Customer Root Key (CRK)
 
-The CRK underpins all high-trust operations. Generate it with Shamir secret
-sharing so that no single custodian holds the complete key:
+The CRK underpins all high-trust operations. Generate it using the
+password-protected generation ceremony so that no single person (including the
+admin) ever sees plaintext share data:
 
 ```bash
-sovra crk generate \
-  --org-id my-org \
-  --shares 5 \
-  --threshold 3 \
-  --output crk-shares.json
+# 1a. Admin starts the ceremony
+sovra crk generate-ceremony start --org-id my-org --shares 5 --threshold 3
+
+# 1b. Each custodian seeds their share index (CLI prompts for password)
+sovra crk generate-ceremony seed <ceremony-id> --index 1 --custodian-name "Alice"
+sovra crk generate-ceremony seed <ceremony-id> --index 2 --custodian-name "Bob"
+sovra crk generate-ceremony seed <ceremony-id> --index 3 --custodian-name "Charlie"
+sovra crk generate-ceremony seed <ceremony-id> --index 4 --custodian-name "David"
+sovra crk generate-ceremony seed <ceremony-id> --index 5 --custodian-name "Eve"
+
+# 1c. Admin completes the ceremony
+sovra crk generate-ceremony complete <ceremony-id> --output crk.json
 ```
 
-Distribute each share to a separate custodian. The `crk-shares.json` file
-contains all shares and the public key. After distribution, delete the file
-from the generation host.
+The output file contains the CRK public key and encrypted share blobs (one per
+custodian). Each share can only be decrypted with the password the custodian
+chose during seeding. Distribute the encrypted share files to the respective
+custodians.
+
+> **Dev/testing only:** `sovra crk generate` still exists but outputs plaintext
+> shares and prints a deprecation warning. Do not use it in production.
 
 ### 2. Sign the Bootstrap Message
 
@@ -78,11 +90,13 @@ sovra identity admin sign-message \
 Have the CRK custodians reconstruct the key and sign this message. The resulting
 hex-encoded Ed25519 signature is passed as `--crk-signature` in the next step.
 
-Alternatively, use the `sovra crk sign` command with the shares file:
+Use `sovra crk sign` with the shares file. If the shares are
+password-protected, the CLI prompts each custodian for their password and
+decrypts locally before signing:
 
 ```bash
 sovra crk sign \
-  --shares-file crk-shares.json \
+  --shares-file crk.json \
   --public-key <BASE64_PUBLIC_KEY> \
   --data "<message from sign-message>"
 ```
@@ -885,25 +899,10 @@ sovra crk ceremony cancel <ceremony-id>
 
 ### Password-Protected CRK Generation
 
-For production deployments, use the generation ceremony flow to ensure the admin
-never sees plaintext share data. Each shareholder provides a password before the
-CRK is generated.
-
-```bash
-# 1. Admin starts the ceremony
-sovra crk generate-ceremony start --org-id <ORG_ID> --shares 5 --threshold 3
-
-# 2. Each shareholder seeds their index (prompts for password)
-sovra crk generate-ceremony seed <ceremony-id> --index 1 --custodian-name "Alice"
-sovra crk generate-ceremony seed <ceremony-id> --index 2 --custodian-name "Bob"
-# ... repeat for all shareholders
-
-# 3. Admin completes the ceremony
-sovra crk generate-ceremony complete <ceremony-id> --output crk.json
-```
-
-The output file contains only encrypted share blobs, salts, and KDF parameters.
-To use an encrypted share in a ceremony, `add-share` auto-detects the format:
+See [Initial Setup - Generate the CRK](#1-generate-the-customer-root-key-crk)
+for the full generation ceremony walkthrough. When using an encrypted share in a
+signing ceremony, `add-share` auto-detects the format and prompts for the
+custodian's password:
 
 ```bash
 sovra crk ceremony add-share <ceremony-id> --share-file share.json
