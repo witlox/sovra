@@ -1,0 +1,100 @@
+name: Vulnerability Fix
+
+on:
+  schedule:
+    # Run daily at 07:00 UTC (after deps-test at 06:00)
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  govulncheck-fix:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Use PAT if available to allow the created PR to trigger CI.
+          # Falls back to GITHUB_TOKEN (PR won't trigger CI, but auto-merge
+          # still works if no required status checks are configured).
+          token: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        id: vulncheck
+        run: |
+          if govulncheck ./... 2>&1; then
+            echo "vulnerable=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "vulnerable=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update vulnerable dependencies
+        if: steps.vulncheck.outputs.vulnerable == 'true'
+        run: |
+          go get -u ./...
+          go mod tidy
+
+      - name: Check for changes
+        if: steps.vulncheck.outputs.vulnerable == 'true'
+        id: changes
+        run: |
+          if git diff --quiet go.mod go.sum; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify fix
+        if: steps.vulncheck.outputs.vulnerable == 'true' && steps.changes.outputs.changed == 'true'
+        run: |
+          go build ./...
+          go test -short ./...
+          govulncheck ./...
+
+      - name: Create PR
+        if: steps.vulncheck.outputs.vulnerable == 'true' && steps.changes.outputs.changed == 'true'
+        run: |
+          BRANCH="govulncheck-fix-$(date +%Y%m%d)"
+
+          # Clean up stale branch if it exists
+          git push origin --delete "$BRANCH" 2>/dev/null || true
+
+          git checkout -b "$BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add go.mod go.sum
+          git commit -m "$(cat <<'EOF'
+          fix(deps): update dependencies to resolve vulnerabilities
+
+          Automated fix for vulnerabilities detected by govulncheck.
+          EOF
+          )"
+          git push origin "$BRANCH"
+
+          PR_URL=$(gh pr create \
+            --title "fix(deps): resolve govulncheck vulnerabilities" \
+            --body "$(cat <<'EOF'
+          ## Summary
+          - Vulnerabilities detected by `govulncheck`
+          - Dependencies updated and verified (build + test + govulncheck pass)
+
+          Automated PR created by the Vulnerability Fix workflow.
+          EOF
+          )" \
+            --label "dependencies" \
+            --head "$BRANCH")
+
+          gh pr merge --auto --squash "$PR_URL"
+        env:
+          GH_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
