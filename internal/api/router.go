@@ -9,11 +9,13 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/backup"
 	"github.com/witlox/sovra/internal/compliance"
 	"github.com/witlox/sovra/internal/crk"
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
 	"github.com/witlox/sovra/internal/identity"
+	"github.com/witlox/sovra/internal/messaging"
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
@@ -59,6 +61,9 @@ type Services struct {
 	AccountRecovery   *identity.AccountRecoveryManager
 	Compliance        *compliance.ReportGenerator
 	RotationScheduler *rotation.Scheduler
+	GroupBindingRepo  workspace.GroupBindingRepository
+	Backup            backup.Service
+	Messaging         messaging.Service
 }
 
 // NewRouter creates a new chi router with all middleware and routes.
@@ -111,6 +116,9 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	registerAccountRecoveryRoutes(r, services)
 	registerComplianceRoutes(r, services)
 	registerRotationPolicyRoutes(r, services)
+	registerBackupRoutes(r, services)
+	registerMessageRoutes(r, services)
+	registerActivityRoutes(r, services)
 
 	return r
 }
@@ -200,11 +208,15 @@ func registerWorkspaceRoutes(r chi.Router, services *Services) {
 		r.Post("/{id}/invite", handler.InviteParticipant)
 		r.Post("/{id}/accept-invitation", handler.AcceptInvitation)
 		r.Post("/{id}/decline-invitation", handler.DeclineInvitation)
-		r.Post("/{id}/participants", handler.AddParticipant)
-		r.Delete("/{id}/participants/{orgId}", handler.RemoveParticipant)
 		r.Post("/{id}/archive", handler.Archive)
 		r.Post("/{id}/export", handler.Export)
 		r.Post("/import", handler.Import)
+
+		// Workspace access request (convenience: resolves bound group, creates join request)
+		if services.Identity != nil && services.GroupBindingRepo != nil {
+			accessHandler := NewWorkspaceAccessRequestHandler(services.Identity, services.GroupBindingRepo)
+			r.Post("/{id}/request-access", accessHandler.RequestAccess)
+		}
 	})
 }
 
@@ -222,6 +234,7 @@ func registerFederationRoutes(r chi.Router, services *Services) {
 		r.Delete("/{partnerId}", handler.Revoke)
 		r.Get("/health", handler.HealthCheck)
 		r.Post("/certificate/import", handler.ImportCertificate)
+		r.Post("/{partnerId}/renew-cert", handler.RenewCertificate)
 	})
 }
 
@@ -334,6 +347,12 @@ func registerIdentityRoutes(r chi.Router, services *Services) {
 		r.Post("/groups/{id}/members", handler.AddGroupMember)
 		r.Delete("/groups/{id}/members/{identityId}", handler.RemoveGroupMember)
 
+		// Group join requests
+		r.Post("/groups/{id}/join-requests", handler.RequestGroupJoin)
+		r.Get("/groups/{id}/join-requests", handler.ListGroupJoinRequests)
+		r.Post("/groups/{id}/join-requests/{requestId}/approve", handler.ApproveJoinRequest)
+		r.Post("/groups/{id}/join-requests/{requestId}/deny", handler.DenyJoinRequest)
+
 		// Roles
 		r.Post("/roles", handler.CreateRole)
 		r.Get("/roles", handler.ListRoles)
@@ -436,5 +455,47 @@ func registerRotationPolicyRoutes(r chi.Router, services *Services) {
 		r.Put("/", handler.Set)
 		r.Get("/", handler.Get)
 		r.Delete("/", handler.Delete)
+	})
+}
+
+// registerBackupRoutes registers backup/restore endpoints.
+func registerBackupRoutes(r chi.Router, services *Services) {
+	if services == nil || services.Backup == nil {
+		return
+	}
+	handler := NewBackupHandler(services.Backup)
+	r.Route("/api/v1/backups", func(r chi.Router) {
+		r.Post("/", handler.Create)
+		r.Get("/", handler.List)
+		r.Get("/{id}", handler.Get)
+		r.Post("/{id}/restore", handler.Restore)
+	})
+}
+
+// registerMessageRoutes registers direct messaging endpoints.
+func registerMessageRoutes(r chi.Router, services *Services) {
+	if services == nil || services.Messaging == nil {
+		return
+	}
+	handler := NewDirectMessageHandler(services.Messaging)
+	r.Route("/api/v1/messages", func(r chi.Router) {
+		r.Post("/", handler.Send)
+		r.Get("/", handler.ListInbox)
+		r.Get("/sent", handler.ListSent)
+		r.Get("/{id}", handler.Read)
+		r.Delete("/{id}", handler.Delete)
+		r.Post("/deliver", handler.Deliver)
+	})
+}
+
+// registerActivityRoutes registers user activity endpoints.
+func registerActivityRoutes(r chi.Router, services *Services) {
+	if services == nil || services.Audit == nil {
+		return
+	}
+	handler := NewActivityHandler(services.Audit)
+	r.Route("/api/v1/activity", func(r chi.Router) {
+		r.Get("/", handler.List)
+		r.Post("/export", handler.Export)
 	})
 }

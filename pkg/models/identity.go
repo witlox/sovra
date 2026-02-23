@@ -137,6 +137,7 @@ type IdentityGroup struct {
 	OrgID         string    `json:"org_id"`
 	Name          string    `json:"name"`
 	Description   string    `json:"description,omitempty"`
+	IDPGroupID    string    `json:"idp_group_id,omitempty"`
 	VaultPolicies []string  `json:"vault_policies,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -228,6 +229,28 @@ const (
 	AccountRecoveryCompleted       AccountRecoveryStatus = "completed"
 	AccountRecoveryFailed          AccountRecoveryStatus = "failed"
 )
+
+// GroupJoinRequestStatus represents the status of a group join request.
+type GroupJoinRequestStatus string
+
+const (
+	GroupJoinRequestPending  GroupJoinRequestStatus = "pending"
+	GroupJoinRequestApproved GroupJoinRequestStatus = "approved"
+	GroupJoinRequestDenied   GroupJoinRequestStatus = "denied"
+)
+
+// GroupJoinRequest represents a request to join an identity group.
+type GroupJoinRequest struct {
+	ID          string                 `json:"id"`
+	GroupID     string                 `json:"group_id"`
+	RequesterID string                 `json:"requester_id"`
+	OrgID       string                 `json:"org_id"`
+	Reason      string                 `json:"reason,omitempty"`
+	Status      GroupJoinRequestStatus `json:"status"`
+	ReviewedBy  string                 `json:"reviewed_by,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	ReviewedAt  time.Time              `json:"reviewed_at,omitempty"`
+}
 
 // AccountRecovery represents an account recovery request using CRK reconstruction.
 type AccountRecovery struct {

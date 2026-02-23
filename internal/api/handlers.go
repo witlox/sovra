@@ -13,11 +13,13 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/backup"
 	"github.com/witlox/sovra/internal/compliance"
 	"github.com/witlox/sovra/internal/crk"
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
 	"github.com/witlox/sovra/internal/identity"
+	"github.com/witlox/sovra/internal/messaging"
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
@@ -120,7 +122,8 @@ func NewWorkspaceHandler(service workspace.Service) *WorkspaceHandler {
 // CreateWorkspaceRequest represents workspace creation request.
 type CreateWorkspaceRequest struct {
 	Name           string                `json:"name"`
-	Participants   []string              `json:"participants"`
+	Participants   []string              `json:"participants,omitempty"` // Deprecated: use GroupID
+	GroupID        string                `json:"group_id,omitempty"`
 	Classification models.Classification `json:"classification"`
 	Mode           models.WorkspaceMode  `json:"mode"`
 	Purpose        string                `json:"purpose"`
@@ -143,6 +146,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	ws, err := h.service.Create(r.Context(), workspace.CreateRequest{
 		Name:           req.Name,
 		Participants:   req.Participants,
+		GroupID:        req.GroupID,
 		Classification: req.Classification,
 		Mode:           req.Mode,
 		Purpose:        req.Purpose,
@@ -322,6 +326,7 @@ func (h *WorkspaceHandler) InviteParticipant(w http.ResponseWriter, r *http.Requ
 // AcceptInvitationRequest represents an invitation acceptance request.
 type AcceptInvitationRequest struct {
 	OrgID     string `json:"org_id"`
+	GroupID   string `json:"group_id,omitempty"`
 	Signature []byte `json:"signature"`
 }
 
@@ -484,64 +489,6 @@ func (h *WorkspaceHandler) Decrypt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, DecryptResponse{Plaintext: plaintext})
-}
-
-// AddParticipantRequest represents request to add a participant.
-type AddParticipantRequest struct {
-	OrgID     string `json:"org_id"`
-	Signature []byte `json:"signature"`
-}
-
-// AddParticipant handles POST /api/v1/workspaces/{id}/participants.
-func (h *WorkspaceHandler) AddParticipant(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
-		return
-	}
-
-	var req AddParticipantRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
-		return
-	}
-
-	if req.OrgID == "" {
-		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "org_id is required")
-		return
-	}
-
-	if err := h.service.AddParticipant(r.Context(), id, req.OrgID, req.Signature); err != nil {
-		handleError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// RemoveParticipant handles DELETE /api/v1/workspaces/{id}/participants/{orgId}.
-func (h *WorkspaceHandler) RemoveParticipant(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	orgID := chi.URLParam(r, "orgId")
-	if id == "" || orgID == "" {
-		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id and org id are required")
-		return
-	}
-
-	var req struct {
-		Signature []byte `json:"signature"`
-	}
-	if err := readJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
-		return
-	}
-
-	if err := h.service.RemoveParticipant(r.Context(), id, orgID, req.Signature); err != nil {
-		handleError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // Archive handles POST /api/v1/workspaces/{id}/archive.
@@ -754,6 +701,37 @@ func (h *FederationHandler) ImportCertificate(w http.ResponseWriter, r *http.Req
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// RenewCertificateRequest represents federation certificate renewal request.
+type RenewCertificateRequest struct {
+	Signature []byte `json:"signature"`
+}
+
+// RenewCertificate handles POST /api/v1/federation/{partnerId}/renew-cert.
+func (h *FederationHandler) RenewCertificate(w http.ResponseWriter, r *http.Request) {
+	partnerID := chi.URLParam(r, "partnerId")
+	if partnerID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "partner id is required")
+		return
+	}
+
+	var req RenewCertificateRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	cert, err := h.service.RotateCertificate(r.Context(), partnerID, req.Signature)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"certificate": cert,
+		"partner_id":  partnerID,
+	})
 }
 
 // =============================================================================
@@ -2409,6 +2387,155 @@ func (h *IdentityHandler) RemoveGroupMember(w http.ResponseWriter, r *http.Reque
 }
 
 // =============================================================================
+// Group Join Request Handlers
+// =============================================================================
+
+// RequestGroupJoinRequest represents a request to join a group.
+type RequestGroupJoinRequest struct {
+	Justification string `json:"justification,omitempty"`
+}
+
+// RequestGroupJoin handles POST /api/v1/identities/groups/{id}/join-requests.
+func (h *IdentityHandler) RequestGroupJoin(w http.ResponseWriter, r *http.Request) {
+	groupID := chi.URLParam(r, "id")
+	if groupID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "group id is required")
+		return
+	}
+
+	var req RequestGroupJoinRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	callerAdminID, _ := r.Context().Value(ContextKeyAdminID).(string)
+	orgID := getOrgID(r)
+
+	joinReq, err := h.manager.RequestGroupJoin(r.Context(), groupID, callerAdminID, orgID, req.Justification)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, joinReq)
+}
+
+// ListGroupJoinRequests handles GET /api/v1/identities/groups/{id}/join-requests.
+func (h *IdentityHandler) ListGroupJoinRequests(w http.ResponseWriter, r *http.Request) {
+	groupID := chi.URLParam(r, "id")
+	if groupID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "group id is required")
+		return
+	}
+
+	requests, err := h.manager.ListPendingJoinRequests(r.Context(), groupID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"requests": requests,
+		"count":    len(requests),
+	})
+}
+
+// ApproveJoinRequest handles POST /api/v1/identities/groups/{id}/join-requests/{requestId}/approve.
+func (h *IdentityHandler) ApproveJoinRequest(w http.ResponseWriter, r *http.Request) {
+	requestID := chi.URLParam(r, "requestId")
+	if requestID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "request id is required")
+		return
+	}
+
+	reviewerID, _ := r.Context().Value(ContextKeyAdminID).(string)
+
+	if err := h.manager.ApproveJoinRequest(r.Context(), requestID, reviewerID); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DenyJoinRequest handles POST /api/v1/identities/groups/{id}/join-requests/{requestId}/deny.
+func (h *IdentityHandler) DenyJoinRequest(w http.ResponseWriter, r *http.Request) {
+	requestID := chi.URLParam(r, "requestId")
+	if requestID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "request id is required")
+		return
+	}
+
+	reviewerID, _ := r.Context().Value(ContextKeyAdminID).(string)
+
+	if err := h.manager.DenyJoinRequest(r.Context(), requestID, reviewerID); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Workspace Access Request Handler
+// =============================================================================
+
+// WorkspaceAccessRequestHandler handles workspace access requests.
+type WorkspaceAccessRequestHandler struct {
+	identityManager *identity.Manager
+	bindingRepo     workspace.GroupBindingRepository
+}
+
+// NewWorkspaceAccessRequestHandler creates a new workspace access request handler.
+func NewWorkspaceAccessRequestHandler(im *identity.Manager, bindingRepo workspace.GroupBindingRepository) *WorkspaceAccessRequestHandler {
+	return &WorkspaceAccessRequestHandler{identityManager: im, bindingRepo: bindingRepo}
+}
+
+// RequestWorkspaceAccessRequest represents a request to access a workspace.
+type RequestWorkspaceAccessRequest struct {
+	Justification string `json:"justification,omitempty"`
+}
+
+// RequestAccess handles POST /api/v1/workspaces/{id}/request-access.
+// Convenience endpoint: resolves the workspace's bound group and creates a join request.
+func (h *WorkspaceAccessRequestHandler) RequestAccess(w http.ResponseWriter, r *http.Request) {
+	wsID := chi.URLParam(r, "id")
+	if wsID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+		return
+	}
+
+	var req RequestWorkspaceAccessRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	callerAdminID, _ := r.Context().Value(ContextKeyAdminID).(string)
+	orgID := getOrgID(r)
+
+	// Look up the workspace-group binding for the caller's org
+	binding, err := h.bindingRepo.GetBinding(r.Context(), wsID, orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	if binding == nil {
+		writeJSONError(w, http.StatusBadRequest, "NO_BOUND_GROUP", "workspace has no bound identity group for this organization")
+		return
+	}
+
+	joinReq, err := h.identityManager.RequestGroupJoin(r.Context(), binding.GroupID, callerAdminID, orgID, req.Justification)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, joinReq)
+}
+
+// =============================================================================
 // Role Handlers
 // =============================================================================
 
@@ -3181,4 +3308,392 @@ func (h *RotationPolicyHandler) ListPolicies(w http.ResponseWriter, r *http.Requ
 		"policies": policies,
 		"count":    len(policies),
 	})
+}
+
+// =============================================================================
+// Backup Handler
+// =============================================================================
+
+// BackupHandler handles backup API requests.
+type BackupHandler struct {
+	service backup.Service
+}
+
+// NewBackupHandler creates a new backup handler.
+func NewBackupHandler(service backup.Service) *BackupHandler {
+	return &BackupHandler{service: service}
+}
+
+// CreateBackupRequest represents a backup creation request.
+type CreateBackupRequest struct {
+	Type         string `json:"type"`
+	CRKSignature []byte `json:"crk_signature"`
+}
+
+// Create handles POST /api/v1/backups.
+func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
+	var req CreateBackupRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.Type == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "type is required")
+		return
+	}
+
+	orgID := getOrgID(r)
+	b, err := h.service.Create(r.Context(), orgID, req.Type, "api", req.CRKSignature)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, b)
+}
+
+// List handles GET /api/v1/backups.
+func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+	backups, err := h.service.List(r.Context(), orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"backups": backups,
+		"count":   len(backups),
+	})
+}
+
+// Get handles GET /api/v1/backups/{id}.
+func (h *BackupHandler) Get(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "backup id is required")
+		return
+	}
+
+	b, err := h.service.Get(r.Context(), id)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, b)
+}
+
+// RestoreBackupRequest represents a restore request.
+type RestoreBackupRequest struct {
+	CRKSignature []byte `json:"crk_signature"`
+}
+
+// Restore handles POST /api/v1/backups/{id}/restore.
+func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "backup id is required")
+		return
+	}
+
+	var req RestoreBackupRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if err := h.service.Restore(r.Context(), id, req.CRKSignature); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Activity Handler
+// =============================================================================
+
+// ActivityHandler handles user activity API requests.
+type ActivityHandler struct {
+	auditSvc audit.Service
+}
+
+// NewActivityHandler creates a new activity handler.
+func NewActivityHandler(auditSvc audit.Service) *ActivityHandler {
+	return &ActivityHandler{auditSvc: auditSvc}
+}
+
+// List handles GET /api/v1/activity — returns caller's own activity.
+func (h *ActivityHandler) List(w http.ResponseWriter, r *http.Request) {
+	// Auto-fill actor from context (set by auth middleware)
+	actor := ""
+	if a, ok := r.Context().Value(ContextKeyAdminID).(string); ok && a != "" {
+		actor = a
+	}
+	if actor == "" {
+		actor = r.URL.Query().Get("actor")
+	}
+	if actor == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "could not determine caller identity")
+		return
+	}
+
+	limit, offset := getPaginationParams(r)
+
+	var since, until time.Time
+	if s := r.URL.Query().Get("since"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			since = t
+		}
+	}
+	if u := r.URL.Query().Get("until"); u != "" {
+		if t, err := time.Parse(time.RFC3339, u); err == nil {
+			until = t
+		}
+	}
+
+	events, err := h.auditSvc.Query(r.Context(), audit.QueryParams{
+		Actor:  actor,
+		Since:  since,
+		Until:  until,
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"events": events,
+		"count":  len(events),
+		"actor":  actor,
+	})
+}
+
+// Export handles POST /api/v1/activity/export — exports caller's activity.
+func (h *ActivityHandler) Export(w http.ResponseWriter, r *http.Request) {
+	actor := ""
+	if a, ok := r.Context().Value(ContextKeyAdminID).(string); ok && a != "" {
+		actor = a
+	}
+	if actor == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "could not determine caller identity")
+		return
+	}
+
+	var req ExportAuditRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	var since, until time.Time
+	if req.Since != "" {
+		if t, err := time.Parse(time.RFC3339, req.Since); err == nil {
+			since = t
+		}
+	}
+	if req.Until != "" {
+		if t, err := time.Parse(time.RFC3339, req.Until); err == nil {
+			until = t
+		}
+	}
+
+	format := req.Format
+	if format == "" {
+		format = audit.ExportFormatJSON
+	}
+
+	data, err := h.auditSvc.Export(r.Context(), audit.ExportRequest{
+		Query: audit.QueryParams{
+			Actor: actor,
+			Since: since,
+			Until: until,
+		},
+		Format: format,
+	})
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	contentType := "application/json"
+	if format == audit.ExportFormatCSV {
+		contentType = "text/csv"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", "attachment; filename=activity-export."+string(format))
+	_, _ = w.Write(data) //nolint:gosec // G705: export data is server-generated audit content, not user-tainted
+}
+
+// =============================================================================
+// Direct Message Handler
+// =============================================================================
+
+// DirectMessageHandler handles direct messaging endpoints.
+type DirectMessageHandler struct {
+	service messaging.Service
+}
+
+// NewDirectMessageHandler creates a new DirectMessageHandler.
+func NewDirectMessageHandler(service messaging.Service) *DirectMessageHandler {
+	return &DirectMessageHandler{service: service}
+}
+
+// Send handles POST /api/v1/messages.
+func (h *DirectMessageHandler) Send(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RecipientOrgID string `json:"recipient_org_id"`
+		RecipientID    string `json:"recipient_id"`
+		Subject        string `json:"subject"`
+		Body           []byte `json:"body"`
+		ConversationID string `json:"conversation_id,omitempty"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		return
+	}
+
+	orgID := getOrgID(r)
+	callerID := getCallerID(r)
+	if orgID == "" || callerID == "" {
+		writeJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	msg, err := h.service.Send(r.Context(), messaging.SendRequest{
+		SenderOrgID:    orgID,
+		SenderID:       callerID,
+		RecipientOrgID: req.RecipientOrgID,
+		RecipientID:    req.RecipientID,
+		Subject:        req.Subject,
+		Body:           req.Body,
+		ConversationID: req.ConversationID,
+	})
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, msg)
+}
+
+// ListInbox handles GET /api/v1/messages.
+func (h *DirectMessageHandler) ListInbox(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+	callerID := getCallerID(r)
+	if orgID == "" || callerID == "" {
+		writeJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	limit, offset := getPaginationParams(r)
+	msgs, err := h.service.ListInbox(r.Context(), orgID, callerID, limit, offset)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"messages": msgs,
+		"count":    len(msgs),
+	})
+}
+
+// ListSent handles GET /api/v1/messages/sent.
+func (h *DirectMessageHandler) ListSent(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+	callerID := getCallerID(r)
+	if orgID == "" || callerID == "" {
+		writeJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	limit, offset := getPaginationParams(r)
+	msgs, err := h.service.ListSent(r.Context(), orgID, callerID, limit, offset)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"messages": msgs,
+		"count":    len(msgs),
+	})
+}
+
+// Read handles GET /api/v1/messages/{id}.
+func (h *DirectMessageHandler) Read(w http.ResponseWriter, r *http.Request) {
+	msgID := chi.URLParam(r, "id")
+	orgID := getOrgID(r)
+	callerID := getCallerID(r)
+	if orgID == "" || callerID == "" {
+		writeJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	msg, err := h.service.Read(r.Context(), orgID, callerID, msgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, msg)
+}
+
+// Delete handles DELETE /api/v1/messages/{id}.
+func (h *DirectMessageHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	msgID := chi.URLParam(r, "id")
+	orgID := getOrgID(r)
+	callerID := getCallerID(r)
+	if orgID == "" || callerID == "" {
+		writeJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	if err := h.service.Delete(r.Context(), orgID, callerID, msgID); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// Deliver handles POST /api/v1/messages/deliver (federation inbound).
+func (h *DirectMessageHandler) Deliver(w http.ResponseWriter, r *http.Request) {
+	// Verify federation certificate is present
+	if r.Context().Value(ContextKeyCert) == nil {
+		writeJSONError(w, http.StatusForbidden, "FORBIDDEN", "federation certificate required")
+		return
+	}
+
+	var req messaging.DeliverRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		return
+	}
+
+	msgID, err := h.service.Deliver(r.Context(), req)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"message_id": msgID})
+}
+
+// getCallerID extracts the caller's identity from context (admin or user).
+func getCallerID(r *http.Request) string {
+	if adminID, ok := r.Context().Value(ContextKeyAdminID).(string); ok && adminID != "" {
+		return adminID
+	}
+	if userID, ok := r.Context().Value(ContextKeyUserID).(string); ok && userID != "" {
+		return userID
+	}
+	return ""
 }

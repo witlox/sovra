@@ -415,6 +415,83 @@ func Migrations() []Migration {
 				ON admin_identities(sso_provider, sso_subject)
 				WHERE sso_provider IS NOT NULL`,
 		},
+		{
+			Version:     30,
+			Description: "Create workspace_group_bindings table",
+			SQL: `CREATE TABLE IF NOT EXISTS workspace_group_bindings (
+				workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+				org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+				group_id UUID NOT NULL REFERENCES identity_groups(id) ON DELETE CASCADE,
+				created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+				PRIMARY KEY (workspace_id, org_id)
+			);
+			CREATE INDEX IF NOT EXISTS idx_workspace_group_bindings_group ON workspace_group_bindings(group_id)`,
+		},
+		{
+			Version:     31,
+			Description: "Add idp_group_id column to identity_groups",
+			SQL:         `ALTER TABLE identity_groups ADD COLUMN IF NOT EXISTS idp_group_id VARCHAR(255)`,
+		},
+		{
+			Version:     32,
+			Description: "Create group_join_requests table",
+			SQL: `CREATE TABLE IF NOT EXISTS group_join_requests (
+				id UUID PRIMARY KEY,
+				group_id UUID NOT NULL REFERENCES identity_groups(id) ON DELETE CASCADE,
+				requester_id UUID NOT NULL,
+				org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+				reason TEXT,
+				status VARCHAR(50) NOT NULL DEFAULT 'pending',
+				reviewed_by VARCHAR(255),
+				created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+				reviewed_at TIMESTAMP,
+				CONSTRAINT chk_join_request_status CHECK (status IN ('pending', 'approved', 'denied'))
+			);
+			CREATE INDEX IF NOT EXISTS idx_group_join_requests_group ON group_join_requests(group_id);
+			CREATE INDEX IF NOT EXISTS idx_group_join_requests_pending ON group_join_requests(group_id) WHERE status = 'pending'`,
+		},
+		{
+			Version:     33,
+			Description: "Create backups table",
+			SQL: `CREATE TABLE IF NOT EXISTS backups (
+				id UUID PRIMARY KEY,
+				org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+				type VARCHAR(100) NOT NULL,
+				status VARCHAR(50) NOT NULL DEFAULT 'pending',
+				created_by VARCHAR(255) NOT NULL,
+				created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+				size BIGINT NOT NULL DEFAULT 0,
+				checksum VARCHAR(255),
+				CONSTRAINT chk_backup_status CHECK (status IN ('pending', 'completed', 'failed'))
+			);
+			CREATE INDEX IF NOT EXISTS idx_backups_org ON backups(org_id)`,
+		},
+		{
+			Version:     34,
+			Description: "Create direct_messages table",
+			SQL: `CREATE TABLE IF NOT EXISTS direct_messages (
+				id UUID PRIMARY KEY,
+				conversation_id UUID NOT NULL,
+				sender_org_id UUID NOT NULL,
+				sender_id UUID NOT NULL,
+				recipient_org_id UUID NOT NULL,
+				recipient_id UUID NOT NULL,
+				subject VARCHAR(256) NOT NULL,
+				body BYTEA NOT NULL,
+				status VARCHAR(50) NOT NULL DEFAULT 'pending',
+				direction VARCHAR(10) NOT NULL,
+				created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+				delivered_at TIMESTAMP,
+				read_at TIMESTAMP,
+				expires_at TIMESTAMP,
+				error_detail TEXT,
+				CONSTRAINT chk_dm_direction CHECK (direction IN ('sent','received')),
+				CONSTRAINT chk_dm_status CHECK (status IN ('pending','delivered','read','failed'))
+			);
+			CREATE INDEX IF NOT EXISTS idx_dm_recipient ON direct_messages(recipient_org_id, recipient_id, direction) WHERE direction = 'received';
+			CREATE INDEX IF NOT EXISTS idx_dm_sender ON direct_messages(sender_org_id, sender_id, direction) WHERE direction = 'sent';
+			CREATE INDEX IF NOT EXISTS idx_dm_conversation ON direct_messages(conversation_id)`,
+		},
 	}
 }
 

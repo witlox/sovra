@@ -159,7 +159,8 @@ type ErrorResponse struct {
 // WorkspaceCreateRequest represents a workspace creation request.
 type WorkspaceCreateRequest struct {
 	Name           string                `json:"name"`
-	Participants   []string              `json:"participants"`
+	Participants   []string              `json:"participants,omitempty"` // Deprecated: use GroupID
+	GroupID        string                `json:"group_id,omitempty"`
 	Classification models.Classification `json:"classification"`
 	Mode           models.WorkspaceMode  `json:"mode,omitempty"`
 	Purpose        string                `json:"purpose,omitempty"`
@@ -307,6 +308,7 @@ func (c *Client) InviteParticipant(ctx context.Context, workspaceID string, req 
 // AcceptInvitationRequest represents an invitation acceptance request.
 type AcceptInvitationRequest struct {
 	OrgID     string `json:"org_id"`
+	GroupID   string `json:"group_id,omitempty"`
 	Signature []byte `json:"signature,omitempty"`
 }
 
@@ -894,6 +896,61 @@ func (c *Client) RemoveGroupMember(ctx context.Context, groupID, identityID stri
 	return c.request(ctx, http.MethodDelete, "/api/v1/identities/groups/"+groupID+"/members/"+identityID, nil, nil)
 }
 
+// Group Join Requests API
+
+// RequestGroupJoinRequest represents a request to join a group.
+type RequestGroupJoinRequest struct {
+	Justification string `json:"justification,omitempty"`
+}
+
+// RequestGroupJoin submits a request to join an identity group.
+func (c *Client) RequestGroupJoin(ctx context.Context, groupID string, req RequestGroupJoinRequest) (*models.GroupJoinRequest, error) {
+	var result models.GroupJoinRequest
+	if err := c.request(ctx, http.MethodPost, "/api/v1/identities/groups/"+groupID+"/join-requests", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// listGroupJoinRequestsResponse wraps the list of group join requests.
+type listGroupJoinRequestsResponse struct {
+	Requests []*models.GroupJoinRequest `json:"requests"`
+	Count    int                        `json:"count"`
+}
+
+// ListGroupJoinRequests lists pending join requests for a group.
+func (c *Client) ListGroupJoinRequests(ctx context.Context, groupID string) ([]*models.GroupJoinRequest, error) {
+	var result listGroupJoinRequestsResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/identities/groups/"+groupID+"/join-requests", nil, &result); err != nil {
+		return nil, err
+	}
+	return result.Requests, nil
+}
+
+// ApproveGroupJoinRequest approves a pending group join request.
+func (c *Client) ApproveGroupJoinRequest(ctx context.Context, groupID, requestID string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/identities/groups/"+groupID+"/join-requests/"+requestID+"/approve", nil, nil)
+}
+
+// DenyGroupJoinRequest denies a pending group join request.
+func (c *Client) DenyGroupJoinRequest(ctx context.Context, groupID, requestID string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/identities/groups/"+groupID+"/join-requests/"+requestID+"/deny", nil, nil)
+}
+
+// RequestWorkspaceAccessRequest represents a request to access a workspace.
+type RequestWorkspaceAccessRequest struct {
+	Justification string `json:"justification,omitempty"`
+}
+
+// RequestWorkspaceAccess submits a request to access a workspace by joining its bound group.
+func (c *Client) RequestWorkspaceAccess(ctx context.Context, workspaceID string, req RequestWorkspaceAccessRequest) (*models.GroupJoinRequest, error) {
+	var result models.GroupJoinRequest
+	if err := c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/request-access", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Roles API
 
 // CreateRoleRequest represents a request to create a role.
@@ -1016,27 +1073,6 @@ func (c *Client) DeleteWorkspace(ctx context.Context, id string, req DeleteWorks
 	return c.request(ctx, http.MethodDelete, "/api/v1/workspaces/"+id, req, nil)
 }
 
-// AddParticipantRequest represents a request to add a participant to a workspace.
-type AddParticipantRequest struct {
-	OrgID     string `json:"org_id"`
-	Signature []byte `json:"signature,omitempty"`
-}
-
-// AddParticipant adds a participant to a workspace.
-func (c *Client) AddParticipant(ctx context.Context, workspaceID string, req AddParticipantRequest) error {
-	return c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/participants", req, nil)
-}
-
-// RemoveParticipantRequest represents a request to remove a participant from a workspace.
-type RemoveParticipantRequest struct {
-	Signature []byte `json:"signature,omitempty"`
-}
-
-// RemoveParticipant removes a participant from a workspace.
-func (c *Client) RemoveParticipant(ctx context.Context, workspaceID, orgID string, req RemoveParticipantRequest) error {
-	return c.request(ctx, http.MethodDelete, "/api/v1/workspaces/"+workspaceID+"/participants/"+orgID, req, nil)
-}
-
 // ArchiveWorkspaceRequest represents a workspace archive request.
 type ArchiveWorkspaceRequest struct {
 	Signature []byte `json:"signature,omitempty"`
@@ -1136,6 +1172,26 @@ type ImportFederationCertificateRequest struct {
 // ImportFederationCertificate imports a federation partner's certificate.
 func (c *Client) ImportFederationCertificate(ctx context.Context, req ImportFederationCertificateRequest) error {
 	return c.request(ctx, http.MethodPost, "/api/v1/federation/certificate/import", req, nil)
+}
+
+// RenewFederationCertRequest represents a federation certificate renewal request.
+type RenewFederationCertRequest struct {
+	Signature []byte `json:"signature,omitempty"`
+}
+
+// RenewFederationCertResponse represents the renewal response.
+type RenewFederationCertResponse struct {
+	Certificate []byte `json:"certificate"`
+	PartnerID   string `json:"partner_id"`
+}
+
+// RenewFederationCert renews a federation certificate for a partner.
+func (c *Client) RenewFederationCert(ctx context.Context, partnerOrgID string, req RenewFederationCertRequest) (*RenewFederationCertResponse, error) {
+	var result RenewFederationCertResponse
+	if err := c.request(ctx, http.MethodPost, "/api/v1/federation/"+partnerOrgID+"/renew-cert", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // ============================================================================
@@ -1793,4 +1849,161 @@ func (c *Client) ListRotationPolicies(ctx context.Context) (*RotationPolicyListR
 		return nil, err
 	}
 	return &result, nil
+}
+
+// ============================================================================
+// Backup API
+// ============================================================================
+
+// CreateBackupRequest represents a backup creation request.
+type CreateBackupRequest struct {
+	Type         string `json:"type"`
+	CRKSignature []byte `json:"crk_signature,omitempty"`
+}
+
+// CreateBackup creates a new backup.
+func (c *Client) CreateBackup(ctx context.Context, req CreateBackupRequest) (*models.Backup, error) {
+	var result models.Backup
+	if err := c.request(ctx, http.MethodPost, "/api/v1/backups", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// BackupListResponse represents a backup list response.
+type BackupListResponse struct {
+	Backups []*models.Backup `json:"backups"`
+	Count   int              `json:"count"`
+}
+
+// ListBackups lists all backups.
+func (c *Client) ListBackups(ctx context.Context) (*BackupListResponse, error) {
+	var result BackupListResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/backups", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetBackup retrieves a backup by ID.
+func (c *Client) GetBackup(ctx context.Context, id string) (*models.Backup, error) {
+	var result models.Backup
+	if err := c.request(ctx, http.MethodGet, "/api/v1/backups/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RestoreBackupRequest represents a backup restore request.
+type RestoreBackupRequest struct {
+	CRKSignature []byte `json:"crk_signature,omitempty"`
+}
+
+// RestoreBackup restores from a backup.
+func (c *Client) RestoreBackup(ctx context.Context, id string, req RestoreBackupRequest) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/backups/"+id+"/restore", req, nil)
+}
+
+// ============================================================================
+// Activity API
+// ============================================================================
+
+// ActivityListResponse represents an activity list response.
+type ActivityListResponse struct {
+	Events []*models.AuditEvent `json:"events"`
+	Count  int                  `json:"count"`
+	Actor  string               `json:"actor"`
+}
+
+// ListActivity lists the caller's own activity.
+func (c *Client) ListActivity(ctx context.Context, params AuditQueryParams) (*ActivityListResponse, error) {
+	path := "/api/v1/activity?"
+	if params.Since != "" {
+		path += "since=" + url.QueryEscape(params.Since) + "&"
+	}
+	if params.Until != "" {
+		path += "until=" + url.QueryEscape(params.Until) + "&"
+	}
+	if params.Limit > 0 {
+		path += fmt.Sprintf("limit=%d&", params.Limit)
+	}
+	var result ActivityListResponse
+	if err := c.request(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ExportActivityRequest represents an activity export request.
+type ExportActivityRequest struct {
+	Since  string `json:"since,omitempty"`
+	Until  string `json:"until,omitempty"`
+	Format string `json:"format,omitempty"`
+}
+
+// ExportActivity exports the caller's activity log.
+func (c *Client) ExportActivity(ctx context.Context, req ExportActivityRequest) ([]byte, error) {
+	return c.requestRaw(ctx, http.MethodPost, "/api/v1/activity/export", req)
+}
+
+// ============================================================================
+// Direct Messaging API
+// ============================================================================
+
+// SendMessageRequest represents a message send request.
+type SendMessageRequest struct {
+	RecipientOrgID string `json:"recipient_org_id"`
+	RecipientID    string `json:"recipient_id"`
+	Subject        string `json:"subject"`
+	Body           []byte `json:"body"`
+	ConversationID string `json:"conversation_id,omitempty"`
+}
+
+// MessageListResponse represents a message list response.
+type MessageListResponse struct {
+	Messages []*models.DirectMessage `json:"messages"`
+	Count    int                     `json:"count"`
+}
+
+// SendMessage sends a direct message.
+func (c *Client) SendMessage(ctx context.Context, req SendMessageRequest) (*models.DirectMessage, error) {
+	var result models.DirectMessage
+	if err := c.request(ctx, http.MethodPost, "/api/v1/messages", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ListMessages lists inbox messages (received).
+func (c *Client) ListMessages(ctx context.Context, limit, offset int) (*MessageListResponse, error) {
+	path := fmt.Sprintf("/api/v1/messages?limit=%d&offset=%d", limit, offset)
+	var result MessageListResponse
+	if err := c.request(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ListSentMessages lists sent messages.
+func (c *Client) ListSentMessages(ctx context.Context, limit, offset int) (*MessageListResponse, error) {
+	path := fmt.Sprintf("/api/v1/messages/sent?limit=%d&offset=%d", limit, offset)
+	var result MessageListResponse
+	if err := c.request(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ReadMessage reads a message by ID (decrypts and marks as read).
+func (c *Client) ReadMessage(ctx context.Context, id string) (*models.DirectMessage, error) {
+	var result models.DirectMessage
+	if err := c.request(ctx, http.MethodGet, "/api/v1/messages/"+id, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DeleteMessage deletes a message by ID.
+func (c *Client) DeleteMessage(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/messages/"+id, nil, nil)
 }

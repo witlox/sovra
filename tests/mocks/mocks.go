@@ -195,6 +195,32 @@ func (m *WorkspaceRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *WorkspaceRepository) GetByName(ctx context.Context, name string) (*models.Workspace, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, ws := range m.workspaces {
+		if ws.Name == name {
+			return ws, nil
+		}
+	}
+	return nil, errors.ErrNotFound
+}
+
+func (m *WorkspaceRepository) ListByParticipant(ctx context.Context, orgID string) ([]*models.Workspace, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.Workspace
+	for _, ws := range m.workspaces {
+		for _, p := range ws.ParticipantOrgs {
+			if p == orgID {
+				result = append(result, ws)
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 // WorkspaceCryptoService mock for workspace encryption.
 type WorkspaceCryptoService struct {
 	mu   sync.Mutex
@@ -1531,6 +1557,22 @@ func (m *UserIdentityRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *UserIdentityRepository) ListActiveSSOBound(ctx context.Context) ([]*models.UserIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("list SSO-bound users failed")
+	}
+	var result []*models.UserIdentity
+	for _, user := range m.users {
+		if user.Active && user.SSOProvider != "" && user.SSOSubject != "" {
+			result = append(result, user)
+		}
+	}
+	return result, nil
+}
+
 // ServiceIdentityRepository mock for service identity persistence.
 type ServiceIdentityRepository struct {
 	mu       sync.RWMutex
@@ -2170,6 +2212,233 @@ func (m *AccountRecoveryRepository) Update(ctx context.Context, req *models.Acco
 	return nil
 }
 
+// =============================================================================
+// Workspace Group Binding Mocks
+// =============================================================================
+
+// WorkspaceGroupBindingRepository mock for workspace-group binding persistence.
+type WorkspaceGroupBindingRepository struct {
+	mu       sync.RWMutex
+	bindings map[string]*models.WorkspaceGroupBinding // key: workspace_id:org_id
+	FailNext bool
+}
+
+func NewWorkspaceGroupBindingRepository() *WorkspaceGroupBindingRepository {
+	return &WorkspaceGroupBindingRepository{
+		bindings: make(map[string]*models.WorkspaceGroupBinding),
+	}
+}
+
+func bindingKey(workspaceID, orgID string) string {
+	return workspaceID + ":" + orgID
+}
+
+func (m *WorkspaceGroupBindingRepository) CreateBinding(ctx context.Context, binding *models.WorkspaceGroupBinding) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("create binding failed")
+	}
+	m.bindings[bindingKey(binding.WorkspaceID, binding.OrgID)] = binding
+	return nil
+}
+
+func (m *WorkspaceGroupBindingRepository) GetBinding(ctx context.Context, workspaceID, orgID string) (*models.WorkspaceGroupBinding, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get binding failed")
+	}
+	b, ok := m.bindings[bindingKey(workspaceID, orgID)]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return b, nil
+}
+
+func (m *WorkspaceGroupBindingRepository) ListByWorkspace(ctx context.Context, workspaceID string) ([]*models.WorkspaceGroupBinding, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.WorkspaceGroupBinding
+	for _, b := range m.bindings {
+		if b.WorkspaceID == workspaceID {
+			result = append(result, b)
+		}
+	}
+	return result, nil
+}
+
+func (m *WorkspaceGroupBindingRepository) ListByGroup(ctx context.Context, groupID string) ([]*models.WorkspaceGroupBinding, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.WorkspaceGroupBinding
+	for _, b := range m.bindings {
+		if b.GroupID == groupID {
+			result = append(result, b)
+		}
+	}
+	return result, nil
+}
+
+func (m *WorkspaceGroupBindingRepository) DeleteBinding(ctx context.Context, workspaceID, orgID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := bindingKey(workspaceID, orgID)
+	if _, ok := m.bindings[key]; !ok {
+		return errors.ErrNotFound
+	}
+	delete(m.bindings, key)
+	return nil
+}
+
+// =============================================================================
+// Group Join Request Mocks
+// =============================================================================
+
+// GroupJoinRequestRepository mock for group join request persistence.
+type GroupJoinRequestRepository struct {
+	mu       sync.RWMutex
+	requests map[string]*models.GroupJoinRequest
+	FailNext bool
+}
+
+func NewGroupJoinRequestRepository() *GroupJoinRequestRepository {
+	return &GroupJoinRequestRepository{
+		requests: make(map[string]*models.GroupJoinRequest),
+	}
+}
+
+func (m *GroupJoinRequestRepository) Create(ctx context.Context, req *models.GroupJoinRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("create join request failed")
+	}
+	if req.ID == "" {
+		req.ID = uuid.New().String()
+	}
+	m.requests[req.ID] = req
+	return nil
+}
+
+func (m *GroupJoinRequestRepository) Get(ctx context.Context, id string) (*models.GroupJoinRequest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get join request failed")
+	}
+	req, ok := m.requests[id]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return req, nil
+}
+
+func (m *GroupJoinRequestRepository) ListPending(ctx context.Context, groupID string) ([]*models.GroupJoinRequest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("list pending requests failed")
+	}
+	var result []*models.GroupJoinRequest
+	for _, req := range m.requests {
+		if req.GroupID == groupID && req.Status == models.GroupJoinRequestPending {
+			result = append(result, req)
+		}
+	}
+	return result, nil
+}
+
+func (m *GroupJoinRequestRepository) Update(ctx context.Context, req *models.GroupJoinRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("update join request failed")
+	}
+	if _, ok := m.requests[req.ID]; !ok {
+		return errors.ErrNotFound
+	}
+	m.requests[req.ID] = req
+	return nil
+}
+
+// =============================================================================
+// Backup Mocks
+// =============================================================================
+
+// BackupRepository mock for backup persistence.
+type BackupRepository struct {
+	mu       sync.RWMutex
+	backups  map[string]*models.Backup
+	FailNext bool
+}
+
+func NewBackupRepository() *BackupRepository {
+	return &BackupRepository{
+		backups: make(map[string]*models.Backup),
+	}
+}
+
+func (m *BackupRepository) Create(ctx context.Context, backup *models.Backup) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("create backup failed")
+	}
+	if backup.ID == "" {
+		backup.ID = uuid.New().String()
+	}
+	m.backups[backup.ID] = backup
+	return nil
+}
+
+func (m *BackupRepository) Get(ctx context.Context, id string) (*models.Backup, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get backup failed")
+	}
+	b, ok := m.backups[id]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return b, nil
+}
+
+func (m *BackupRepository) List(ctx context.Context, orgID string) ([]*models.Backup, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.Backup
+	for _, b := range m.backups {
+		if orgID == "" || b.OrgID == orgID {
+			result = append(result, b)
+		}
+	}
+	return result, nil
+}
+
+func (m *BackupRepository) Update(ctx context.Context, backup *models.Backup) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("update backup failed")
+	}
+	if _, ok := m.backups[backup.ID]; !ok {
+		return errors.ErrNotFound
+	}
+	m.backups[backup.ID] = backup
+	return nil
+}
+
 // MockCRKProvider is a mock CRK provider for testing.
 type MockCRKProvider struct{}
 
@@ -2181,4 +2450,260 @@ func (m *MockCRKProvider) GetActiveCRK(ctx context.Context, orgID string) (*mode
 
 func (m *MockCRKProvider) Verify(publicKey []byte, data []byte, signature []byte) (bool, error) {
 	return true, nil
+}
+
+// =============================================================================
+// Direct Message Mocks
+// =============================================================================
+
+// DirectMessageRepository mock for direct message persistence.
+type DirectMessageRepository struct {
+	mu       sync.RWMutex
+	messages map[string]*models.DirectMessage
+	FailNext bool
+}
+
+func NewDirectMessageRepository() *DirectMessageRepository {
+	return &DirectMessageRepository{
+		messages: make(map[string]*models.DirectMessage),
+	}
+}
+
+func (m *DirectMessageRepository) Create(ctx context.Context, msg *models.DirectMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return fmt.Errorf("create message failed")
+	}
+	if msg.ID == "" {
+		msg.ID = uuid.New().String()
+	}
+	m.messages[msg.ID] = msg
+	return nil
+}
+
+func (m *DirectMessageRepository) Get(ctx context.Context, id string) (*models.DirectMessage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("get message failed")
+	}
+	msg, ok := m.messages[id]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return msg, nil
+}
+
+func (m *DirectMessageRepository) ListInbox(ctx context.Context, orgID, recipientID string, limit, offset int) ([]*models.DirectMessage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.DirectMessage
+	for _, msg := range m.messages {
+		if msg.RecipientOrgID == orgID && msg.RecipientID == recipientID && msg.Direction == "received" {
+			result = append(result, msg)
+		}
+	}
+	// Apply pagination
+	if offset >= len(result) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(result) {
+		end = len(result)
+	}
+	return result[offset:end], nil
+}
+
+func (m *DirectMessageRepository) ListSent(ctx context.Context, orgID, senderID string, limit, offset int) ([]*models.DirectMessage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.DirectMessage
+	for _, msg := range m.messages {
+		if msg.SenderOrgID == orgID && msg.SenderID == senderID && msg.Direction == "sent" {
+			result = append(result, msg)
+		}
+	}
+	if offset >= len(result) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(result) {
+		end = len(result)
+	}
+	return result[offset:end], nil
+}
+
+func (m *DirectMessageRepository) ListByConversation(ctx context.Context, conversationID string, limit, offset int) ([]*models.DirectMessage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.DirectMessage
+	for _, msg := range m.messages {
+		if msg.ConversationID == conversationID {
+			result = append(result, msg)
+		}
+	}
+	if offset >= len(result) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(result) {
+		end = len(result)
+	}
+	return result[offset:end], nil
+}
+
+func (m *DirectMessageRepository) MarkDelivered(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	msg, ok := m.messages[id]
+	if !ok {
+		return errors.ErrNotFound
+	}
+	msg.Status = models.DirectMessageStatusDelivered
+	now := time.Now()
+	msg.DeliveredAt = &now
+	return nil
+}
+
+func (m *DirectMessageRepository) MarkRead(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	msg, ok := m.messages[id]
+	if !ok {
+		return errors.ErrNotFound
+	}
+	msg.Status = models.DirectMessageStatusRead
+	now := time.Now()
+	msg.ReadAt = &now
+	return nil
+}
+
+func (m *DirectMessageRepository) MarkFailed(ctx context.Context, id, errorDetail string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	msg, ok := m.messages[id]
+	if !ok {
+		return errors.ErrNotFound
+	}
+	msg.Status = models.DirectMessageStatusFailed
+	msg.ErrorDetail = errorDetail
+	return nil
+}
+
+func (m *DirectMessageRepository) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.messages[id]; !ok {
+		return errors.ErrNotFound
+	}
+	delete(m.messages, id)
+	return nil
+}
+
+// MockFederationRelay is a mock federation relay for messaging tests.
+type MockFederationRelay struct {
+	mu              sync.Mutex
+	Active          bool
+	RelayErr        error
+	RelayResponse   []byte
+	RelayedPayloads [][]byte
+}
+
+func NewMockFederationRelay() *MockFederationRelay {
+	return &MockFederationRelay{
+		Active:        true,
+		RelayResponse: []byte(`{"message_id":"relay-msg-1"}`),
+	}
+}
+
+func (m *MockFederationRelay) RelayMessage(ctx context.Context, partnerOrgID string, payload []byte) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.RelayedPayloads = append(m.RelayedPayloads, payload)
+	if m.RelayErr != nil {
+		return nil, m.RelayErr
+	}
+	return m.RelayResponse, nil
+}
+
+func (m *MockFederationRelay) IsFederationActive(ctx context.Context, partnerOrgID string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Active, nil
+}
+
+// MockEncryptor is a mock encryptor for messaging tests.
+// It does a simple prefix-based "encryption" for testability.
+type MockEncryptor struct {
+	mu       sync.Mutex
+	FailNext bool
+}
+
+func NewMockEncryptor() *MockEncryptor {
+	return &MockEncryptor{}
+}
+
+func (m *MockEncryptor) Encrypt(ctx context.Context, orgID string, plaintext []byte) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("encrypt failed")
+	}
+	return append([]byte("enc:"+orgID+":"), plaintext...), nil
+}
+
+func (m *MockEncryptor) Decrypt(ctx context.Context, orgID string, ciphertext []byte) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return nil, fmt.Errorf("decrypt failed")
+	}
+	prefix := []byte("enc:" + orgID + ":")
+	if len(ciphertext) > len(prefix) {
+		return ciphertext[len(prefix):], nil
+	}
+	return ciphertext, nil
+}
+
+// MockIdentityResolver is a mock identity resolver for messaging tests.
+type MockIdentityResolver struct {
+	mu       sync.Mutex
+	Exists   bool
+	FailNext bool
+}
+
+func NewMockIdentityResolver() *MockIdentityResolver {
+	return &MockIdentityResolver{Exists: true}
+}
+
+func (m *MockIdentityResolver) IdentityExists(ctx context.Context, identityID string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailNext {
+		m.FailNext = false
+		return false, fmt.Errorf("identity lookup failed")
+	}
+	return m.Exists, nil
+}
+
+// MockAuditService is a mock audit service that records events.
+type MockAuditService struct {
+	mu     sync.Mutex
+	Events []*models.AuditEvent
+}
+
+func NewMockAuditService() *MockAuditService {
+	return &MockAuditService{}
+}
+
+func (m *MockAuditService) Log(ctx context.Context, event *models.AuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Events = append(m.Events, event)
+	return nil
 }

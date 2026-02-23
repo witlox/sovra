@@ -260,6 +260,119 @@ func TestScheduler_FailOpen_IdPUnreachable(t *testing.T) {
 	assert.Empty(t, disabledIDs, "should not disable admins when IdP is unreachable (fail-open)")
 }
 
+// mockUserRepo implements identity.UserRepository for reconciliation testing.
+type mockUserRepo struct {
+	mu    sync.RWMutex
+	users map[string]*models.UserIdentity
+}
+
+func newMockUserRepo() *mockUserRepo {
+	return &mockUserRepo{users: make(map[string]*models.UserIdentity)}
+}
+
+func (m *mockUserRepo) Create(_ context.Context, user *models.UserIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.users[user.ID] = user
+	return nil
+}
+
+func (m *mockUserRepo) Get(_ context.Context, id string) (*models.UserIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if u, ok := m.users[id]; ok {
+		return u, nil
+	}
+	return nil, assert.AnError
+}
+
+func (m *mockUserRepo) GetByEmail(_ context.Context, _, _ string) (*models.UserIdentity, error) {
+	return nil, assert.AnError
+}
+
+func (m *mockUserRepo) GetBySSOSubject(_ context.Context, _ models.SSOProvider, _ string) (*models.UserIdentity, error) {
+	return nil, assert.AnError
+}
+
+func (m *mockUserRepo) List(_ context.Context, _ string) ([]*models.UserIdentity, error) {
+	return nil, nil
+}
+
+func (m *mockUserRepo) ListActiveSSOBound(_ context.Context) ([]*models.UserIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*models.UserIdentity
+	for _, u := range m.users {
+		if u.Active && u.SSOProvider != "" && u.SSOSubject != "" {
+			result = append(result, u)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockUserRepo) Update(_ context.Context, user *models.UserIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.users[user.ID] = user
+	return nil
+}
+
+func (m *mockUserRepo) Delete(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.users, id)
+	return nil
+}
+
+func TestScheduler_DisablesEjectedUser(t *testing.T) {
+	adminRepo := newMockAdminRepo()
+	userRepo := newMockUserRepo()
+	checker := newMockChecker()
+	auditor := &mockAuditor{}
+
+	userRepo.users["user-1"] = &models.UserIdentity{
+		ID:          "user-1",
+		OrgID:       "org-1",
+		Active:      true,
+		SSOProvider: models.SSOProviderAzureAD,
+		SSOSubject:  "user-gone",
+	}
+	checker.SetResult("user-gone", idp.SubjectStatus{Active: false})
+
+	var disabledUserIDs []string
+	var mu sync.Mutex
+	disableUserFn := func(_ context.Context, userID string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		disabledUserIDs = append(disabledUserIDs, userID)
+		return nil
+	}
+
+	s := reconciliation.NewScheduler(adminRepo, checker, func(_ context.Context, _ string) error { return nil }, auditor, 50*time.Millisecond)
+	s.SetUserReconciliation(userRepo, disableUserFn)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go s.Start(ctx)
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Contains(t, disabledUserIDs, "user-1")
+
+	events := auditor.Events()
+	require.NotEmpty(t, events)
+	found := false
+	for _, e := range events {
+		if e.EventType == models.AuditEventTypeUserReconcileDisabled {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected user.reconciliation.disabled audit event")
+}
+
 func TestScheduler_AdminWithoutSSO_NotChecked(t *testing.T) {
 	repo := newMockAdminRepo()
 	checker := newMockChecker()

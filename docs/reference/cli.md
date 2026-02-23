@@ -31,16 +31,23 @@ sovra health
 
 ## login
 
-Authenticate with the Sovra API.
+Authenticate with the Sovra API. Uses SSO by default.
 
 ```bash
-sovra login --email admin@example.org --password SECRET
+sovra login --issuer-url https://idp.example.org --client-id sovra-cli
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--email` | Email address |
-| `--password` | Password |
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--issuer-url` | OIDC issuer URL | |
+| `--client-id` | OIDC client ID | |
+| `--auth-method` | Authentication method (`sso`, `approle`) | `sso` |
+
+For legacy AppRole authentication:
+
+```bash
+sovra login --auth-method approle
+```
 
 ---
 
@@ -124,10 +131,47 @@ sovra metrics
 
 ## activity
 
-View activity log for an actor.
+View and export activity logs.
+
+### activity list
+
+List activity across the organization.
 
 ```bash
-sovra activity actor-123 --since 2026-01-01T00:00:00Z --limit 50
+sovra activity list --since 2026-01-01T00:00:00Z --limit 50
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--since` | Start time (RFC3339) | |
+| `--until` | End time (RFC3339) | |
+| `--limit` | Maximum results | `100` |
+
+### activity export
+
+Export activity logs to a file.
+
+```bash
+sovra activity export \
+  --since 2026-01-01T00:00:00Z \
+  --until 2026-02-01T00:00:00Z \
+  --output activity-export.json \
+  --format json
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--since` | Start time (RFC3339) | |
+| `--until` | End time (RFC3339) | |
+| `--output` | Output file | |
+| `--format` | Export format (`json`, `csv`) | `json` |
+
+### activity get
+
+View activity log for a specific actor.
+
+```bash
+sovra activity get actor-123 --since 2026-01-01T00:00:00Z --limit 50
 ```
 
 | Flag | Description | Default |
@@ -147,7 +191,7 @@ Manage shared cryptographic workspaces.
 ```bash
 sovra workspace create \
   --name genomics-data \
-  --participants org-a,org-b \
+  --group-id group-123 \
   --classification CONFIDENTIAL \
   --purpose "Shared genomics research"
 ```
@@ -155,7 +199,7 @@ sovra workspace create \
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--name` | Workspace name (required) | |
-| `--participants` | Participant org IDs (comma-separated) | |
+| `--group-id` | Identity group ID for participants | |
 | `--classification` | Data classification | `CONFIDENTIAL` |
 | `--purpose` | Workspace purpose | |
 
@@ -221,8 +265,13 @@ sovra workspace invite ws-123 --org-id org-b
 ### workspace accept-invitation
 
 ```bash
-sovra workspace accept-invitation ws-123 --org-id org-b
+sovra workspace accept-invitation ws-123 --org-id org-b --group-id group-123
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--org-id` | Organization ID |
+| `--group-id` | Identity group ID to join as |
 
 ### workspace decline-invitation
 
@@ -230,17 +279,17 @@ sovra workspace accept-invitation ws-123 --org-id org-b
 sovra workspace decline-invitation ws-123 --org-id org-b
 ```
 
-### workspace add-participant
+### workspace request-access
+
+Request access to an existing workspace.
 
 ```bash
-sovra workspace add-participant ws-123 --org-id org-c
+sovra workspace request-access ws-123 --justification "Need access for data analysis"
 ```
 
-### workspace remove-participant
-
-```bash
-sovra workspace remove-participant ws-123 --org-id org-c
-```
+| Flag | Description |
+|------|-------------|
+| `--justification` | Justification for the access request |
 
 ### workspace archive
 
@@ -341,6 +390,14 @@ sovra federation import-cert \
 |------|-------------|
 | `--partner-org` | Partner organization ID |
 | `--cert-file` | Certificate file path |
+
+### federation renew-cert
+
+Renew the federation certificate for a partner organization.
+
+```bash
+sovra federation renew-cert partner-org-id
+```
 
 ---
 
@@ -618,7 +675,9 @@ sovra identity get identity-123 --type admin
 sovra identity create admin \
   --email admin@example.org \
   --name "Admin User" \
-  --role security_admin
+  --role security_admin \
+  --sso-provider azure_ad \
+  --sso-subject sub-456
 ```
 
 | Flag | Description | Default |
@@ -626,6 +685,8 @@ sovra identity create admin \
 | `--email` | Admin email address | |
 | `--name` | Admin display name | |
 | `--role` | Admin role | `operations_admin` |
+| `--sso-provider` | SSO provider (`azure_ad`, `okta`, `google`) | |
+| `--sso-subject` | SSO subject identifier | |
 
 Roles: `super_admin`, `security_admin`, `operations_admin`, `auditor`
 
@@ -763,6 +824,30 @@ sovra identity group remove-member group-123 --identity-id user-456
 | Flag | Description |
 |------|-------------|
 | `--identity-id` | Identity ID to remove |
+
+### identity group join-requests
+
+List pending join requests for a group.
+
+```bash
+sovra identity group join-requests group-123
+```
+
+### identity group approve-join
+
+Approve a pending join request.
+
+```bash
+sovra identity group approve-join request-123
+```
+
+### identity group deny-join
+
+Deny a pending join request.
+
+```bash
+sovra identity group deny-join request-123
+```
 
 ### identity role create
 
@@ -1078,6 +1163,48 @@ sovra compliance access-review \
 
 ---
 
+## backup
+
+Manage system backups.
+
+### backup create
+
+Create a new backup.
+
+```bash
+sovra backup create --type full
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--type` | Backup type (e.g. `full`, `incremental`) | |
+
+### backup list
+
+List available backups.
+
+```bash
+sovra backup list
+```
+
+### backup get
+
+Get details of a specific backup.
+
+```bash
+sovra backup get backup-123
+```
+
+### backup restore
+
+Restore from a backup. Requires CRK co-signature. (Not yet implemented.)
+
+```bash
+sovra backup restore backup-123
+```
+
+---
+
 ## rotation-policy
 
 Manage automatic key rotation policies for workspaces.
@@ -1110,3 +1237,53 @@ sovra rotation-policy delete ws-123
 ```bash
 sovra rotation-policy list
 ```
+
+---
+
+## message
+
+Send and receive encrypted direct messages between users on federated control planes without creating a workspace.
+
+### message send
+
+```bash
+sovra message send --to <recipient-id> --to-org <org-id> --subject "..." --body "..."
+sovra message send --to <recipient-id> --subject "..." --body-file ./message.txt
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--to` | Recipient identity ID | (required) |
+| `--to-org` | Recipient organization ID | Caller's `--org-id` |
+| `--subject` | Message subject (max 256 chars) | (required) |
+| `--body` | Message body text | |
+| `--body-file` | File containing message body (max 64KB) | |
+
+When `--to-org` is omitted, the message is treated as same-org (no federation required). Cross-org messages require an active federation link with the recipient's organization.
+
+### message list
+
+```bash
+sovra message list [--sent] [--limit N]
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--sent` | Show sent messages instead of inbox | `false` |
+| `--limit` | Maximum messages to return | `50` |
+
+### message read
+
+```bash
+sovra message read <message-id>
+```
+
+Decrypts and displays the message body. Received messages are automatically marked as read.
+
+### message delete
+
+```bash
+sovra message delete <message-id>
+```
+
+Deletes a message you own (sent or received).

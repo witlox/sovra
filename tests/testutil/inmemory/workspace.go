@@ -283,14 +283,6 @@ func (s *WorkspaceService) List(ctx context.Context, orgID string, limit, offset
 	return s.repo.List(ctx, orgID, limit, offset)
 }
 
-func (s *WorkspaceService) AddParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error {
-	return nil
-}
-
-func (s *WorkspaceService) RemoveParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error {
-	return nil
-}
-
 func (s *WorkspaceService) Archive(ctx context.Context, workspaceID string, signature []byte) error {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {

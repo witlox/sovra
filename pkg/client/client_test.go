@@ -732,29 +732,6 @@ func TestDeleteWorkspace(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestAddParticipant(t *testing.T) {
-	_, c := mockServer(t, func(r chi.Router) {
-		r.Post("/api/v1/workspaces/{id}/participants", func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "ws1", chi.URLParam(r, "id"))
-			w.WriteHeader(http.StatusNoContent)
-		})
-	})
-	err := c.AddParticipant(context.Background(), "ws1", AddParticipantRequest{OrgID: "org2"})
-	require.NoError(t, err)
-}
-
-func TestRemoveParticipant(t *testing.T) {
-	_, c := mockServer(t, func(r chi.Router) {
-		r.Delete("/api/v1/workspaces/{id}/participants/{orgId}", func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "ws1", chi.URLParam(r, "id"))
-			assert.Equal(t, "org2", chi.URLParam(r, "orgId"))
-			w.WriteHeader(http.StatusNoContent)
-		})
-	})
-	err := c.RemoveParticipant(context.Background(), "ws1", "org2", RemoveParticipantRequest{})
-	require.NoError(t, err)
-}
-
 func TestArchiveWorkspace(t *testing.T) {
 	_, c := mockServer(t, func(r chi.Router) {
 		r.Post("/api/v1/workspaces/{id}/archive", func(w http.ResponseWriter, r *http.Request) {
@@ -1524,4 +1501,138 @@ func TestGetActivityLog(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, events, 1)
 	assert.Equal(t, "ev1", events[0].ID)
+}
+
+// ============================================================================
+// Direct Messaging Tests
+// ============================================================================
+
+func TestSendMessage(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+			var req SendMessageRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			writeJSONResponse(w, http.StatusCreated, models.DirectMessage{
+				ID:             "msg-1",
+				SenderOrgID:    "org1",
+				SenderID:       "user-a",
+				RecipientOrgID: req.RecipientOrgID,
+				RecipientID:    req.RecipientID,
+				Subject:        req.Subject,
+				Status:         models.DirectMessageStatusDelivered,
+				Direction:      "sent",
+			})
+		})
+	})
+	msg, err := c.SendMessage(context.Background(), SendMessageRequest{
+		RecipientOrgID: "org2",
+		RecipientID:    "user-b",
+		Subject:        "Hello",
+		Body:           []byte("hi there"),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "msg-1", msg.ID)
+	assert.Equal(t, "Hello", msg.Subject)
+	assert.Equal(t, models.DirectMessageStatusDelivered, msg.Status)
+}
+
+func TestSendMessageError(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusBadRequest, ErrorResponse{Error: "subject is required"})
+		})
+	})
+	_, err := c.SendMessage(context.Background(), SendMessageRequest{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "subject is required")
+}
+
+func TestListMessages(t *testing.T) {
+	// ListMessages builds query params into path, use catch-all handler
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, MessageListResponse{
+			Messages: []*models.DirectMessage{
+				{ID: "msg-1", Subject: "Inbox msg", Direction: "received"},
+			},
+			Count: 1,
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := New(Config{BaseURL: srv.URL})
+	resp, err := c.ListMessages(context.Background(), 20, 5)
+	require.NoError(t, err)
+	assert.Equal(t, 1, resp.Count)
+	assert.Equal(t, "msg-1", resp.Messages[0].ID)
+}
+
+func TestListSentMessages(t *testing.T) {
+	// ListSentMessages builds query params into path, use catch-all handler
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, MessageListResponse{
+			Messages: []*models.DirectMessage{
+				{ID: "msg-2", Subject: "Sent msg", Direction: "sent"},
+			},
+			Count: 1,
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := New(Config{BaseURL: srv.URL})
+	resp, err := c.ListSentMessages(context.Background(), 50, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 1, resp.Count)
+	assert.Equal(t, "sent", resp.Messages[0].Direction)
+}
+
+func TestReadMessage(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/messages/{id}", func(w http.ResponseWriter, r *http.Request) {
+			id := chi.URLParam(r, "id")
+			writeJSONResponse(w, http.StatusOK, models.DirectMessage{
+				ID:      id,
+				Subject: "Read me",
+				Body:    []byte("decrypted content"),
+				Status:  models.DirectMessageStatusRead,
+			})
+		})
+	})
+	msg, err := c.ReadMessage(context.Background(), "msg-123")
+	require.NoError(t, err)
+	assert.Equal(t, "msg-123", msg.ID)
+	assert.Equal(t, "decrypted content", string(msg.Body))
+	assert.Equal(t, models.DirectMessageStatusRead, msg.Status)
+}
+
+func TestReadMessageNotFound(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/messages/{id}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusNotFound, ErrorResponse{Error: "not found"})
+		})
+	})
+	_, err := c.ReadMessage(context.Background(), "nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestDeleteMessage(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Delete("/api/v1/messages/{id}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
+		})
+	})
+	err := c.DeleteMessage(context.Background(), "msg-456")
+	require.NoError(t, err)
+}
+
+func TestDeleteMessageNotFound(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Delete("/api/v1/messages/{id}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusNotFound, ErrorResponse{Error: "not found"})
+		})
+	})
+	err := c.DeleteMessage(context.Background(), "nonexistent")
+	require.Error(t, err)
 }

@@ -105,6 +105,9 @@ type AdminConfig struct {
 	IDPIssuerURL           string        `mapstructure:"idp_issuer_url"`
 	IDPClientID            string        `mapstructure:"idp_client_id"`
 	IDPOIDCSecret          string        `mapstructure:"idp_client_secret"` // nolint:gosec // G117: OIDC client secret
+	IDPGroupEndpoint       string        `mapstructure:"idp_group_endpoint"`
+	GroupSyncInterval      time.Duration `mapstructure:"group_sync_interval"`
+	GroupSyncEnabled       bool          `mapstructure:"group_sync_enabled"`
 }
 
 // TelemetryConfig holds telemetry/tracing configuration.
@@ -200,6 +203,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("admin.cert_ttl", 24*time.Hour)
 	v.SetDefault("admin.reconciliation_interval", 5*time.Minute)
 	v.SetDefault("admin.reconciliation_enabled", false)
+	v.SetDefault("admin.group_sync_interval", 5*time.Minute)
+	v.SetDefault("admin.group_sync_enabled", false)
 
 	// Telemetry defaults
 	v.SetDefault("telemetry.enabled", false)

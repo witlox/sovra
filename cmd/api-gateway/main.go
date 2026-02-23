@@ -23,6 +23,8 @@ import (
 	"github.com/witlox/sovra/internal/federation"
 	"github.com/witlox/sovra/internal/identity"
 	"github.com/witlox/sovra/internal/identity/idp"
+	"github.com/witlox/sovra/internal/identity/sync"
+	"github.com/witlox/sovra/internal/messaging"
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/reconciliation"
 	"github.com/witlox/sovra/internal/rotation"
@@ -161,6 +163,7 @@ func main() {
 
 	// Configure IdP checker and reconciliation scheduler
 	var reconciler *reconciliation.Scheduler
+	var groupSyncer *sync.Scheduler
 	if cfg.Admin.IDPIssuerURL != "" {
 		idpChecker, err := idp.NewOIDCChecker(idp.OIDCCheckerConfig{
 			IssuerURL:  cfg.Admin.IDPIssuerURL,
@@ -182,9 +185,31 @@ func main() {
 				adminRepo, idpChecker, identityMgr.DisableAdmin, auditSvc,
 				cfg.Admin.ReconciliationInterval,
 			)
+			// Enable user reconciliation
+			reconciler.SetUserReconciliation(userRepo, identityMgr.DisableUser)
 			go reconciler.Start(ctx)
-			logger.Info("admin IdP reconciliation enabled",
+			logger.Info("IdP reconciliation enabled (admins + users)",
 				"interval", cfg.Admin.ReconciliationInterval)
+		}
+
+		// Group membership sync
+		if cfg.Admin.GroupSyncEnabled {
+			groupChecker, err := idp.NewOIDCGroupChecker(idp.OIDCGroupCheckerConfig{
+				IssuerURL:             cfg.Admin.IDPIssuerURL,
+				ClientID:              cfg.Admin.IDPClientID,
+				OIDCSecret:            cfg.Admin.IDPOIDCSecret,
+				GroupEndpointTemplate: cfg.Admin.IDPGroupEndpoint,
+			})
+			if err != nil {
+				logger.Error("failed to create IdP group checker", "error", err)
+				os.Exit(1)
+			}
+			groupSyncer = sync.NewScheduler(
+				groupRepo, groupChecker, auditSvc,
+				cfg.Admin.GroupSyncInterval,
+			)
+			go groupSyncer.Start(ctx)
+			logger.Info("IdP group sync enabled", "interval", cfg.Admin.GroupSyncInterval)
 		}
 	} else {
 		// No IdP configured — air-gap mode assumption.
@@ -229,6 +254,16 @@ func main() {
 	rotationScheduler := rotation.NewScheduler(wsSvc, time.Hour)
 	rotationScheduler.Start(ctx)
 
+	// Direct messaging service
+	msgRepo := postgres.NewDirectMessageRepository(db)
+	msgEncryptor := messaging.NewVaultEncryptor(vaultClient.Transit("transit"))
+	msgResolver := &messaging.IdentityManagerAdapter{
+		GetUserFn: func(ctx context.Context, id string) (any, error) {
+			return identityMgr.GetUser(ctx, id)
+		},
+	}
+	msgSvc := messaging.NewService(msgRepo, fedSvc, msgEncryptor, msgResolver, auditSvc)
+
 	services := &api.Services{
 		Workspace:         wsSvc,
 		Federation:        fedSvc,
@@ -243,6 +278,7 @@ func main() {
 		AccountRecovery:   recoveryMgr,
 		Compliance:        complianceGen,
 		RotationScheduler: rotationScheduler,
+		Messaging:         msgSvc,
 	}
 
 	routerCfg := api.DefaultRouterConfig()
@@ -307,6 +343,9 @@ func main() {
 	rotationScheduler.Stop()
 	if reconciler != nil {
 		reconciler.Stop()
+	}
+	if groupSyncer != nil {
+		groupSyncer.Stop()
 	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()

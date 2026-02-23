@@ -6,294 +6,718 @@ title: Administrator Guide
 # Administrator Guide
 
 This guide covers administrative operations for Sovra platform administrators.
+It reflects the current architecture: group-workspace binding, mTLS admin
+authentication, CRK co-signature for privileged operations, and IdP integration
+with automatic air-gap detection.
 
 ## Overview
 
 Administrators manage the Sovra platform, including:
-- Organization setup and configuration
-- User and identity management
-- Edge node administration
-- Federation management
-- Policy configuration
-- Audit and compliance
+
+- Organization initialization and CRK lifecycle
+- Admin identity creation, enrollment, and certificate renewal
+- Group-based workspace access control
+- Cross-organization invitation flow
+- Federation with partner organizations
+- IdP integration and group synchronization (connected mode)
+- Manual group management (air-gap mode)
+- Backup and restore
+- Compliance reporting and audit
 
 ## Prerequisites
 
 Administrators must have:
-- **Admin identity** with appropriate RBAC roles
-- **CRK share access** for high-risk operations (or ability to coordinate with CRK custodians)
-- **CLI access** to `sovra` tool
+
+- **mTLS client certificate** issued during enrollment (`--cert` and `--key` flags)
+- **CRK co-signature capability** for high-risk operations (coordinate with CRK custodians)
+- **CLI access** to the `sovra` binary
+
+Admin authentication uses mTLS client certificates throughout. There is no
+password-based login for admin operations. Supply your certificate on every
+command that requires admin privileges:
+
+```bash
+sovra --cert admin.crt --key admin.key --org-id my-org <command>
+```
+
+You can also set persistent configuration via environment variables or a config
+file to avoid repeating these flags.
 
 ## Initial Setup
 
-### 1. Initialize Organization
+### 1. Generate the Customer Root Key (CRK)
+
+The CRK underpins all high-trust operations. Generate it with Shamir secret
+sharing so that no single custodian holds the complete key:
 
 ```bash
-# Generate CRK (requires 3 of 5 custodians for reconstruction)
 sovra crk generate \
-  --org-id eth-zurich \
+  --org-id my-org \
   --shares 5 \
   --threshold 3 \
   --output crk-shares.json
-
-# Initialize control plane
-sovra init \
-  --org-id eth-zurich \
-  --org-name "ETH Zurich" \
-  --config sovra.yaml
-
-# Verify initialization
-sovra status
 ```
 
-### 2. Create Initial Admin
+Distribute each share to a separate custodian. The `crk-shares.json` file
+contains all shares and the public key. After distribution, delete the file
+from the generation host.
+
+### 2. Sign the Bootstrap Message
+
+Before creating the first admin, produce the CRK signature that authorizes the
+operation. First, generate the canonical message:
 
 ```bash
-# Create first admin (bootstrap)
-sovra admin create \
-  --email admin@eth.ch \
+sovra identity admin sign-message \
+  --org-id my-org \
+  --email admin@example.org \
   --name "Platform Admin" \
-  --role platform-admin \
-  --mfa-required
-
-# Output: Admin created. ID: admin-xxxx
+  --role super_admin
 ```
 
-### 3. Configure Edge Nodes
+Have the CRK custodians reconstruct the key and sign this message. The resulting
+hex-encoded Ed25519 signature is passed as `--crk-signature` in the next step.
+
+Alternatively, use the `sovra crk sign` command with the shares file:
 
 ```bash
-# Register edge node
-sovra edge-node register \
-  --node-id edge-1 \
-  --location "Zurich Data Center" \
-  --vault-address https://vault.edge-1.internal:8200
-
-# Verify edge node health
-sovra edge-node status edge-1
+sovra crk sign \
+  --shares-file crk-shares.json \
+  --public-key <BASE64_PUBLIC_KEY> \
+  --data "<message from sign-message>"
 ```
 
-## Identity Management
+### 3. Bootstrap the First Admin
 
-### Managing Admins
+The bootstrap flow is available only when the organization has zero existing
+admins:
 
 ```bash
-# List all admins
-sovra admin list
+sovra identity admin bootstrap \
+  --org-id my-org \
+  --email admin@example.org \
+  --name "Platform Admin" \
+  --role super_admin \
+  --crk-signature <HEX_SIGNATURE>
+```
 
-# Create admin with specific roles
-sovra admin create \
-  --email security@eth.ch \
+On success, the command outputs an **enrollment token** and a **TOTP secret**.
+Configure the TOTP secret in an authenticator app before proceeding.
+
+### 4. Complete Enrollment
+
+Enrollment issues the mTLS client certificate that the admin will use for all
+subsequent operations:
+
+```bash
+sovra identity admin enroll <admin-id> \
+  --token <ENROLLMENT_TOKEN> \
+  --totp-code <6_DIGIT_CODE>
+```
+
+The command prints the PEM-encoded certificate and private key. Save them
+securely -- the private key is shown only once.
+
+### 5. Verify Setup
+
+```bash
+sovra --cert admin.crt --key admin.key --org-id my-org health
+```
+
+## Creating Additional Admins
+
+Every additional admin creation requires CRK co-signature and an authenticated
+admin caller (mTLS).
+
+```bash
+# 1. Generate the message to be signed
+sovra identity admin sign-message \
+  --org-id my-org \
+  --email security@example.org \
   --name "Security Admin" \
-  --role security-admin \
-  --mfa-required
+  --role security_admin
 
-# Assign additional role
-sovra admin add-role \
-  --email security@eth.ch \
-  --role audit-viewer
+# 2. Obtain CRK signature from custodians (out of band)
 
-# Remove admin role
-sovra admin remove-role \
-  --email security@eth.ch \
-  --role audit-viewer
+# 3. Create the admin
+sovra --cert admin.crt --key admin.key identity create admin \
+  --email security@example.org \
+  --name "Security Admin" \
+  --role security_admin \
+  --crk-signature <HEX_SIGNATURE>
 
-# Disable admin (preserves audit trail)
-sovra admin disable --email former-admin@eth.ch
-
-# Delete admin (only if no audit history)
-sovra admin delete --email temp-admin@eth.ch --confirm
+# 4. New admin completes enrollment (same flow as bootstrap step 4)
+sovra identity admin enroll <new-admin-id> \
+  --token <ENROLLMENT_TOKEN> \
+  --totp-code <6_DIGIT_CODE>
 ```
 
-### Managing Users
+Available admin roles: `super_admin`, `security_admin`, `operations_admin`, `auditor`.
+
+### SSO Binding
+
+When creating an admin, you can optionally bind them to an SSO identity:
 
 ```bash
-# Provision user from SSO
-sovra user provision \
-  --email researcher@eth.ch \
-  --name "Dr. Alice Smith" \
-  --department "Computer Science" \
-  --sso-provider azure-ad
-
-# List users
-sovra user list
-
-# Add user to group
-sovra user add-group \
-  --email researcher@eth.ch \
-  --group cancer-research-team
-
-# View user permissions
-sovra user permissions --email researcher@eth.ch
+sovra --cert admin.crt --key admin.key identity create admin \
+  --email admin@example.org \
+  --name "SSO Admin" \
+  --role operations_admin \
+  --crk-signature <HEX_SIGNATURE> \
+  --sso-provider azure_ad \
+  --sso-subject <SSO_SUBJECT_ID>
 ```
 
-### Managing Service Accounts
+Supported SSO providers: `azure_ad`, `okta`, `google`, `oidc`.
+
+### Disabling and Enabling Admins
 
 ```bash
-# Create service account
-sovra service create \
-  --name "Data Pipeline" \
-  --auth-method approle \
-  --allowed-workspaces cancer-research,genomics
+# Disable (preserves audit trail)
+sovra --cert admin.crt --key admin.key identity admin disable <admin-id>
 
-# Rotate service credentials
-sovra service rotate-credentials --name "Data Pipeline"
-
-# View service account status
-sovra service status --name "Data Pipeline"
+# Re-enable
+sovra --cert admin.crt --key admin.key identity admin enable <admin-id>
 ```
 
-### Managing Device Identities
+### Certificate Renewal
+
+Admin mTLS certificates have a limited TTL. Renew before expiry:
 
 ```bash
-# Register IoT device
-sovra device register \
-  --device-id sensor-001 \
-  --type iot-sensor \
-  --location "Lab A" \
-  --certificate /path/to/device-cert.pem
+sovra --cert admin.crt --key admin.key identity admin renew-cert <admin-id> \
+  --totp-code <6_DIGIT_CODE>
+```
 
-# Revoke device certificate
-sovra device revoke --device-id sensor-001
+The command outputs a new certificate and private key. Replace the old files.
 
-# List devices by location
-sovra device list --location "Lab A"
+## Group Management
+
+Groups are the foundation of workspace access control. A workspace is bound to a
+group at creation time, and membership in that group grants access to the
+workspace.
+
+### Creating Groups
+
+```bash
+sovra --cert admin.crt --key admin.key identity group create \
+  --name cancer-research-team \
+  --description "Collaborative cancer research group"
+```
+
+### Listing Groups
+
+```bash
+sovra --cert admin.crt --key admin.key identity group list
+```
+
+### Adding and Removing Members (Air-Gap Mode)
+
+In air-gap deployments (no IdP configured), manage group membership manually:
+
+```bash
+# Add a user to a group
+sovra --cert admin.crt --key admin.key identity group add-member <group-id> \
+  --identity-id <user-id> \
+  --identity-type user
+
+# Remove a member
+sovra --cert admin.crt --key admin.key identity group remove-member <group-id> \
+  --identity-id <user-id>
+```
+
+The `--identity-type` parameter accepts: `admin`, `user`, `service`, `device`.
+
+### Join Request Management
+
+Users can request access to a workspace, which creates a join request for the
+workspace's bound group. Admins manage these requests:
+
+```bash
+# List pending join requests for a group
+sovra --cert admin.crt --key admin.key identity group join-requests <group-id>
+
+# Approve a request
+sovra --cert admin.crt --key admin.key identity group approve-join <request-id> \
+  --group-id <group-id>
+
+# Deny a request
+sovra --cert admin.crt --key admin.key identity group deny-join <request-id> \
+  --group-id <group-id>
 ```
 
 ## Workspace Management
 
-### Creating Workspaces
+### Creating Workspaces with Group Binding
+
+Workspace access is controlled through group membership. When creating a
+workspace, bind it to a group using the `--group-id` flag:
 
 ```bash
-# Create workspace (requires CRK signature)
-sovra workspace create \
+sovra --cert admin.crt --key admin.key workspace create \
   --name cancer-research \
-  --description "Collaborative cancer research data" \
-  --edge-node edge-1 \
-  --crk-sign  # Requires 3 CRK custodians
+  --group-id <group-id> \
+  --classification CONFIDENTIAL \
+  --purpose "Collaborative cancer research data"
+```
 
-# Add organization to workspace
-sovra workspace add-org \
-  --workspace cancer-research \
-  --org-id partner-university
+All members of the bound group automatically receive access to the workspace.
+To grant a user workspace access, add them to the group. To revoke access,
+remove them from the group.
 
+### Listing and Inspecting Workspaces
+
+```bash
 # List workspaces
-sovra workspace list
+sovra --cert admin.crt --key admin.key workspace list
+
+# Get workspace details
+sovra --cert admin.crt --key admin.key workspace get <workspace-id>
 ```
 
-### Managing Workspace Access
+### Updating Workspaces
 
 ```bash
-# Add user to workspace
-sovra workspace add-user \
-  --workspace cancer-research \
-  --email researcher@eth.ch \
-  --role contributor
-
-# Remove user from workspace
-sovra workspace remove-user \
-  --workspace cancer-research \
-  --email former-researcher@eth.ch
-
-# View workspace participants
-sovra workspace participants cancer-research
+sovra --cert admin.crt --key admin.key workspace update <workspace-id> \
+  --purpose "Updated research purpose" \
+  --classification SECRET
 ```
 
-### Workspace Key Rotation
+### Rotating the Data Encryption Key
 
 ```bash
-# Rotate workspace DEK (requires CRK signature)
-sovra workspace rotate-key \
-  --workspace cancer-research \
-  --crk-sign
+sovra --cert admin.crt --key admin.key workspace rotate-dek <workspace-id>
+```
 
-# Schedule automatic rotation
-sovra workspace set-rotation-policy \
-  --workspace cancer-research \
-  --interval 90d  # Rotate every 90 days
+### Extending Workspace Expiration
+
+```bash
+sovra --cert admin.crt --key admin.key workspace extend <workspace-id> \
+  --expires-at 2027-01-01T00:00:00Z
+```
+
+### Requesting Workspace Access
+
+Users who are not yet group members can request access to a workspace. This
+creates a join request for the workspace's bound group:
+
+```bash
+sovra workspace request-access <workspace-id> \
+  --justification "Need access for analysis"
+```
+
+The admin then approves or denies via the group join request commands described
+above.
+
+### Archiving and Deleting Workspaces
+
+```bash
+# Archive (soft delete, preserves data)
+sovra --cert admin.crt --key admin.key workspace archive <workspace-id>
+
+# Delete (permanent)
+sovra --cert admin.crt --key admin.key workspace delete <workspace-id>
+```
+
+### Workspace Export and Import (Air-Gap Transfer)
+
+For air-gapped environments, export a workspace as a portable bundle:
+
+```bash
+# Export
+sovra --cert admin.crt --key admin.key workspace export <workspace-id> \
+  --output workspace-bundle.json
+
+# Import on the destination system
+sovra --cert admin.crt --key admin.key workspace import \
+  --input workspace-bundle.json
+```
+
+## Invitation Flow (Cross-Organization)
+
+The invitation flow is the mechanism for adding partner organizations to a
+workspace. The `workspace add-participant` and `workspace remove-participant`
+commands have been removed. Organizations can only join workspaces through the
+invitation flow.
+
+### Sending an Invitation
+
+```bash
+sovra --cert admin.crt --key admin.key workspace invite <workspace-id> \
+  --org-id partner-org
+```
+
+### Accepting an Invitation
+
+When a partner organization accepts an invitation, they bind their own group to
+the workspace using the `--group-id` flag. This determines which of their
+members get access:
+
+```bash
+sovra --cert partner-admin.crt --key partner-admin.key \
+  workspace accept-invitation <workspace-id> \
+  --org-id partner-org \
+  --group-id <partner-group-id>
+```
+
+### Declining an Invitation
+
+```bash
+sovra --cert partner-admin.crt --key partner-admin.key \
+  workspace decline-invitation <workspace-id> \
+  --org-id partner-org
 ```
 
 ## Federation Management
 
-### Establishing Federation
+### Initializing Federation
 
 ```bash
-# Initialize federation with partner
-sovra federation init \
-  --partner-org partner-university \
-  --crk-sign  # Requires CRK
-
-# Export federation certificate
-sovra federation export-cert \
-  --output eth-zurich-federation.crt
-
-# Import partner certificate
-sovra federation import-cert \
-  --partner-org partner-university \
-  --cert /path/to/partner-federation.crt
-
-# Establish federation
-sovra federation establish \
-  --partner-org partner-university
-
-# Verify federation
-sovra federation status partner-university
+sovra --cert admin.crt --key admin.key federation init
 ```
 
-### Federation Health
+### Establishing Federation with a Partner
 
 ```bash
-# Check all federations
-sovra federation list
-
-# Detailed partner status
-sovra federation status partner-university --verbose
-
-# Renew federation certificate
-sovra federation renew-cert \
+sovra --cert admin.crt --key admin.key federation establish \
   --partner-org partner-university \
-  --crk-sign
+  --partner-url https://sovra.partner-university.example.org
 ```
+
+### Importing a Partner Certificate
+
+```bash
+sovra --cert admin.crt --key admin.key federation import-cert \
+  --partner-org partner-university \
+  --cert-file partner-federation.pem
+```
+
+### Checking Federation Status
+
+```bash
+# List all federation partners
+sovra --cert admin.crt --key admin.key federation list
+
+# Status of a specific partner
+sovra --cert admin.crt --key admin.key federation status <partner-org-id>
+
+# Health check across all partners
+sovra --cert admin.crt --key admin.key federation health
+```
+
+### Renewing a Federation Certificate
+
+```bash
+sovra --cert admin.crt --key admin.key federation renew-cert <partner-org-id>
+```
+
+### Revoking a Federation
+
+```bash
+sovra --cert admin.crt --key admin.key federation revoke <partner-org-id>
+```
+
+This notifies the partner and revokes associated certificates.
+
+### Federation Direct Messaging
+
+Once a federation link is active, users on both organizations can exchange encrypted direct messages without creating a shared workspace. Messages are encrypted at rest using each organization's Vault transit KEK (`org-kek-{orgID}`) and delivered over the mTLS federation channel.
+
+No additional admin configuration is required beyond establishing the federation link. Message audit events (`message.send`, `message.deliver`, `message.read`, `message.delete`) appear in the standard audit log.
+
+## IdP Integration (Connected Mode)
+
+When an Identity Provider is configured, Sovra operates in **connected mode**.
+The API gateway detects IdP configuration at startup and enables SSO login and
+optional group synchronization.
+
+### Configuration
+
+Set the following in `sovra.yaml` (or via environment variables):
+
+```yaml
+admin:
+  idp_issuer_url: "https://login.example.org/realms/sovra"
+  idp_client_id: "sovra-admin"
+  idp_client_secret: "..."        # OIDC client secret
+  cert_ttl: 24h                    # Short-lived admin certs (default)
+  reconciliation_enabled: true     # Enable IdP-to-local admin reconciliation
+  reconciliation_interval: 5m
+```
+
+### IdP Group Synchronization
+
+When group sync is enabled, Sovra periodically fetches group membership from
+the IdP and updates local groups to match:
+
+```yaml
+admin:
+  group_sync_enabled: true
+  idp_group_endpoint: "https://graph.example.org/v1.0/groups/{group_id}/members"
+  group_sync_interval: 5m
+```
+
+The `idp_group_endpoint` is a URL template. Sovra substitutes `{group_id}`
+with each group's external identifier when polling membership.
+
+When group sync is active, manual membership changes made via
+`sovra identity group add-member` / `remove-member` may be overwritten on the
+next sync cycle. Use the IdP as the source of truth for group membership in
+connected mode.
+
+### SSO Login for Users
+
+Non-admin users authenticate via SSO using the OAuth2 PKCE flow:
+
+```bash
+sovra login
+```
+
+This opens a browser for IdP authentication. On success, credentials are stored
+in `~/.sovra/credentials.json`.
+
+### Provisioning SSO Users
+
+```bash
+sovra --cert admin.crt --key admin.key identity create user-sso \
+  --email researcher@example.org \
+  --name "Dr. Alice Smith" \
+  --sso-provider azure_ad \
+  --sso-subject <SSO_SUBJECT_ID>
+```
+
+## Air-Gap Mode
+
+When no `admin.idp_issuer_url` is configured, Sovra assumes an air-gapped
+deployment. The API gateway logs a warning at startup and makes the following
+adjustments:
+
+- **Extended certificate TTL**: If `admin.cert_ttl` is left at the default
+  (24 hours), it is automatically extended to 1 year (8760 hours). If you have
+  explicitly set a custom TTL, that value is preserved.
+- **No SSO**: Users cannot use `sovra login`. Authentication is via mTLS
+  certificates or environment tokens only.
+- **Manual group management**: Without IdP group sync, all group membership
+  changes must be performed manually using `sovra identity group add-member`
+  and `sovra identity group remove-member`.
+
+### Air-Gap Configuration
+
+A minimal `sovra.yaml` for air-gap operation:
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 8080
+  mtls_enabled: true
+
+admin:
+  cert_ttl: 8760h   # 1 year (also the auto-detected default in air-gap mode)
+
+federation:
+  enabled: true
+  certificate_expiry: 8760h
+```
+
+### Air-Gap Workspace Transfer
+
+Use `workspace export` and `workspace import` to move workspace bundles between
+air-gapped environments. See the workspace export/import section above.
+
+## Identity Management
+
+### Service Identities
+
+```bash
+# Create a service identity
+sovra --cert admin.crt --key admin.key identity create service \
+  --name data-pipeline \
+  --auth-method approle
+
+# Rotate service credentials
+sovra --cert admin.crt --key admin.key identity service rotate <service-id>
+```
+
+Authentication methods: `approle`, `kubernetes`, `cert`.
+
+### Device Identities
+
+```bash
+# Enroll a device
+sovra --cert admin.crt --key admin.key identity enroll-device \
+  --name edge-sensor-1 \
+  --device-type sensor
+
+# Revoke a device
+sovra --cert admin.crt --key admin.key identity revoke-device <device-id>
+```
+
+### Listing and Inspecting Identities
+
+```bash
+# List identities by type
+sovra --cert admin.crt --key admin.key identity list --type admin
+sovra --cert admin.crt --key admin.key identity list --type user
+sovra --cert admin.crt --key admin.key identity list --type service
+sovra --cert admin.crt --key admin.key identity list --type device
+
+# Get identity details
+sovra --cert admin.crt --key admin.key identity get <identity-id> --type admin
+```
+
+### Deleting Identities
+
+```bash
+sovra --cert admin.crt --key admin.key identity delete <identity-id> --type user
+```
+
+### MFA (TOTP)
+
+```bash
+# Enable MFA for an admin
+sovra --cert admin.crt --key admin.key identity mfa enable <admin-id>
+
+# Verify a TOTP code
+sovra --cert admin.crt --key admin.key identity mfa verify <admin-id> --code 123456
+```
+
+## Role Management
+
+### Creating and Assigning Roles
+
+```bash
+# Create a custom role
+sovra --cert admin.crt --key admin.key identity role create \
+  --name data-reader \
+  --description "Read-only data access"
+
+# List roles
+sovra --cert admin.crt --key admin.key identity role list
+
+# Assign a role to an identity
+sovra --cert admin.crt --key admin.key identity role assign <role-id> \
+  --identity-id <user-id> \
+  --identity-type user
+
+# Unassign a role
+sovra --cert admin.crt --key admin.key identity role unassign <role-id> \
+  --identity-id <user-id>
+```
+
+## Edge Node Administration
+
+```bash
+# Register an edge node
+sovra --cert admin.crt --key admin.key edge register \
+  --name edge-eu-west \
+  --vault-addr https://vault.eu-west.internal:8200 \
+  --region eu-west
+
+# List edge nodes
+sovra --cert admin.crt --key admin.key edge list
+
+# Check edge node health
+sovra --cert admin.crt --key admin.key edge health <edge-id>
+
+# Synchronize policies to an edge node
+sovra --cert admin.crt --key admin.key edge sync-policies <edge-id>
+
+# Synchronize keys for a workspace to an edge node
+sovra --cert admin.crt --key admin.key edge sync-keys <edge-id> --workspace <ws-id>
+
+# Check sync status
+sovra --cert admin.crt --key admin.key edge sync-status <edge-id>
+
+# Unregister an edge node
+sovra --cert admin.crt --key admin.key edge unregister <edge-id>
+```
+
+## Backup and Restore
+
+### Creating Backups
+
+```bash
+# Full backup (default)
+sovra --cert admin.crt --key admin.key backup create
+
+# Incremental backup
+sovra --cert admin.crt --key admin.key backup create --type incremental
+```
+
+### Listing and Inspecting Backups
+
+```bash
+# List all backups
+sovra --cert admin.crt --key admin.key backup list
+
+# Get backup details
+sovra --cert admin.crt --key admin.key backup get <backup-id>
+```
+
+### Restoring from Backup
+
+**Note:** Restore is not yet implemented. The command exists but will return an
+error until the feature is complete.
+
+```bash
+sovra --cert admin.crt --key admin.key backup restore <backup-id>
+```
+
+Restore will require CRK signature when implemented.
 
 ## Policy Management
 
-### Creating Policies
+### Creating and Managing Policies
 
 ```bash
-# Create workspace policy
-cat > cancer-research-policy.rego << 'EOF'
-package sovra.policy.workspace.cancer_research
+# Create a policy from a Rego file
+sovra --cert admin.crt --key admin.key policy create \
+  --name data-access \
+  --workspace <workspace-id> \
+  --rego-file policy.rego
 
-default allow = false
+# List policies for a workspace
+sovra --cert admin.crt --key admin.key policy list --workspace <workspace-id>
 
-# Allow researchers to encrypt/decrypt
-allow {
-    input.user.groups[_] == "cancer-research-team"
-    input.action in ["encrypt", "decrypt"]
-}
+# Get policy details
+sovra --cert admin.crt --key admin.key policy get <policy-id>
 
-# Require audit trail for all operations
-require_audit = true
-EOF
+# Update a policy
+sovra --cert admin.crt --key admin.key policy update <policy-id> \
+  --rego-file updated-policy.rego
 
-# Upload policy
-sovra policy upload \
-  --workspace cancer-research \
-  --policy cancer-research-policy.rego
-
-# Validate policy
-sovra policy validate \
-  --policy cancer-research-policy.rego
+# Delete a policy
+sovra --cert admin.crt --key admin.key policy delete <policy-id>
 ```
 
-### Testing Policies
+### Evaluating and Validating Policies
 
 ```bash
-# Test policy with sample input
-sovra policy test \
-  --workspace cancer-research \
-  --input '{"user":{"email":"researcher@eth.ch","groups":["cancer-research-team"]},"action":"encrypt"}'
+# Evaluate a policy against sample input
+sovra --cert admin.crt --key admin.key policy evaluate \
+  --workspace <workspace-id> \
+  --input-file eval-input.json
 
-# Output: ALLOW
+# Validate policy syntax
+sovra policy validate policy.rego
+```
+
+### Rotation Policies
+
+```bash
+# Set automatic key rotation policy for a workspace
+sovra --cert admin.crt --key admin.key rotation-policy set <workspace-id> \
+  --max-age 720h \
+  --enabled
+
+# Get rotation policy
+sovra --cert admin.crt --key admin.key rotation-policy get <workspace-id>
+
+# List all rotation policies
+sovra --cert admin.crt --key admin.key rotation-policy list
+
+# Delete rotation policy
+sovra --cert admin.crt --key admin.key rotation-policy delete <workspace-id>
 ```
 
 ## Audit and Compliance
@@ -301,224 +725,214 @@ sovra policy test \
 ### Querying Audit Logs
 
 ```bash
-# Recent audit events
-sovra audit query --since "24 hours ago"
+# Query recent events
+sovra --cert admin.crt --key admin.key audit query \
+  --since 2026-01-01T00:00:00Z \
+  --limit 50
 
 # Filter by event type
-sovra audit query \
+sovra --cert admin.crt --key admin.key audit query \
   --event-type workspace.access \
-  --since "7 days ago"
+  --since 2026-02-01T00:00:00Z
 
-# Filter by user
-sovra audit query \
-  --actor researcher@eth.ch \
-  --since "30 days ago"
+# Get a specific event
+sovra --cert admin.crt --key admin.key audit get <event-id>
 
-# Failed operations
-sovra audit query \
-  --result error \
-  --since "7 days ago"
+# Audit statistics
+sovra --cert admin.crt --key admin.key audit stats \
+  --since 2026-01-01T00:00:00Z
+```
 
-# Export for compliance
-sovra audit export \
-  --since "2026-01-01" \
-  --until "2026-01-31" \
-  --format csv \
-  --output january-audit.csv
+### Exporting Audit Logs
+
+```bash
+sovra --cert admin.crt --key admin.key audit export \
+  --format json \
+  --output audit-january.json \
+  --since 2026-01-01T00:00:00Z \
+  --until 2026-02-01T00:00:00Z
+```
+
+Supported formats: `json`, `csv`.
+
+### Verifying Audit Log Integrity
+
+```bash
+sovra --cert admin.crt --key admin.key audit verify \
+  --since 2026-01-01T00:00:00Z \
+  --until 2026-02-01T00:00:00Z
 ```
 
 ### Compliance Reports
 
 ```bash
-# Generate access review report
-sovra compliance access-review \
-  --workspace cancer-research \
-  --output access-review.pdf
+# Compliance summary
+sovra --cert admin.crt --key admin.key compliance summary \
+  --since 2026-01-01T00:00:00Z \
+  --until 2026-02-01T00:00:00Z
 
-# Generate activity summary
-sovra compliance activity-summary \
-  --since "90 days ago" \
-  --output activity-summary.pdf
+# Access review
+sovra --cert admin.crt --key admin.key compliance access-review \
+  --since 2026-01-01T00:00:00Z \
+  --until 2026-02-01T00:00:00Z
 
-# GDPR data subject access request
-sovra compliance dsar \
-  --subject researcher@eth.ch \
-  --output dsar-response.zip
+# GDPR Data Subject Access Request
+sovra --cert admin.crt --key admin.key compliance gdpr-dsar \
+  --subject-id <user-id>
 ```
+
+## Emergency Access
+
+Break-glass emergency access provides controlled override when standard
+authentication or authorization is unavailable.
+
+```bash
+# Request emergency access
+sovra emergency-access request \
+  --org-id my-org \
+  --reason "Critical security incident"
+
+# Approve (requires admin)
+sovra --cert admin.crt --key admin.key emergency-access approve <request-id>
+
+# Verify with CRK signature
+sovra --cert admin.crt --key admin.key emergency-access verify <request-id> \
+  --signature <BASE64_CRK_SIGNATURE>
+
+# Complete
+sovra --cert admin.crt --key admin.key emergency-access complete <request-id>
+
+# List requests
+sovra --cert admin.crt --key admin.key emergency-access list --org-id my-org
+
+# Get request details
+sovra --cert admin.crt --key admin.key emergency-access get <request-id>
+```
+
+## Account Recovery
+
+When an admin loses credentials, initiate account recovery using CRK share
+reconstruction:
+
+```bash
+# Initiate recovery
+sovra account-recovery initiate \
+  --admin-id <admin-id> \
+  --reason "Lost credentials" \
+  --type lost_credentials
+
+# Submit CRK shares (run by each custodian)
+sovra account-recovery share <recovery-id>
+
+# Complete recovery after threshold is met
+sovra account-recovery complete <recovery-id>
+```
+
+Recovery types: `lost_credentials`, `locked_account`.
 
 ## Certificate Management
 
-### TLS Certificates
-
 ```bash
+# Issue a certificate
+sovra --cert admin.crt --key admin.key cert issue \
+  --common-name api.example.org \
+  --role default \
+  --ttl 8760h \
+  --alt-names api2.example.org
+
 # List certificates
-sovra cert list
+sovra --cert admin.crt --key admin.key cert list
 
-# Check expiring certificates
-sovra cert list --expiring 30d
+# Get certificate details
+sovra --cert admin.crt --key admin.key cert get <serial>
 
-# Rotate all certificates
-sovra cert rotate --all
+# Revoke a certificate
+sovra --cert admin.crt --key admin.key cert revoke <serial>
 
-# Rotate specific certificate
-sovra cert rotate --name edge-1-tls
+# View CA chain
+sovra --cert admin.crt --key admin.key cert ca-chain
+
+# Clean up expired certificates
+sovra --cert admin.crt --key admin.key cert tidy --safety-buffer 72h
 ```
 
-### Federation Certificates
+## CRK Ceremony Operations
+
+For operations requiring CRK signatures, a formal ceremony workflow is
+available:
 
 ```bash
-# View federation certificate status
-sovra federation cert-status partner-university
+# Start a ceremony
+sovra crk ceremony start --shares 5 --threshold 3
 
-# Renew before expiry
-sovra federation cert-renew \
-  --partner partner-university \
-  --crk-sign
+# Each custodian adds their share
+sovra crk ceremony add-share <ceremony-id> \
+  --share-file share.json \
+  --share-index 1
+
+# Complete the ceremony
+sovra crk ceremony complete <ceremony-id>
+
+# Cancel if needed
+sovra crk ceremony cancel <ceremony-id>
 ```
 
-## Backup and Recovery
-
-### Creating Backups
+### CRK Rotation
 
 ```bash
-# Full backup
-sovra backup create \
-  --output /backup/sovra-$(date +%Y%m%d).tar.gz
-
-# Database only
-sovra backup create \
-  --type database \
-  --output /backup/db-$(date +%Y%m%d).sql
-
-# Configuration only
-sovra backup create \
-  --type config \
-  --output /backup/config-$(date +%Y%m%d).tar.gz
+sovra crk rotate --threshold 3
 ```
 
-### Restoring from Backup
+## Quick Reference: Operations Requiring CRK Co-Signature
 
-```bash
-# Verify backup integrity
-sovra backup verify /backup/sovra-20260130.tar.gz
-
-# Restore (requires CRK)
-sovra backup restore \
-  --input /backup/sovra-20260130.tar.gz \
-  --crk-sign
-```
-
-## Monitoring and Alerts
-
-### Health Checks
-
-```bash
-# Overall platform health
-sovra health check
-
-# Edge node health
-sovra edge-node status --all
-
-# Federation health
-sovra federation status --all
-
-# Database health
-sovra health check-db
-```
-
-### Metrics
-
-```bash
-# View key metrics
-sovra metrics summary
-
-# Export metrics
-sovra metrics export --format prometheus
-```
-
-## High-Risk Operations (Require CRK)
-
-The following operations require CRK signatures:
-
-| Operation | Description | CRK Threshold |
-|-----------|-------------|---------------|
-| `workspace create` | Create new workspace | 3 of 5 |
-| `workspace rotate-key` | Rotate workspace encryption key | 3 of 5 |
-| `federation establish` | Establish new federation | 3 of 5 |
-| `federation cert-renew` | Renew federation certificate | 3 of 5 |
-| `backup restore` | Restore from backup | 3 of 5 |
-| `crk regenerate-shares` | Generate new CRK shares | 3 of 5 |
-| `emergency-access approve` | Approve emergency access | 3 of 5 |
-
-### Performing CRK Operations
-
-```bash
-# Option 1: Interactive (prompts for shares)
-sovra workspace create \
-  --name new-workspace \
-  --crk-sign
-
-# Option 2: Provide shares directly
-sovra workspace create \
-  --name new-workspace \
-  --share-1 <SHARE_1> \
-  --share-2 <SHARE_2> \
-  --share-3 <SHARE_3>
-
-# Option 3: Key ceremony mode
-sovra crk ceremony start
-# ... custodians enter shares
-sovra workspace create --name new-workspace
-sovra crk ceremony complete
-```
-
-## Administrative Roles
-
-| Role | Permissions |
-|------|-------------|
-| `platform-admin` | Full access to all operations |
-| `security-admin` | Identity management, policy configuration, audit access |
-| `workspace-admin` | Workspace management, user assignment |
-| `audit-viewer` | Read-only access to audit logs |
-| `federation-admin` | Federation management |
-
-### Assigning Roles
-
-```bash
-# Assign role to admin
-sovra admin add-role \
-  --email admin@eth.ch \
-  --role security-admin
-
-# View admin roles
-sovra admin roles --email admin@eth.ch
-```
+| Operation | Command |
+|-----------|---------|
+| Bootstrap first admin | `sovra identity admin bootstrap --crk-signature ...` |
+| Create additional admin | `sovra identity create admin --crk-signature ...` |
+| Restore from backup | `sovra backup restore <backup-id>` |
 
 ## Troubleshooting
 
-### Common Issues
+**Cannot authenticate:**
 
-**Cannot create workspace:**
+Verify your mTLS certificate is valid and not expired:
+
 ```bash
-# Check CRK availability
-sovra crk status
-
-# Verify edge node health
-sovra edge-node status edge-1
-
-# Check user permissions
-sovra admin roles --email $(whoami)
+openssl x509 -in admin.crt -noout -dates
 ```
+
+If expired, renew using `sovra identity admin renew-cert`.
+
+**Air-gap mode unexpectedly active:**
+
+Check the API gateway logs for the `admin.airgap.assumed` audit event. Ensure
+`admin.idp_issuer_url` is set in your configuration if you intend to run in
+connected mode.
+
+**Group sync not working:**
+
+Confirm that both `admin.group_sync_enabled` is `true` and
+`admin.idp_group_endpoint` is configured. Check the API gateway logs for sync
+errors.
 
 **Federation not connecting:**
+
 ```bash
-# Check connectivity
-sovra federation test-connection partner-university
+# Check overall federation health
+sovra --cert admin.crt --key admin.key federation health
 
-# Verify certificates
-sovra federation cert-verify partner-university
+# Check specific partner
+sovra --cert admin.crt --key admin.key federation status <partner-org-id>
 
-# Check audit logs
-sovra audit query --event-type federation.* --since "1 hour ago"
+# Renew certificate if expired
+sovra --cert admin.crt --key admin.key federation renew-cert <partner-org-id>
 ```
 
+**Workspace access denied:**
+
+Verify the user is a member of the workspace's bound group:
+
+```bash
+sovra --cert admin.crt --key admin.key identity group join-requests <group-id>
+sovra --cert admin.crt --key admin.key workspace get <workspace-id>
+```

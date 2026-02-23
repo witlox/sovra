@@ -144,6 +144,16 @@ func (m *mockUserRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *mockUserRepo) ListActiveSSOBound(ctx context.Context) ([]*models.UserIdentity, error) {
+	var result []*models.UserIdentity
+	for _, user := range m.users {
+		if user.Active && user.SSOProvider != "" && user.SSOSubject != "" {
+			result = append(result, user)
+		}
+	}
+	return result, nil
+}
+
 type mockServiceRepo struct {
 	services map[string]*models.ServiceIdentity
 }

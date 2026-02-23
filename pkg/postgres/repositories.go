@@ -2279,9 +2279,9 @@ func (r *IdentityGroupRepository) Create(ctx context.Context, group *models.Iden
 	}
 
 	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO identity_groups (id, org_id, name, description, vault_policies, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		id, orgID, group.Name, group.Description, pq.Array(group.VaultPolicies), group.CreatedAt, group.UpdatedAt,
+		`INSERT INTO identity_groups (id, org_id, name, description, idp_group_id, vault_policies, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		id, orgID, group.Name, group.Description, nullString(group.IDPGroupID), pq.Array(group.VaultPolicies), group.CreatedAt, group.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create identity group: %w", err)
@@ -2297,16 +2297,20 @@ func (r *IdentityGroupRepository) Get(ctx context.Context, id string) (*models.I
 	}
 
 	group := &models.IdentityGroup{}
+	var idpGroupID sql.NullString
 	err = r.db.QueryRowContext(ctx,
-		`SELECT id, org_id, name, description, vault_policies, created_at, updated_at
+		`SELECT id, org_id, name, description, COALESCE(idp_group_id, ''), vault_policies, created_at, updated_at
 		 FROM identity_groups WHERE id = $1`,
 		uid,
-	).Scan(&group.ID, &group.OrgID, &group.Name, &group.Description, pq.Array(&group.VaultPolicies), &group.CreatedAt, &group.UpdatedAt)
+	).Scan(&group.ID, &group.OrgID, &group.Name, &group.Description, &idpGroupID, pq.Array(&group.VaultPolicies), &group.CreatedAt, &group.UpdatedAt)
 	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get identity group: %w", err)
+	}
+	if idpGroupID.Valid {
+		group.IDPGroupID = idpGroupID.String
 	}
 	return group, nil
 }
@@ -2374,9 +2378,9 @@ func (r *IdentityGroupRepository) Update(ctx context.Context, group *models.Iden
 	}
 
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE identity_groups SET name = $2, description = $3, vault_policies = $4, updated_at = $5
+		`UPDATE identity_groups SET name = $2, description = $3, idp_group_id = $4, vault_policies = $5, updated_at = $6
 		 WHERE id = $1`,
-		id, group.Name, group.Description, pq.Array(group.VaultPolicies), group.UpdatedAt,
+		id, group.Name, group.Description, nullString(group.IDPGroupID), pq.Array(group.VaultPolicies), group.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update identity group: %w", err)
@@ -2496,7 +2500,7 @@ func (r *IdentityGroupRepository) GetGroupsForIdentity(ctx context.Context, iden
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT g.id, g.org_id, g.name, g.description, g.vault_policies, g.created_at, g.updated_at
+		`SELECT g.id, g.org_id, g.name, g.description, COALESCE(g.idp_group_id, ''), g.vault_policies, g.created_at, g.updated_at
 		 FROM identity_groups g
 		 INNER JOIN group_memberships gm ON g.id = gm.group_id
 		 WHERE gm.identity_id = $1`,
@@ -2510,7 +2514,7 @@ func (r *IdentityGroupRepository) GetGroupsForIdentity(ctx context.Context, iden
 	var groups []*models.IdentityGroup
 	for rows.Next() {
 		group := &models.IdentityGroup{}
-		if err := rows.Scan(&group.ID, &group.OrgID, &group.Name, &group.Description, pq.Array(&group.VaultPolicies), &group.CreatedAt, &group.UpdatedAt); err != nil {
+		if err := rows.Scan(&group.ID, &group.OrgID, &group.Name, &group.Description, &group.IDPGroupID, pq.Array(&group.VaultPolicies), &group.CreatedAt, &group.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan identity group: %w", err)
 		}
 		groups = append(groups, group)
@@ -3234,4 +3238,727 @@ func (r *WorkspaceInvitationRepository) Update(ctx context.Context, inv *workspa
 		return errors.ErrNotFound
 	}
 	return nil
+}
+
+// nullString returns a sql.NullString from a plain string (empty → null).
+func nullString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+// =============================================================================
+// Workspace Group Binding Repository
+// =============================================================================
+
+// WorkspaceGroupBindingRepository handles workspace-group binding persistence.
+type WorkspaceGroupBindingRepository struct {
+	db *DB
+}
+
+// NewWorkspaceGroupBindingRepository creates a new binding repository.
+func NewWorkspaceGroupBindingRepository(db *DB) *WorkspaceGroupBindingRepository {
+	return &WorkspaceGroupBindingRepository{db: db}
+}
+
+// CreateBinding creates a workspace-group binding.
+func (r *WorkspaceGroupBindingRepository) CreateBinding(ctx context.Context, binding *models.WorkspaceGroupBinding) error {
+	wsID, err := uuid.Parse(binding.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("invalid workspace ID: %w", err)
+	}
+	orgID, err := uuid.Parse(binding.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+	groupID, err := uuid.Parse(binding.GroupID)
+	if err != nil {
+		return fmt.Errorf("invalid group ID: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO workspace_group_bindings (workspace_id, org_id, group_id, created_at)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (workspace_id, org_id) DO UPDATE SET group_id = $3`,
+		wsID, orgID, groupID, binding.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create workspace group binding: %w", err)
+	}
+	return nil
+}
+
+// GetBinding retrieves a binding by workspace and org.
+func (r *WorkspaceGroupBindingRepository) GetBinding(ctx context.Context, workspaceID, orgID string) (*models.WorkspaceGroupBinding, error) {
+	wsID, err := uuid.Parse(workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid workspace ID: %w", err)
+	}
+	oID, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	b := &models.WorkspaceGroupBinding{}
+	err = r.db.QueryRowContext(ctx,
+		`SELECT workspace_id, org_id, group_id, created_at
+		 FROM workspace_group_bindings WHERE workspace_id = $1 AND org_id = $2`,
+		wsID, oID,
+	).Scan(&b.WorkspaceID, &b.OrgID, &b.GroupID, &b.CreatedAt)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace group binding: %w", err)
+	}
+	return b, nil
+}
+
+// ListByWorkspace returns all bindings for a workspace.
+func (r *WorkspaceGroupBindingRepository) ListByWorkspace(ctx context.Context, workspaceID string) ([]*models.WorkspaceGroupBinding, error) {
+	wsID, err := uuid.Parse(workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid workspace ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT workspace_id, org_id, group_id, created_at
+		 FROM workspace_group_bindings WHERE workspace_id = $1`,
+		wsID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workspace group bindings: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var bindings []*models.WorkspaceGroupBinding
+	for rows.Next() {
+		b := &models.WorkspaceGroupBinding{}
+		if err := rows.Scan(&b.WorkspaceID, &b.OrgID, &b.GroupID, &b.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan workspace group binding: %w", err)
+		}
+		bindings = append(bindings, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate workspace group bindings: %w", err)
+	}
+	return bindings, nil
+}
+
+// ListByGroup returns all bindings for a group.
+func (r *WorkspaceGroupBindingRepository) ListByGroup(ctx context.Context, groupID string) ([]*models.WorkspaceGroupBinding, error) {
+	gID, err := uuid.Parse(groupID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid group ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT workspace_id, org_id, group_id, created_at
+		 FROM workspace_group_bindings WHERE group_id = $1`,
+		gID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list bindings by group: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var bindings []*models.WorkspaceGroupBinding
+	for rows.Next() {
+		b := &models.WorkspaceGroupBinding{}
+		if err := rows.Scan(&b.WorkspaceID, &b.OrgID, &b.GroupID, &b.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan workspace group binding: %w", err)
+		}
+		bindings = append(bindings, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate bindings by group: %w", err)
+	}
+	return bindings, nil
+}
+
+// DeleteBinding removes a workspace-group binding.
+func (r *WorkspaceGroupBindingRepository) DeleteBinding(ctx context.Context, workspaceID, orgID string) error {
+	wsID, err := uuid.Parse(workspaceID)
+	if err != nil {
+		return fmt.Errorf("invalid workspace ID: %w", err)
+	}
+	oID, err := uuid.Parse(orgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`DELETE FROM workspace_group_bindings WHERE workspace_id = $1 AND org_id = $2`,
+		wsID, oID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to delete workspace group binding: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// =============================================================================
+// Group Join Request Repository
+// =============================================================================
+
+// GroupJoinRequestRepository handles group join request persistence.
+type GroupJoinRequestRepository struct {
+	db *DB
+}
+
+// NewGroupJoinRequestRepository creates a new group join request repository.
+func NewGroupJoinRequestRepository(db *DB) *GroupJoinRequestRepository {
+	return &GroupJoinRequestRepository{db: db}
+}
+
+// Create persists a new group join request.
+func (r *GroupJoinRequestRepository) Create(ctx context.Context, req *models.GroupJoinRequest) error {
+	id, err := uuid.Parse(req.ID)
+	if err != nil {
+		return fmt.Errorf("invalid join request ID: %w", err)
+	}
+	groupID, err := uuid.Parse(req.GroupID)
+	if err != nil {
+		return fmt.Errorf("invalid group ID: %w", err)
+	}
+	orgID, err := uuid.Parse(req.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO group_join_requests (id, group_id, requester_id, org_id, reason, status, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		id, groupID, req.RequesterID, orgID, req.Reason, req.Status, req.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create group join request: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves a group join request by ID.
+func (r *GroupJoinRequestRepository) Get(ctx context.Context, id string) (*models.GroupJoinRequest, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid join request ID: %w", err)
+	}
+
+	req := &models.GroupJoinRequest{}
+	var reviewedBy sql.NullString
+	var reviewedAt sql.NullTime
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, group_id, requester_id, org_id, reason, status, reviewed_by, created_at, reviewed_at
+		 FROM group_join_requests WHERE id = $1`,
+		uid,
+	).Scan(&req.ID, &req.GroupID, &req.RequesterID, &req.OrgID, &req.Reason, &req.Status, &reviewedBy, &req.CreatedAt, &reviewedAt)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get group join request: %w", err)
+	}
+	if reviewedBy.Valid {
+		req.ReviewedBy = reviewedBy.String
+	}
+	if reviewedAt.Valid {
+		req.ReviewedAt = reviewedAt.Time
+	}
+	return req, nil
+}
+
+// ListPending returns all pending join requests for a group.
+func (r *GroupJoinRequestRepository) ListPending(ctx context.Context, groupID string) ([]*models.GroupJoinRequest, error) {
+	gID, err := uuid.Parse(groupID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid group ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id FROM group_join_requests WHERE group_id = $1 AND status = 'pending' ORDER BY created_at ASC`,
+		gID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pending join requests: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var requests []*models.GroupJoinRequest
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan join request ID: %w", err)
+		}
+		req, err := r.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, req)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending join requests: %w", err)
+	}
+	return requests, nil
+}
+
+// Update updates a group join request.
+func (r *GroupJoinRequestRepository) Update(ctx context.Context, req *models.GroupJoinRequest) error {
+	id, err := uuid.Parse(req.ID)
+	if err != nil {
+		return fmt.Errorf("invalid join request ID: %w", err)
+	}
+
+	var reviewedAt *time.Time
+	if !req.ReviewedAt.IsZero() {
+		reviewedAt = &req.ReviewedAt
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE group_join_requests SET status = $2, reviewed_by = $3, reviewed_at = $4
+		 WHERE id = $1`,
+		id, req.Status, nullString(req.ReviewedBy), reviewedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update group join request: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// =============================================================================
+// Backup Repository
+// =============================================================================
+
+// BackupRepository handles backup persistence.
+type BackupRepository struct {
+	db *DB
+}
+
+// NewBackupRepository creates a new backup repository.
+func NewBackupRepository(db *DB) *BackupRepository {
+	return &BackupRepository{db: db}
+}
+
+// Create persists a new backup.
+func (r *BackupRepository) Create(ctx context.Context, backup *models.Backup) error {
+	id, err := uuid.Parse(backup.ID)
+	if err != nil {
+		return fmt.Errorf("invalid backup ID: %w", err)
+	}
+	orgID, err := uuid.Parse(backup.OrgID)
+	if err != nil {
+		return fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO backups (id, org_id, type, status, created_by, created_at, size, checksum)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		id, orgID, backup.Type, backup.Status, backup.CreatedBy, backup.CreatedAt, backup.Size, backup.Checksum,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create backup: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves a backup by ID.
+func (r *BackupRepository) Get(ctx context.Context, id string) (*models.Backup, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid backup ID: %w", err)
+	}
+
+	b := &models.Backup{}
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, org_id, type, status, created_by, created_at, size, checksum
+		 FROM backups WHERE id = $1`,
+		uid,
+	).Scan(&b.ID, &b.OrgID, &b.Type, &b.Status, &b.CreatedBy, &b.CreatedAt, &b.Size, &b.Checksum)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get backup: %w", err)
+	}
+	return b, nil
+}
+
+// List returns all backups for an organization.
+func (r *BackupRepository) List(ctx context.Context, orgID string) ([]*models.Backup, error) {
+	oID, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, org_id, type, status, created_by, created_at, size, checksum
+		 FROM backups WHERE org_id = $1 ORDER BY created_at DESC`,
+		oID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list backups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var backups []*models.Backup
+	for rows.Next() {
+		b := &models.Backup{}
+		if err := rows.Scan(&b.ID, &b.OrgID, &b.Type, &b.Status, &b.CreatedBy, &b.CreatedAt, &b.Size, &b.Checksum); err != nil {
+			return nil, fmt.Errorf("failed to scan backup: %w", err)
+		}
+		backups = append(backups, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate backups: %w", err)
+	}
+	return backups, nil
+}
+
+// Update updates a backup.
+func (r *BackupRepository) Update(ctx context.Context, backup *models.Backup) error {
+	id, err := uuid.Parse(backup.ID)
+	if err != nil {
+		return fmt.Errorf("invalid backup ID: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE backups SET status = $2, size = $3, checksum = $4 WHERE id = $1`,
+		id, backup.Status, backup.Size, backup.Checksum,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update backup: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// =============================================================================
+// User Identity Repository Extensions
+// =============================================================================
+
+// ListActiveSSOBound returns all active SSO-bound user identities.
+func (r *UserIdentityRepository) ListActiveSSOBound(ctx context.Context) ([]*models.UserIdentity, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, org_id, email, name, sso_provider, sso_subject, groups, active, created_at, updated_at, last_login_at
+		 FROM user_identities
+		 WHERE active = true AND sso_provider IS NOT NULL AND sso_subject IS NOT NULL AND sso_subject != ''`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active SSO-bound users: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var users []*models.UserIdentity
+	for rows.Next() {
+		u := &models.UserIdentity{}
+		var lastLogin sql.NullTime
+		if err := rows.Scan(&u.ID, &u.OrgID, &u.Email, &u.Name, &u.SSOProvider, &u.SSOSubject, pq.Array(&u.Groups), &u.Active, &u.CreatedAt, &u.UpdatedAt, &lastLogin); err != nil {
+			return nil, fmt.Errorf("failed to scan user identity: %w", err)
+		}
+		if lastLogin.Valid {
+			u.LastLoginAt = lastLogin.Time
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate SSO-bound users: %w", err)
+	}
+	return users, nil
+}
+
+// =============================================================================
+// Direct Message Repository
+// =============================================================================
+
+// DirectMessageRepository handles direct message persistence.
+type DirectMessageRepository struct {
+	db *DB
+}
+
+// NewDirectMessageRepository creates a new direct message repository.
+func NewDirectMessageRepository(db *DB) *DirectMessageRepository {
+	return &DirectMessageRepository{db: db}
+}
+
+// Create persists a new direct message.
+func (r *DirectMessageRepository) Create(ctx context.Context, msg *models.DirectMessage) error {
+	id, err := uuid.Parse(msg.ID)
+	if err != nil {
+		return fmt.Errorf("invalid message ID: %w", err)
+	}
+	convID, err := uuid.Parse(msg.ConversationID)
+	if err != nil {
+		return fmt.Errorf("invalid conversation ID: %w", err)
+	}
+	senderOrgID, err := uuid.Parse(msg.SenderOrgID)
+	if err != nil {
+		return fmt.Errorf("invalid sender org ID: %w", err)
+	}
+	senderID, err := uuid.Parse(msg.SenderID)
+	if err != nil {
+		return fmt.Errorf("invalid sender ID: %w", err)
+	}
+	recipientOrgID, err := uuid.Parse(msg.RecipientOrgID)
+	if err != nil {
+		return fmt.Errorf("invalid recipient org ID: %w", err)
+	}
+	recipientID, err := uuid.Parse(msg.RecipientID)
+	if err != nil {
+		return fmt.Errorf("invalid recipient ID: %w", err)
+	}
+
+	var deliveredAt, readAt, expiresAt *time.Time
+	if msg.DeliveredAt != nil {
+		deliveredAt = msg.DeliveredAt
+	}
+	if msg.ReadAt != nil {
+		readAt = msg.ReadAt
+	}
+	if msg.ExpiresAt != nil {
+		expiresAt = msg.ExpiresAt
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO direct_messages (id, conversation_id, sender_org_id, sender_id, recipient_org_id, recipient_id, subject, body, status, direction, created_at, delivered_at, read_at, expires_at, error_detail)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		id, convID, senderOrgID, senderID, recipientOrgID, recipientID,
+		msg.Subject, msg.Body, msg.Status, msg.Direction,
+		msg.CreatedAt, deliveredAt, readAt, expiresAt, msg.ErrorDetail,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create direct message: %w", err)
+	}
+	return nil
+}
+
+// Get retrieves a direct message by ID.
+func (r *DirectMessageRepository) Get(ctx context.Context, id string) (*models.DirectMessage, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid message ID: %w", err)
+	}
+
+	msg := &models.DirectMessage{}
+	var deliveredAt, readAt, expiresAt sql.NullTime
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id, conversation_id, sender_org_id, sender_id, recipient_org_id, recipient_id,
+		        subject, body, status, direction, created_at, delivered_at, read_at, expires_at, error_detail
+		 FROM direct_messages WHERE id = $1`,
+		uid,
+	).Scan(&msg.ID, &msg.ConversationID, &msg.SenderOrgID, &msg.SenderID,
+		&msg.RecipientOrgID, &msg.RecipientID, &msg.Subject, &msg.Body,
+		&msg.Status, &msg.Direction, &msg.CreatedAt,
+		&deliveredAt, &readAt, &expiresAt, &msg.ErrorDetail)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get direct message: %w", err)
+	}
+	if deliveredAt.Valid {
+		msg.DeliveredAt = &deliveredAt.Time
+	}
+	if readAt.Valid {
+		msg.ReadAt = &readAt.Time
+	}
+	if expiresAt.Valid {
+		msg.ExpiresAt = &expiresAt.Time
+	}
+	return msg, nil
+}
+
+// ListInbox returns received messages for a user.
+func (r *DirectMessageRepository) ListInbox(ctx context.Context, orgID, recipientID string, limit, offset int) ([]*models.DirectMessage, error) {
+	oID, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+	rID, err := uuid.Parse(recipientID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid recipient ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, conversation_id, sender_org_id, sender_id, recipient_org_id, recipient_id,
+		        subject, body, status, direction, created_at, delivered_at, read_at, expires_at, error_detail
+		 FROM direct_messages
+		 WHERE recipient_org_id = $1 AND recipient_id = $2 AND direction = 'received'
+		 ORDER BY created_at DESC LIMIT $3 OFFSET $4`,
+		oID, rID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list inbox: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanDirectMessages(rows)
+}
+
+// ListSent returns sent messages for a user.
+func (r *DirectMessageRepository) ListSent(ctx context.Context, orgID, senderID string, limit, offset int) ([]*models.DirectMessage, error) {
+	oID, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid org ID: %w", err)
+	}
+	sID, err := uuid.Parse(senderID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid sender ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, conversation_id, sender_org_id, sender_id, recipient_org_id, recipient_id,
+		        subject, body, status, direction, created_at, delivered_at, read_at, expires_at, error_detail
+		 FROM direct_messages
+		 WHERE sender_org_id = $1 AND sender_id = $2 AND direction = 'sent'
+		 ORDER BY created_at DESC LIMIT $3 OFFSET $4`,
+		oID, sID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sent messages: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanDirectMessages(rows)
+}
+
+// ListByConversation returns all messages in a conversation.
+func (r *DirectMessageRepository) ListByConversation(ctx context.Context, conversationID string, limit, offset int) ([]*models.DirectMessage, error) {
+	cID, err := uuid.Parse(conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid conversation ID: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, conversation_id, sender_org_id, sender_id, recipient_org_id, recipient_id,
+		        subject, body, status, direction, created_at, delivered_at, read_at, expires_at, error_detail
+		 FROM direct_messages
+		 WHERE conversation_id = $1
+		 ORDER BY created_at ASC LIMIT $2 OFFSET $3`,
+		cID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list conversation messages: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanDirectMessages(rows)
+}
+
+// MarkDelivered marks a message as delivered.
+func (r *DirectMessageRepository) MarkDelivered(ctx context.Context, id string) error {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid message ID: %w", err)
+	}
+	now := time.Now()
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE direct_messages SET status = 'delivered', delivered_at = $2 WHERE id = $1`,
+		uid, now,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to mark message delivered: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// MarkRead marks a message as read.
+func (r *DirectMessageRepository) MarkRead(ctx context.Context, id string) error {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid message ID: %w", err)
+	}
+	now := time.Now()
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE direct_messages SET status = 'read', read_at = $2 WHERE id = $1`,
+		uid, now,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to mark message read: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// MarkFailed marks a message as failed with an error detail.
+func (r *DirectMessageRepository) MarkFailed(ctx context.Context, id, errorDetail string) error {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid message ID: %w", err)
+	}
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE direct_messages SET status = 'failed', error_detail = $2 WHERE id = $1`,
+		uid, errorDetail,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to mark message failed: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// Delete removes a direct message.
+func (r *DirectMessageRepository) Delete(ctx context.Context, id string) error {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid message ID: %w", err)
+	}
+	result, err := r.db.ExecContext(ctx, `DELETE FROM direct_messages WHERE id = $1`, uid)
+	if err != nil {
+		return fmt.Errorf("failed to delete direct message: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+// scanDirectMessages scans rows into DirectMessage slices.
+func scanDirectMessages(rows *sql.Rows) ([]*models.DirectMessage, error) {
+	var msgs []*models.DirectMessage
+	for rows.Next() {
+		msg := &models.DirectMessage{}
+		var deliveredAt, readAt, expiresAt sql.NullTime
+		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.SenderOrgID, &msg.SenderID,
+			&msg.RecipientOrgID, &msg.RecipientID, &msg.Subject, &msg.Body,
+			&msg.Status, &msg.Direction, &msg.CreatedAt,
+			&deliveredAt, &readAt, &expiresAt, &msg.ErrorDetail); err != nil {
+			return nil, fmt.Errorf("failed to scan direct message: %w", err)
+		}
+		if deliveredAt.Valid {
+			msg.DeliveredAt = &deliveredAt.Time
+		}
+		if readAt.Valid {
+			msg.ReadAt = &readAt.Time
+		}
+		if expiresAt.Valid {
+			msg.ExpiresAt = &expiresAt.Time
+		}
+		msgs = append(msgs, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate direct messages: %w", err)
+	}
+	return msgs, nil
 }

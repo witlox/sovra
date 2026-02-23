@@ -139,4 +139,8 @@ type Service interface {
 	StopHealthMonitor()
 	// RotateCertificate rotates the federation certificate for a partner.
 	RotateCertificate(ctx context.Context, partnerOrgID string, signature []byte) ([]byte, error)
+	// RelayMessage sends a payload to a federated partner's message delivery endpoint.
+	RelayMessage(ctx context.Context, partnerOrgID string, payload []byte) ([]byte, error)
+	// IsFederationActive checks whether an active federation exists with the given partner.
+	IsFederationActive(ctx context.Context, partnerOrgID string) (bool, error)
 }

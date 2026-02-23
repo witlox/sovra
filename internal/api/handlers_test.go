@@ -20,6 +20,7 @@ import (
 	"github.com/witlox/sovra/internal/edge"
 	"github.com/witlox/sovra/internal/federation"
 	"github.com/witlox/sovra/internal/identity"
+	"github.com/witlox/sovra/internal/messaging"
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
@@ -789,82 +790,6 @@ func TestWorkspaceHandlerDelete(t *testing.T) {
 		body, _ := json.Marshal(reqBody)
 
 		req := httptest.NewRequest("DELETE", "/api/v1/workspaces/non-existent-id", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		r.ServeHTTP(w, req)
-
-		assert.True(t, w.Code >= 200 && w.Code < 500)
-	})
-}
-
-// TestWorkspaceHandlerAddParticipant tests adding participants.
-func TestWorkspaceHandlerAddParticipant(t *testing.T) {
-	wsSvc := newRealWorkspaceService()
-	handler := api.NewWorkspaceHandler(wsSvc)
-
-	ctx := context.Background()
-	ws, _ := wsSvc.Create(ctx, workspace.CreateRequest{
-		Name:           "ws-with-participants",
-		Participants:   []string{"org1"},
-		Classification: models.ClassificationConfidential,
-	})
-
-	t.Run("adds participant to workspace", func(t *testing.T) {
-		reqBody := map[string]any{
-			"org_id":    "new-org",
-			"signature": "dGVzdC1zaWduYXR1cmU=",
-		}
-		body, _ := json.Marshal(reqBody)
-
-		r := chi.NewRouter()
-		r.Post("/api/v1/workspaces/{id}/participants", handler.AddParticipant)
-
-		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/participants", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		r.ServeHTTP(w, req)
-
-		// Handler exercises the code path regardless of success/error
-		assert.True(t, w.Code >= 200 && w.Code < 500)
-	})
-
-	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
-		r := chi.NewRouter()
-		r.Post("/api/v1/workspaces/{id}/participants", handler.AddParticipant)
-
-		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/participants", bytes.NewReader([]byte("bad")))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-}
-
-// TestWorkspaceHandlerRemoveParticipant tests removing participants.
-func TestWorkspaceHandlerRemoveParticipant(t *testing.T) {
-	wsSvc := newRealWorkspaceService()
-	handler := api.NewWorkspaceHandler(wsSvc)
-
-	ctx := context.Background()
-	ws, _ := wsSvc.Create(ctx, workspace.CreateRequest{
-		Name:         "ws-with-participants",
-		Participants: []string{"org1", "org2"},
-	})
-
-	t.Run("removes participant from workspace", func(t *testing.T) {
-		r := chi.NewRouter()
-		r.Delete("/api/v1/workspaces/{id}/participants/{orgId}", handler.RemoveParticipant)
-
-		reqBody := map[string]any{
-			"signature": "dGVzdC1zaWduYXR1cmU=",
-		}
-		body, _ := json.Marshal(reqBody)
-
-		req := httptest.NewRequest("DELETE", "/api/v1/workspaces/"+ws.ID+"/participants/org1", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -2839,64 +2764,6 @@ func TestWorkspaceHandlerArchiveFlow(t *testing.T) {
 	})
 }
 
-func TestWorkspaceHandlerParticipantFlow(t *testing.T) {
-	wsSvc := newRealWorkspaceService()
-	handler := api.NewWorkspaceHandler(wsSvc)
-
-	// Create workspace first
-	reqBody := map[string]any{
-		"name":           "participant-test",
-		"participants":   []string{"org1"},
-		"classification": "secret",
-	}
-	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest("POST", "/api/v1/workspaces", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	handler.Create(w, req)
-	require.Equal(t, http.StatusCreated, w.Code)
-
-	var ws models.Workspace
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ws))
-
-	r := chi.NewRouter()
-	r.Post("/api/v1/workspaces/{id}/participants", handler.AddParticipant)
-	r.Delete("/api/v1/workspaces/{id}/participants/{orgId}", handler.RemoveParticipant)
-
-	t.Run("adds participant", func(t *testing.T) {
-		addBody, _ := json.Marshal(map[string]any{
-			"org_id":    "org-2",
-			"signature": "c2ln",
-		})
-		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/participants", bytes.NewReader(addBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-
-		assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusNoContent)
-	})
-
-	t.Run("removes participant", func(t *testing.T) {
-		rmBody, _ := json.Marshal(map[string]any{"signature": "c2ln"})
-		req := httptest.NewRequest("DELETE", "/api/v1/workspaces/"+ws.ID+"/participants/org-2", bytes.NewReader(rmBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-
-		assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusNoContent)
-	})
-
-	t.Run("add participant missing org_id", func(t *testing.T) {
-		addBody, _ := json.Marshal(map[string]any{})
-		req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws.ID+"/participants", bytes.NewReader(addBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-}
-
 func TestPolicyHandlerGetNotFound(t *testing.T) {
 	handler := api.NewPolicyHandler(newRealPolicyService())
 	r := chi.NewRouter()
@@ -4072,5 +3939,281 @@ func TestIdentityHandlerDeleteNotFound(t *testing.T) {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 		assert.True(t, w.Code >= 200 && w.Code < 500)
+	})
+}
+
+// =============================================================================
+// Direct Message Handler Tests
+// =============================================================================
+
+func newRealMessagingService() messaging.Service {
+	repo := mocks.NewDirectMessageRepository()
+	relay := mocks.NewMockFederationRelay()
+	enc := mocks.NewMockEncryptor()
+	resolver := mocks.NewMockIdentityResolver()
+	auditSvc := mocks.NewMockAuditService()
+	return messaging.NewService(repo, relay, enc, resolver, auditSvc)
+}
+
+func withAuth(r *http.Request, orgID, userID string) *http.Request {
+	ctx := context.WithValue(r.Context(), api.ContextKeyOrgID, orgID)
+	ctx = context.WithValue(ctx, api.ContextKeyUserID, userID)
+	return r.WithContext(ctx)
+}
+
+func withCert(r *http.Request) *http.Request {
+	ctx := context.WithValue(r.Context(), api.ContextKeyCert, &api.CertificateInfo{
+		CommonName:   "federation.org-remote.sovra",
+		Organization: "org-remote",
+	})
+	return r.WithContext(ctx)
+}
+
+func TestDirectMessageHandlerSend(t *testing.T) {
+	svc := newRealMessagingService()
+	handler := api.NewDirectMessageHandler(svc)
+
+	t.Run("sends message successfully", func(t *testing.T) {
+		reqBody := map[string]any{
+			"recipient_org_id": "org1",
+			"recipient_id":     "user-b",
+			"subject":          "Test subject",
+			"body":             []byte("Hello"),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := withAuth(httptest.NewRequest("POST", "/api/v1/messages", bytes.NewReader(body)), "org1", "user-a")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Send(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.DirectMessage
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "Test subject", resp.Subject)
+		assert.Equal(t, "sent", resp.Direction)
+	})
+
+	t.Run("returns 401 without auth", func(t *testing.T) {
+		reqBody := map[string]any{
+			"recipient_org_id": "org1",
+			"recipient_id":     "user-b",
+			"subject":          "Test",
+			"body":             []byte("data"),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/messages", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Send(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		req := withAuth(httptest.NewRequest("POST", "/api/v1/messages", bytes.NewReader([]byte("not json"))), "org1", "user-a")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Send(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestDirectMessageHandlerListInbox(t *testing.T) {
+	svc := newRealMessagingService()
+	handler := api.NewDirectMessageHandler(svc)
+	ctx := context.Background()
+
+	// Seed a message
+	_, err := svc.Send(ctx, messaging.SendRequest{
+		SenderOrgID: "org1", SenderID: "user-a",
+		RecipientOrgID: "org1", RecipientID: "user-b",
+		Subject: "Inbox test", Body: []byte("data"),
+	})
+	require.NoError(t, err)
+
+	t.Run("lists inbox messages", func(t *testing.T) {
+		req := withAuth(httptest.NewRequest("GET", "/api/v1/messages?limit=10", nil), "org1", "user-b")
+		w := httptest.NewRecorder()
+
+		handler.ListInbox(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "messages")
+		assert.Contains(t, resp, "count")
+	})
+
+	t.Run("returns 401 without auth", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/messages", nil)
+		w := httptest.NewRecorder()
+		handler.ListInbox(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
+func TestDirectMessageHandlerListSent(t *testing.T) {
+	svc := newRealMessagingService()
+	handler := api.NewDirectMessageHandler(svc)
+	ctx := context.Background()
+
+	_, err := svc.Send(ctx, messaging.SendRequest{
+		SenderOrgID: "org1", SenderID: "user-a",
+		RecipientOrgID: "org1", RecipientID: "user-b",
+		Subject: "Sent test", Body: []byte("data"),
+	})
+	require.NoError(t, err)
+
+	t.Run("lists sent messages", func(t *testing.T) {
+		req := withAuth(httptest.NewRequest("GET", "/api/v1/messages/sent?limit=10", nil), "org1", "user-a")
+		w := httptest.NewRecorder()
+
+		handler.ListSent(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "messages")
+	})
+}
+
+func TestDirectMessageHandlerRead(t *testing.T) {
+	svc := newRealMessagingService()
+	handler := api.NewDirectMessageHandler(svc)
+	ctx := context.Background()
+
+	msg, err := svc.Send(ctx, messaging.SendRequest{
+		SenderOrgID: "org1", SenderID: "user-a",
+		RecipientOrgID: "org1", RecipientID: "user-b",
+		Subject: "Read test", Body: []byte("readable content"),
+	})
+	require.NoError(t, err)
+
+	t.Run("reads message by ID", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/messages/{id}", func(w http.ResponseWriter, req *http.Request) {
+			req = withAuth(req, "org1", "user-a")
+			handler.Read(w, req)
+		})
+
+		req := httptest.NewRequest("GET", "/api/v1/messages/"+msg.ID, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp models.DirectMessage
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "Read test", resp.Subject)
+	})
+
+	t.Run("returns 401 without auth", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/messages/{id}", handler.Read)
+		req := httptest.NewRequest("GET", "/api/v1/messages/"+msg.ID, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
+func TestDirectMessageHandlerDelete(t *testing.T) {
+	svc := newRealMessagingService()
+	handler := api.NewDirectMessageHandler(svc)
+	ctx := context.Background()
+
+	msg, err := svc.Send(ctx, messaging.SendRequest{
+		SenderOrgID: "org1", SenderID: "user-a",
+		RecipientOrgID: "org1", RecipientID: "user-b",
+		Subject: "Delete test", Body: []byte("data"),
+	})
+	require.NoError(t, err)
+
+	t.Run("deletes message", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Delete("/api/v1/messages/{id}", func(w http.ResponseWriter, req *http.Request) {
+			req = withAuth(req, "org1", "user-a")
+			handler.Delete(w, req)
+		})
+
+		req := httptest.NewRequest("DELETE", "/api/v1/messages/"+msg.ID, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestDirectMessageHandlerDeliver(t *testing.T) {
+	svc := newRealMessagingService()
+	handler := api.NewDirectMessageHandler(svc)
+
+	t.Run("delivers inbound message with cert", func(t *testing.T) {
+		reqBody := map[string]any{
+			"sender_org_id":    "org-remote",
+			"sender_id":        "remote-user",
+			"recipient_org_id": "org1",
+			"recipient_id":     "local-user",
+			"subject":          "Inbound",
+			"body":             []byte("Hello from partner"),
+			"conversation_id":  "conv-1",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := withCert(httptest.NewRequest("POST", "/api/v1/messages/deliver", bytes.NewReader(body)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Deliver(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.NotEmpty(t, resp["message_id"])
+	})
+
+	t.Run("returns 403 without federation cert", func(t *testing.T) {
+		reqBody := map[string]any{
+			"sender_org_id":    "org-remote",
+			"sender_id":        "remote-user",
+			"recipient_org_id": "org1",
+			"recipient_id":     "local-user",
+			"subject":          "Inbound",
+			"body":             []byte("data"),
+			"conversation_id":  "conv-2",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/messages/deliver", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.Deliver(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+}
+
+func TestDirectMessageRouterIntegration(t *testing.T) {
+	svc := newRealMessagingService()
+	services := &api.Services{
+		Messaging: svc,
+	}
+
+	router := api.NewRouter(nil, services)
+
+	t.Run("message routes are registered", func(t *testing.T) {
+		// POST /api/v1/messages should be reachable (401 expected without auth)
+		req := httptest.NewRequest("POST", "/api/v1/messages", bytes.NewReader([]byte("{}")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		// Should not be 404 — the route exists
+		assert.NotEqual(t, http.StatusNotFound, w.Code)
 	})
 }

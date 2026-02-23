@@ -3,11 +3,17 @@ package main
 
 import (
 	"context"
+	cryptoRand "crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -36,6 +42,11 @@ func getClient(cmd *cobra.Command) *client.Client {
 	keyFile, _ := cmd.Root().PersistentFlags().GetString("key")
 	caCertFile, _ := cmd.Root().PersistentFlags().GetString("ca-cert")
 	token := os.Getenv("SOVRA_TOKEN")
+
+	// Auto-load stored SSO credentials if no explicit token
+	if token == "" {
+		token = loadSSOCredentials()
+	}
 
 	return client.New(client.Config{
 		BaseURL:    apiURL,
@@ -66,6 +77,9 @@ func init() {
 	rootCmd.AddCommand(edgeCmd)
 	rootCmd.AddCommand(loginCmd)
 	rootCmd.AddCommand(logoutCmd)
+	rootCmd.AddCommand(backupCmd)
+	rootCmd.AddCommand(messageCmd)
+	rootCmd.AddCommand(activityCmd)
 
 	// Global flags
 	rootCmd.PersistentFlags().String("config", "", "Config file path")
@@ -500,7 +514,8 @@ var workspaceGetCmd = &cobra.Command{
 
 func init() {
 	workspaceCreateCmd.Flags().String("name", "", "Workspace name")
-	workspaceCreateCmd.Flags().StringSlice("participants", nil, "Participant organization IDs")
+	workspaceCreateCmd.Flags().String("group-id", "", "Identity group ID for access control")
+	workspaceCreateCmd.Flags().StringSlice("participants", nil, "Participant organization IDs (deprecated: use --group-id)")
 	workspaceCreateCmd.Flags().String("classification", "CONFIDENTIAL", "Data classification")
 	workspaceCreateCmd.Flags().String("purpose", "", "Workspace purpose")
 
@@ -518,12 +533,9 @@ func init() {
 	workspaceDeleteCmd.Flags().String("org-id", "", "Organization ID for signature")
 
 	workspaceAcceptInvitationCmd.Flags().String("org-id", "", "Organization ID")
+	workspaceAcceptInvitationCmd.Flags().String("group-id", "", "Identity group ID for access control")
 
 	workspaceDeclineInvitationCmd.Flags().String("org-id", "", "Organization ID")
-
-	workspaceAddParticipantCmd.Flags().String("org-id", "", "Organization ID to add")
-
-	workspaceRemoveParticipantCmd.Flags().String("org-id", "", "Organization ID to remove")
 
 	workspaceCmd.AddCommand(workspaceCreateCmd)
 	workspaceCmd.AddCommand(workspaceListCmd)
@@ -535,13 +547,12 @@ func init() {
 	workspaceCmd.AddCommand(workspaceDeleteCmd)
 	workspaceCmd.AddCommand(workspaceAcceptInvitationCmd)
 	workspaceCmd.AddCommand(workspaceDeclineInvitationCmd)
-	workspaceCmd.AddCommand(workspaceAddParticipantCmd)
-	workspaceCmd.AddCommand(workspaceRemoveParticipantCmd)
 	workspaceCmd.AddCommand(workspaceArchiveCmd)
 }
 
 func runWorkspaceCreate(cmd *cobra.Command, args []string) error {
 	name, _ := cmd.Flags().GetString("name")
+	groupID, _ := cmd.Flags().GetString("group-id")
 	participants, _ := cmd.Flags().GetStringSlice("participants")
 	classification, _ := cmd.Flags().GetString("classification")
 	purpose, _ := cmd.Flags().GetString("purpose")
@@ -549,8 +560,8 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) error {
 	if name == "" {
 		return fmt.Errorf("--name is required")
 	}
-	if len(participants) == 0 {
-		return fmt.Errorf("--participants is required")
+	if groupID == "" && len(participants) == 0 {
+		return fmt.Errorf("--group-id is required")
 	}
 
 	c := getClient(cmd)
@@ -558,6 +569,7 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) error {
 
 	ws, err := c.CreateWorkspace(ctx, client.WorkspaceCreateRequest{
 		Name:           name,
+		GroupID:        groupID,
 		Participants:   participants,
 		Classification: models.Classification(classification),
 		Purpose:        purpose,
@@ -759,11 +771,12 @@ var workspaceAcceptInvitationCmd = &cobra.Command{
 		if orgID == "" {
 			return fmt.Errorf("--org-id is required")
 		}
+		groupID, _ := cmd.Flags().GetString("group-id")
 
 		c := getClient(cmd)
 		ctx := context.Background()
 
-		if err := c.AcceptInvitation(ctx, args[0], client.AcceptInvitationRequest{OrgID: orgID}); err != nil {
+		if err := c.AcceptInvitation(ctx, args[0], client.AcceptInvitationRequest{OrgID: orgID, GroupID: groupID}); err != nil {
 			return fmt.Errorf("accept invitation: %w", err)
 		}
 
@@ -794,50 +807,6 @@ var workspaceDeclineInvitationCmd = &cobra.Command{
 	},
 }
 
-var workspaceAddParticipantCmd = &cobra.Command{
-	Use:   "add-participant [workspace-id]",
-	Short: "Add a participant to a workspace",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		orgID, _ := cmd.Flags().GetString("org-id")
-		if orgID == "" {
-			return fmt.Errorf("--org-id is required")
-		}
-
-		c := getClient(cmd)
-		ctx := context.Background()
-
-		if err := c.AddParticipant(ctx, args[0], client.AddParticipantRequest{OrgID: orgID}); err != nil {
-			return fmt.Errorf("add participant: %w", err)
-		}
-
-		fmt.Printf("Participant %s added to workspace %s\n", orgID, args[0])
-		return nil
-	},
-}
-
-var workspaceRemoveParticipantCmd = &cobra.Command{
-	Use:   "remove-participant [workspace-id]",
-	Short: "Remove a participant from a workspace",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		orgID, _ := cmd.Flags().GetString("org-id")
-		if orgID == "" {
-			return fmt.Errorf("--org-id is required")
-		}
-
-		c := getClient(cmd)
-		ctx := context.Background()
-
-		if err := c.RemoveParticipant(ctx, args[0], orgID, client.RemoveParticipantRequest{}); err != nil {
-			return fmt.Errorf("remove participant: %w", err)
-		}
-
-		fmt.Printf("Participant %s removed from workspace %s\n", orgID, args[0])
-		return nil
-	},
-}
-
 var workspaceArchiveCmd = &cobra.Command{
 	Use:   "archive [workspace-id]",
 	Short: "Archive a workspace",
@@ -853,6 +822,41 @@ var workspaceArchiveCmd = &cobra.Command{
 		fmt.Printf("Workspace archived: %s\n", args[0])
 		return nil
 	},
+}
+
+var workspaceRequestAccessCmd = &cobra.Command{
+	Use:   "request-access [workspace-id]",
+	Short: "Request access to a workspace",
+	Long:  `Request access to a workspace by joining its bound identity group.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		justification, _ := cmd.Flags().GetString("justification")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		joinReq, err := c.RequestWorkspaceAccess(ctx, args[0], client.RequestWorkspaceAccessRequest{
+			Justification: justification,
+		})
+		if err != nil {
+			return fmt.Errorf("request workspace access: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(joinReq, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Access request created: %s (group: %s, status: %s)\n", joinReq.ID, joinReq.GroupID, joinReq.Status)
+		}
+		return nil
+	},
+}
+
+func init() {
+	workspaceRequestAccessCmd.Flags().String("justification", "", "Justification for the access request")
+
+	workspaceCmd.AddCommand(workspaceRequestAccessCmd)
 }
 
 // ============================================================================
@@ -1074,6 +1078,32 @@ func init() {
 	federationCmd.AddCommand(federationRevokeCmd)
 	federationCmd.AddCommand(federationHealthCmd)
 	federationCmd.AddCommand(federationImportCertCmd)
+	federationCmd.AddCommand(federationRenewCertCmd)
+}
+
+var federationRenewCertCmd = &cobra.Command{
+	Use:   "renew-cert [partner-org-id]",
+	Short: "Renew federation certificate for a partner",
+	Long:  `Renew the mTLS certificate used for federation with a partner organization.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.RenewFederationCert(ctx, args[0], client.RenewFederationCertRequest{})
+		if err != nil {
+			return fmt.Errorf("renew federation cert: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Federation certificate renewed for partner: %s\n", resp.PartnerID)
+		}
+		return nil
+	},
 }
 
 // ============================================================================
@@ -2024,6 +2054,82 @@ var identityGroupRemoveMemberCmd = &cobra.Command{
 	},
 }
 
+// Group join request subcommands
+
+var identityGroupJoinRequestsCmd = &cobra.Command{
+	Use:   "join-requests [group-id]",
+	Short: "List pending join requests for a group",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		requests, err := c.ListGroupJoinRequests(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("list join requests: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(requests, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			if len(requests) == 0 {
+				fmt.Println("No pending join requests.")
+				return nil
+			}
+			for _, r := range requests {
+				fmt.Printf("%s  requester=%s  status=%s  reason=%s\n", r.ID, r.RequesterID, r.Status, r.Reason)
+			}
+		}
+		return nil
+	},
+}
+
+var identityGroupApproveJoinCmd = &cobra.Command{
+	Use:   "approve-join [request-id]",
+	Short: "Approve a group join request",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		groupID, _ := cmd.Flags().GetString("group-id")
+		if groupID == "" {
+			return fmt.Errorf("--group-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.ApproveGroupJoinRequest(ctx, groupID, args[0]); err != nil {
+			return fmt.Errorf("approve join request: %w", err)
+		}
+
+		fmt.Printf("Join request %s approved\n", args[0])
+		return nil
+	},
+}
+
+var identityGroupDenyJoinCmd = &cobra.Command{
+	Use:   "deny-join [request-id]",
+	Short: "Deny a group join request",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		groupID, _ := cmd.Flags().GetString("group-id")
+		if groupID == "" {
+			return fmt.Errorf("--group-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.DenyGroupJoinRequest(ctx, groupID, args[0]); err != nil {
+			return fmt.Errorf("deny join request: %w", err)
+		}
+
+		fmt.Printf("Join request %s denied\n", args[0])
+		return nil
+	},
+}
+
 // Role subcommands
 
 var identityRoleCmd = &cobra.Command{
@@ -2204,11 +2310,20 @@ func init() {
 	identityMFACmd.AddCommand(identityMFAEnableCmd)
 	identityMFACmd.AddCommand(identityMFAVerifyCmd)
 
+	// identity group approve-join flags
+	identityGroupApproveJoinCmd.Flags().String("group-id", "", "Group ID for the join request")
+
+	// identity group deny-join flags
+	identityGroupDenyJoinCmd.Flags().String("group-id", "", "Group ID for the join request")
+
 	// Wire up group subcommands
 	identityGroupCmd.AddCommand(identityGroupCreateCmd)
 	identityGroupCmd.AddCommand(identityGroupListCmd)
 	identityGroupCmd.AddCommand(identityGroupAddMemberCmd)
 	identityGroupCmd.AddCommand(identityGroupRemoveMemberCmd)
+	identityGroupCmd.AddCommand(identityGroupJoinRequestsCmd)
+	identityGroupCmd.AddCommand(identityGroupApproveJoinCmd)
+	identityGroupCmd.AddCommand(identityGroupDenyJoinCmd)
 
 	// Wire up role subcommands
 	identityRoleCmd.AddCommand(identityRoleCreateCmd)
@@ -2722,28 +2837,41 @@ func init() {
 var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Authenticate with the Sovra API",
+	Long: `Authenticate with Sovra using SSO (default) or legacy email/password.
+
+SSO login uses OAuth2 PKCE flow — opens a browser for IdP authentication
+and stores the resulting token in ~/.sovra/credentials.json.
+
+For service accounts, use --auth-method approle with SOVRA_TOKEN env var.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		email, _ := cmd.Flags().GetString("email")
-		password, _ := cmd.Flags().GetString("password")
+		authMethod, _ := cmd.Flags().GetString("auth-method")
 
-		if email == "" {
-			return fmt.Errorf("--email is required")
+		if authMethod == "approle" {
+			// Legacy email/password path (retained for compatibility)
+			email, _ := cmd.Flags().GetString("email")
+			password, _ := cmd.Flags().GetString("password")
+			if email == "" {
+				return fmt.Errorf("--email is required for approle auth")
+			}
+			if password == "" {
+				return fmt.Errorf("--password is required for approle auth")
+			}
+
+			c := getClient(cmd)
+			ctx := context.Background()
+
+			resp, err := c.Login(ctx, email, password)
+			if err != nil {
+				return fmt.Errorf("login failed: %w", err)
+			}
+
+			fmt.Printf("Login successful. Token expires at: %s\n", resp.ExpiresAt.Format(time.RFC3339))
+			fmt.Printf("Set SOVRA_TOKEN environment variable with:\nexport SOVRA_TOKEN=%s\n", resp.Token)
+			return nil
 		}
-		if password == "" {
-			return fmt.Errorf("--password is required")
-		}
 
-		c := getClient(cmd)
-		ctx := context.Background()
-
-		resp, err := c.Login(ctx, email, password)
-		if err != nil {
-			return fmt.Errorf("login failed: %w", err)
-		}
-
-		fmt.Printf("Login successful. Token expires at: %s\n", resp.ExpiresAt.Format(time.RFC3339))
-		fmt.Printf("Set SOVRA_TOKEN environment variable with:\nexport SOVRA_TOKEN=%s\n", resp.Token)
-		return nil
+		// SSO login (default): OAuth2 PKCE flow
+		return runSSOLogin(cmd)
 	},
 }
 
@@ -2758,15 +2886,241 @@ var logoutCmd = &cobra.Command{
 			return fmt.Errorf("logout failed: %w", err)
 		}
 
+		// Remove stored credentials
+		credsPath := sovraCredentialsPath()
+		_ = os.Remove(credsPath)
 		fmt.Println("Logged out successfully.")
 		return nil
 	},
 }
 
 func init() {
-	loginCmd.Flags().String("email", "", "Email address")
-	loginCmd.Flags().String("password", "", "Password")
+	loginCmd.Flags().String("email", "", "Email address (for approle auth)")
+	loginCmd.Flags().String("password", "", "Password (for approle auth)")
+	loginCmd.Flags().String("auth-method", "sso", "Authentication method: sso (default) or approle")
+	loginCmd.Flags().String("issuer-url", "", "SSO IdP issuer URL (overrides SOVRA_SSO_ISSUER_URL)")
+	loginCmd.Flags().String("client-id", "", "SSO client ID (overrides SOVRA_SSO_CLIENT_ID)")
 }
+
+// sovraCredentialsPath returns the path to stored SSO credentials.
+func sovraCredentialsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".sovra", "credentials.json")
+}
+
+// ssoCredentials represents stored SSO credentials.
+type ssoCredentials struct {
+	AccessToken  string    `json:"access_token"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+// loadSSOCredentials loads stored SSO credentials if available and not expired.
+func loadSSOCredentials() string {
+	credsPath := sovraCredentialsPath()
+	if credsPath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(credsPath)
+	if err != nil {
+		return ""
+	}
+	var creds ssoCredentials
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return ""
+	}
+	if time.Now().After(creds.ExpiresAt) {
+		return ""
+	}
+	return creds.AccessToken
+}
+
+// runSSOLogin performs an OAuth2 PKCE login flow.
+func runSSOLogin(cmd *cobra.Command) error {
+	issuerURL, _ := cmd.Flags().GetString("issuer-url")
+	if issuerURL == "" {
+		issuerURL = os.Getenv("SOVRA_SSO_ISSUER_URL")
+	}
+	if issuerURL == "" {
+		return fmt.Errorf("SSO issuer URL required: set --issuer-url or SOVRA_SSO_ISSUER_URL")
+	}
+
+	clientID, _ := cmd.Flags().GetString("client-id")
+	if clientID == "" {
+		clientID = os.Getenv("SOVRA_SSO_CLIENT_ID")
+	}
+	if clientID == "" {
+		return fmt.Errorf("SSO client ID required: set --client-id or SOVRA_SSO_CLIENT_ID")
+	}
+
+	// Generate PKCE code verifier and challenge
+	verifierBytes := make([]byte, 32)
+	if _, err := cryptoRandRead(verifierBytes); err != nil {
+		return fmt.Errorf("generate verifier: %w", err)
+	}
+	codeVerifier := base64.RawURLEncoding.EncodeToString(verifierBytes)
+
+	challengeHash := sha256Sum([]byte(codeVerifier))
+	codeChallenge := base64.RawURLEncoding.EncodeToString(challengeHash[:])
+
+	// State parameter for CSRF protection
+	stateBytes := make([]byte, 16)
+	if _, err := cryptoRandRead(stateBytes); err != nil {
+		return fmt.Errorf("generate state: %w", err)
+	}
+	state := hex.EncodeToString(stateBytes)
+
+	// Start local callback server
+	resultCh := make(chan ssoCallbackResult, 1)
+	listener, err := netListen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("start callback server: %w", err)
+	}
+	callbackPort := listener.Addr().(*net.TCPAddr).Port
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", callbackPort)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		code := r.URL.Query().Get("code")
+		returnedState := r.URL.Query().Get("state")
+		errParam := r.URL.Query().Get("error")
+
+		if errParam != "" {
+			resultCh <- ssoCallbackResult{err: fmt.Errorf("IdP error: %s", errParam)}
+			fmt.Fprintf(w, "Authentication failed: %s. You can close this window.", errParam)
+			return
+		}
+		if returnedState != state {
+			resultCh <- ssoCallbackResult{err: fmt.Errorf("state mismatch")}
+			fmt.Fprint(w, "Authentication failed: state mismatch. You can close this window.")
+			return
+		}
+		resultCh <- ssoCallbackResult{code: code}
+		fmt.Fprint(w, "Authentication successful! You can close this window.")
+	})
+
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(listener) }()
+	defer func() { _ = srv.Close() }()
+
+	// Build authorization URL
+	authURL := fmt.Sprintf("%s/authorize?response_type=code&client_id=%s&redirect_uri=%s&state=%s&code_challenge=%s&code_challenge_method=S256&scope=openid+profile+email",
+		strings.TrimRight(issuerURL, "/"),
+		clientID,
+		redirectURI,
+		state,
+		codeChallenge,
+	)
+
+	fmt.Printf("Opening browser for SSO login...\n")
+	fmt.Printf("If the browser doesn't open, visit:\n%s\n\n", authURL)
+
+	// Attempt to open browser (best-effort)
+	_ = openBrowser(authURL)
+
+	// Wait for callback
+	fmt.Println("Waiting for authentication...")
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			return fmt.Errorf("SSO login: %w", result.err)
+		}
+
+		// Exchange code for token
+		tokenURL := strings.TrimRight(issuerURL, "/") + "/token"
+		tokenResp, err := exchangeCodeForToken(tokenURL, clientID, result.code, redirectURI, codeVerifier)
+		if err != nil {
+			return fmt.Errorf("token exchange: %w", err)
+		}
+
+		// Store credentials
+		creds := ssoCredentials{
+			AccessToken:  tokenResp.AccessToken,
+			RefreshToken: tokenResp.RefreshToken,
+			ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
+		}
+
+		credsPath := sovraCredentialsPath()
+		if credsPath != "" {
+			credsDir := filepath.Dir(credsPath)
+			_ = os.MkdirAll(credsDir, 0700)
+			data, _ := json.MarshalIndent(creds, "", "  ")
+			if err := os.WriteFile(credsPath, data, 0600); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not save credentials: %v\n", err)
+			}
+		}
+
+		fmt.Printf("SSO login successful. Token expires at: %s\n", creds.ExpiresAt.Format(time.RFC3339))
+		return nil
+
+	case <-time.After(5 * time.Minute):
+		return fmt.Errorf("SSO login timed out (5 minutes)")
+	}
+}
+
+type ssoCallbackResult struct {
+	code string
+	err  error
+}
+
+type tokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	ExpiresIn    int    `json:"expires_in"`
+	TokenType    string `json:"token_type"`
+}
+
+func exchangeCodeForToken(tokenURL, clientID, code, redirectURI, codeVerifier string) (*tokenResponse, error) {
+	formData := fmt.Sprintf("grant_type=authorization_code&client_id=%s&code=%s&redirect_uri=%s&code_verifier=%s",
+		clientID, code, redirectURI, codeVerifier)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, tokenURL, strings.NewReader(formData))
+	if err != nil {
+		return nil, fmt.Errorf("create token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("token request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read token response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tokenResp tokenResponse
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return nil, fmt.Errorf("parse token response: %w", err)
+	}
+	return &tokenResp, nil
+}
+
+func openBrowser(url string) error {
+	if err := exec.CommandContext(context.Background(), "open", url).Start(); err != nil {
+		return fmt.Errorf("open browser: %w", err)
+	}
+	return nil
+}
+
+// cryptoRandRead wraps crypto/rand.Read for testability.
+var cryptoRandRead = cryptoRand.Read
+
+// sha256Sum wraps sha256.Sum256 for use in PKCE challenge.
+func sha256Sum(data []byte) [32]byte {
+	return sha256.Sum256(data)
+}
+
+// netListen wraps net.Listen for testability.
+var netListen = net.Listen
 
 // ============================================================================
 // Encrypt/Decrypt Commands
@@ -2974,9 +3328,9 @@ var metricsCmd = &cobra.Command{
 // Activity Log Command
 // ============================================================================
 
-var activityCmd = &cobra.Command{
-	Use:   "activity [actor-id]",
-	Short: "View activity log for an actor",
+var activityGetCmd = &cobra.Command{
+	Use:   "get [actor-id]",
+	Short: "View activity log for a specific actor",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		since, _ := cmd.Flags().GetString("since")
@@ -3010,9 +3364,9 @@ var activityCmd = &cobra.Command{
 }
 
 func init() {
-	activityCmd.Flags().String("since", "", "Start time (RFC3339)")
-	activityCmd.Flags().String("until", "", "End time (RFC3339)")
-	activityCmd.Flags().Int("limit", 100, "Maximum results")
+	activityGetCmd.Flags().String("since", "", "Start time (RFC3339)")
+	activityGetCmd.Flags().String("until", "", "End time (RFC3339)")
+	activityGetCmd.Flags().Int("limit", 100, "Maximum results")
 }
 
 // ============================================================================
@@ -3959,6 +4313,389 @@ func init() {
 	rotationPolicyCmd.AddCommand(rotationPolicyListCmd)
 
 	rootCmd.AddCommand(rotationPolicyCmd)
+}
+
+// ============================================================================
+// Backup Commands
+// ============================================================================
+
+var backupCmd = &cobra.Command{
+	Use:   "backup",
+	Short: "Backup and restore management",
+	Long:  `Manage system backups and restores. Restore requires CRK signature.`,
+}
+
+var backupCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a new backup",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		backupType, _ := cmd.Flags().GetString("type")
+		if backupType == "" {
+			backupType = "full"
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		b, err := c.CreateBackup(ctx, client.CreateBackupRequest{Type: backupType})
+		if err != nil {
+			return fmt.Errorf("create backup: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(b, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Backup created: %s (type=%s, status=%s)\n", b.ID, b.Type, b.Status)
+		}
+		return nil
+	},
+}
+
+var backupListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List backups",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.ListBackups(ctx)
+		if err != nil {
+			return fmt.Errorf("list backups: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Backups (%d):\n", resp.Count)
+			for _, b := range resp.Backups {
+				fmt.Printf("  %s  type=%s  status=%s  created=%s\n",
+					b.ID, b.Type, b.Status, b.CreatedAt.Format(time.RFC3339))
+			}
+		}
+		return nil
+	},
+}
+
+var backupGetCmd = &cobra.Command{
+	Use:   "get [backup-id]",
+	Short: "Get backup details",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		b, err := c.GetBackup(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("get backup: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(b, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("ID: %s\nType: %s\nStatus: %s\nCreated: %s\nSize: %d\nChecksum: %s\n",
+				b.ID, b.Type, b.Status, b.CreatedAt.Format(time.RFC3339), b.Size, b.Checksum)
+		}
+		return nil
+	},
+}
+
+var backupRestoreCmd = &cobra.Command{
+	Use:   "restore [backup-id]",
+	Short: "Restore from a backup (requires CRK signature)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.RestoreBackup(ctx, args[0], client.RestoreBackupRequest{}); err != nil {
+			return fmt.Errorf("restore backup: %w", err)
+		}
+
+		fmt.Printf("Restore initiated from backup: %s\n", args[0])
+		return nil
+	},
+}
+
+func init() {
+	backupCreateCmd.Flags().String("type", "full", "Backup type (full, incremental)")
+
+	backupCmd.AddCommand(backupCreateCmd)
+	backupCmd.AddCommand(backupListCmd)
+	backupCmd.AddCommand(backupGetCmd)
+	backupCmd.AddCommand(backupRestoreCmd)
+}
+
+// ============================================================================
+// Message Commands
+// ============================================================================
+
+var messageCmd = &cobra.Command{
+	Use:   "message",
+	Short: "Direct messaging",
+	Long:  `Send and receive encrypted direct messages between users on federated control planes.`,
+}
+
+var messageSendCmd = &cobra.Command{
+	Use:   "send",
+	Short: "Send a direct message",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		to, _ := cmd.Flags().GetString("to")
+		toOrg, _ := cmd.Flags().GetString("to-org")
+		subject, _ := cmd.Flags().GetString("subject")
+		body, _ := cmd.Flags().GetString("body")
+		bodyFile, _ := cmd.Flags().GetString("body-file")
+
+		if to == "" || subject == "" {
+			return fmt.Errorf("--to and --subject are required")
+		}
+
+		// If --to-org not specified, default to caller's own org
+		if toOrg == "" {
+			toOrg, _ = cmd.Root().PersistentFlags().GetString("org-id")
+		}
+
+		var bodyBytes []byte
+		if bodyFile != "" {
+			data, err := os.ReadFile(bodyFile)
+			if err != nil {
+				return fmt.Errorf("read body file: %w", err)
+			}
+			bodyBytes = data
+		} else if body != "" {
+			bodyBytes = []byte(body)
+		} else {
+			return fmt.Errorf("--body or --body-file is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		msg, err := c.SendMessage(ctx, client.SendMessageRequest{
+			RecipientOrgID: toOrg,
+			RecipientID:    to,
+			Subject:        subject,
+			Body:           bodyBytes,
+		})
+		if err != nil {
+			return fmt.Errorf("send message: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(msg, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Message sent: %s (status=%s)\n", msg.ID, msg.Status)
+		}
+		return nil
+	},
+}
+
+var messageListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List messages",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sent, _ := cmd.Flags().GetBool("sent")
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		var resp *client.MessageListResponse
+		var err error
+		if sent {
+			resp, err = c.ListSentMessages(ctx, limit, 0)
+		} else {
+			resp, err = c.ListMessages(ctx, limit, 0)
+		}
+		if err != nil {
+			return fmt.Errorf("list messages: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			if len(resp.Messages) == 0 {
+				fmt.Println("No messages.")
+				return nil
+			}
+			for _, msg := range resp.Messages {
+				status := string(msg.Status)
+				if sent {
+					fmt.Printf("  %s  to=%s  subject=%q  status=%s  %s\n",
+						msg.ID, msg.RecipientID, msg.Subject, status, msg.CreatedAt.Format(time.RFC3339))
+				} else {
+					fmt.Printf("  %s  from=%s  subject=%q  status=%s  %s\n",
+						msg.ID, msg.SenderID, msg.Subject, status, msg.CreatedAt.Format(time.RFC3339))
+				}
+			}
+		}
+		return nil
+	},
+}
+
+var messageReadCmd = &cobra.Command{
+	Use:   "read <message-id>",
+	Short: "Read a message",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		msg, err := c.ReadMessage(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("read message: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(msg, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("From:    %s (org: %s)\n", msg.SenderID, msg.SenderOrgID)
+			fmt.Printf("To:      %s (org: %s)\n", msg.RecipientID, msg.RecipientOrgID)
+			fmt.Printf("Subject: %s\n", msg.Subject)
+			fmt.Printf("Date:    %s\n", msg.CreatedAt.Format(time.RFC3339))
+			fmt.Printf("Status:  %s\n", msg.Status)
+			fmt.Println("---")
+			fmt.Println(string(msg.Body))
+		}
+		return nil
+	},
+}
+
+var messageDeleteCmd = &cobra.Command{
+	Use:   "delete <message-id>",
+	Short: "Delete a message",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.DeleteMessage(ctx, args[0]); err != nil {
+			return fmt.Errorf("delete message: %w", err)
+		}
+
+		fmt.Printf("Message %s deleted.\n", args[0])
+		return nil
+	},
+}
+
+func init() {
+	messageSendCmd.Flags().String("to", "", "Recipient identity ID")
+	messageSendCmd.Flags().String("to-org", "", "Recipient organization ID (defaults to caller's org)")
+	messageSendCmd.Flags().String("subject", "", "Message subject")
+	messageSendCmd.Flags().String("body", "", "Message body text")
+	messageSendCmd.Flags().String("body-file", "", "File containing message body")
+
+	messageListCmd.Flags().Bool("sent", false, "Show sent messages instead of inbox")
+	messageListCmd.Flags().Int("limit", 50, "Maximum messages to return")
+
+	messageCmd.AddCommand(messageSendCmd)
+	messageCmd.AddCommand(messageListCmd)
+	messageCmd.AddCommand(messageReadCmd)
+	messageCmd.AddCommand(messageDeleteCmd)
+}
+
+// ============================================================================
+// Activity Commands
+// ============================================================================
+
+var activityCmd = &cobra.Command{
+	Use:   "activity",
+	Short: "User activity log",
+	Long:  `View your own activity log without needing to specify an actor ID.`,
+}
+
+var activityListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List your activity",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		since, _ := cmd.Flags().GetString("since")
+		until, _ := cmd.Flags().GetString("until")
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		resp, err := c.ListActivity(ctx, client.AuditQueryParams{
+			Since: since,
+			Until: until,
+			Limit: limit,
+		})
+		if err != nil {
+			return fmt.Errorf("list activity: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(resp, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Activity for %s (%d events):\n", resp.Actor, resp.Count)
+			for _, e := range resp.Events {
+				fmt.Printf("  %s  %s  %s  %s\n",
+					e.Timestamp.Format(time.RFC3339), e.EventType, e.Result, e.ID)
+			}
+		}
+		return nil
+	},
+}
+
+var activityExportCmd = &cobra.Command{
+	Use:   "export",
+	Short: "Export your activity log",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		since, _ := cmd.Flags().GetString("since")
+		until, _ := cmd.Flags().GetString("until")
+		output, _ := cmd.Flags().GetString("output")
+		format, _ := cmd.Flags().GetString("format")
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		data, err := c.ExportActivity(ctx, client.ExportActivityRequest{
+			Since:  since,
+			Until:  until,
+			Format: format,
+		})
+		if err != nil {
+			return fmt.Errorf("export activity: %w", err)
+		}
+
+		if output != "" {
+			if err := os.WriteFile(output, data, 0600); err != nil {
+				return fmt.Errorf("write output: %w", err)
+			}
+			fmt.Printf("Activity exported to %s\n", output)
+		} else {
+			fmt.Print(string(data))
+		}
+		return nil
+	},
+}
+
+func init() {
+	activityListCmd.Flags().String("since", "", "Start time (RFC3339)")
+	activityListCmd.Flags().String("until", "", "End time (RFC3339)")
+	activityListCmd.Flags().Int("limit", 50, "Maximum events to return")
+
+	activityExportCmd.Flags().String("since", "", "Start time (RFC3339)")
+	activityExportCmd.Flags().String("until", "", "End time (RFC3339)")
+	activityExportCmd.Flags().String("output", "", "Output file path")
+	activityExportCmd.Flags().String("format", "json", "Export format (json, csv)")
+
+	activityCmd.AddCommand(activityListCmd)
+	activityCmd.AddCommand(activityExportCmd)
+	activityCmd.AddCommand(activityGetCmd)
 }
 
 // ============================================================================

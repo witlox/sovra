@@ -165,6 +165,24 @@ const (
 	AuditEventTypeEmergencyApprove AuditEventType = "emergency.approve"
 	AuditEventTypeEmergencyDeny    AuditEventType = "emergency.deny"
 	AuditEventTypeEmergencyAccess  AuditEventType = "emergency.access"
+
+	AuditEventTypeGroupMemberAdd        AuditEventType = "group.member.add"
+	AuditEventTypeGroupMemberRemove     AuditEventType = "group.member.remove"
+	AuditEventTypeGroupSync             AuditEventType = "group.sync"
+	AuditEventTypeGroupJoinRequest      AuditEventType = "group.join.request"
+	AuditEventTypeGroupJoinApprove      AuditEventType = "group.join.approve"
+	AuditEventTypeGroupJoinDeny         AuditEventType = "group.join.deny"
+	AuditEventTypeWorkspaceGroupBind    AuditEventType = "workspace.group.bind"
+	AuditEventTypeWorkspaceGroupUnbind  AuditEventType = "workspace.group.unbind"
+	AuditEventTypeFederationCertRenew   AuditEventType = "federation.cert.renew"
+	AuditEventTypeBackupCreate          AuditEventType = "backup.create"
+	AuditEventTypeBackupRestore         AuditEventType = "backup.restore"
+	AuditEventTypeUserReconcileDisabled AuditEventType = "user.reconciliation.disabled"
+
+	AuditEventTypeMessageSend    AuditEventType = "message.send"
+	AuditEventTypeMessageDeliver AuditEventType = "message.deliver"
+	AuditEventTypeMessageRead    AuditEventType = "message.read"
+	AuditEventTypeMessageDelete  AuditEventType = "message.delete"
 )
 
 // AuditEventResult represents the result of an audited operation.
@@ -265,4 +283,63 @@ type HealthResponse struct {
 	Status     HealthStatus               `json:"status"`
 	Version    string                     `json:"version"`
 	Components map[string]ComponentHealth `json:"components"`
+}
+
+// WorkspaceGroupBinding links a workspace to an identity group for access control.
+// Each participating org binds its own group to the workspace.
+type WorkspaceGroupBinding struct {
+	WorkspaceID string    `json:"workspace_id"`
+	OrgID       string    `json:"org_id"`
+	GroupID     string    `json:"group_id"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// BackupStatus represents the status of a backup.
+type BackupStatus string
+
+const (
+	BackupStatusPending   BackupStatus = "pending"
+	BackupStatusCompleted BackupStatus = "completed"
+	BackupStatusFailed    BackupStatus = "failed"
+)
+
+// Backup represents a system backup record.
+type Backup struct {
+	ID        string       `json:"id"`
+	OrgID     string       `json:"org_id"`
+	Type      string       `json:"type"`
+	Status    BackupStatus `json:"status"`
+	CreatedBy string       `json:"created_by"`
+	CreatedAt time.Time    `json:"created_at"`
+	Size      int64        `json:"size"`
+	Checksum  string       `json:"checksum"`
+}
+
+// DirectMessageStatus represents the status of a direct message.
+type DirectMessageStatus string
+
+const (
+	DirectMessageStatusPending   DirectMessageStatus = "pending"
+	DirectMessageStatusDelivered DirectMessageStatus = "delivered"
+	DirectMessageStatusRead      DirectMessageStatus = "read"
+	DirectMessageStatusFailed    DirectMessageStatus = "failed"
+)
+
+// DirectMessage represents a store-and-forward message between users on federated control planes.
+type DirectMessage struct {
+	ID             string              `json:"id"`
+	ConversationID string              `json:"conversation_id"`
+	SenderOrgID    string              `json:"sender_org_id"`
+	SenderID       string              `json:"sender_id"`
+	RecipientOrgID string              `json:"recipient_org_id"`
+	RecipientID    string              `json:"recipient_id"`
+	Subject        string              `json:"subject"`
+	Body           []byte              `json:"body"`
+	Status         DirectMessageStatus `json:"status"`
+	Direction      string              `json:"direction"` // "sent" or "received"
+	CreatedAt      time.Time           `json:"created_at"`
+	DeliveredAt    *time.Time          `json:"delivered_at,omitempty"`
+	ReadAt         *time.Time          `json:"read_at,omitempty"`
+	ExpiresAt      *time.Time          `json:"expires_at,omitempty"`
+	ErrorDetail    string              `json:"error_detail,omitempty"`
 }

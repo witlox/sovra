@@ -253,3 +253,73 @@ func TestFederationRotateCertificate(t *testing.T) {
 		_ = newCert
 	})
 }
+
+func TestFederationRelayMessage(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	svc := createTestService("org-relay")
+
+	t.Run("relay message to established partner", func(t *testing.T) {
+		// Establish federation first
+		_, err := svc.Establish(ctx, federation.EstablishRequest{
+			PartnerOrgID: "org-target",
+			PartnerURL:   "https://target.example.com",
+			PartnerCert:  []byte("target-cert"),
+		})
+		require.NoError(t, err)
+
+		payload := []byte(`{"subject":"test","body":"hello"}`)
+		resp, err := svc.RelayMessage(ctx, "org-target", payload)
+		require.NoError(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("relay message to unknown partner still succeeds on mock client", func(t *testing.T) {
+		// The testable service delegates to the mock MTLSClient which accepts any partner.
+		// In production, the productionServiceImpl checks repo for active federation first.
+		payload := []byte(`{"subject":"test"}`)
+		resp, err := svc.RelayMessage(ctx, "org-unknown", payload)
+		require.NoError(t, err)
+		assert.NotNil(t, resp)
+	})
+}
+
+func TestFederationIsFederationActive(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	svc := createTestService("org-active-check")
+
+	t.Run("returns true for active federation", func(t *testing.T) {
+		_, err := svc.Establish(ctx, federation.EstablishRequest{
+			PartnerOrgID: "org-active-partner",
+			PartnerURL:   "https://active.example.com",
+			PartnerCert:  []byte("cert-data"),
+		})
+		require.NoError(t, err)
+
+		active, err := svc.IsFederationActive(ctx, "org-active-partner")
+		require.NoError(t, err)
+		assert.True(t, active)
+	})
+
+	t.Run("returns false for revoked federation", func(t *testing.T) {
+		_, err := svc.Establish(ctx, federation.EstablishRequest{
+			PartnerOrgID: "org-revoke-partner",
+			PartnerURL:   "https://revoke.example.com",
+			PartnerCert:  []byte("cert-data"),
+		})
+		require.NoError(t, err)
+
+		err = svc.Revoke(ctx, federation.RevocationRequest{
+			PartnerOrgID: "org-revoke-partner",
+		})
+		require.NoError(t, err)
+
+		active, err := svc.IsFederationActive(ctx, "org-revoke-partner")
+		require.NoError(t, err)
+		assert.False(t, active)
+	})
+
+	t.Run("returns error for non-existent federation", func(t *testing.T) {
+		_, err := svc.IsFederationActive(ctx, "org-nonexistent")
+		require.Error(t, err)
+	})
+}

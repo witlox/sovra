@@ -5,233 +5,305 @@ title: User Guide
 
 # User Guide
 
-This guide covers operations for end users of the Sovra platform.
+This guide covers day-to-day operations for end users of the Sovra platform. It assumes your organization has already been set up by an administrator and that you have been provisioned as a user identity.
 
 ## Overview
 
 As a Sovra user, you can:
-- Encrypt and decrypt data in workspaces you have access to
-- View your workspace memberships
+
+- Authenticate via your organization's Single Sign-On (SSO) provider
 - Request access to workspaces
-- View your activity history
+- Encrypt and decrypt data within workspaces you have access to
+- View your groups and request group membership
+- Review your own activity history
 
-## Getting Started
+## Authentication
 
-### Authentication
+Sovra supports several authentication methods. Most users authenticate through SSO. Service accounts and administrators use alternative methods described below.
 
-Sovra supports multiple authentication methods depending on your identity type:
+### SSO Login (Default)
 
-**SSO Users (most common):**
+The default login method uses an OAuth2 PKCE flow. Running `sovra login` opens your browser, redirects you to your organization's Identity Provider (IdP), and stores the resulting token locally.
+
 ```bash
-# Login via your organization's SSO
 sovra login
-
-# Opens browser for SSO authentication
-# After successful login: "Authenticated as researcher@eth.ch"
 ```
 
-**Service Accounts:**
+After successful authentication in the browser, the CLI stores credentials in `~/.sovra/credentials.json`. Subsequent commands use this stored token automatically until it expires.
+
+**Specifying SSO parameters:**
+
+You can pass the IdP issuer URL and client ID as flags or environment variables:
+
 ```bash
-# Using AppRole authentication
+# Using flags
+sovra login --issuer-url https://idp.example.org --client-id sovra-cli
+
+# Using environment variables
+export SOVRA_SSO_ISSUER_URL=https://idp.example.org
+export SOVRA_SSO_CLIENT_ID=sovra-cli
+sovra login
+```
+
+If neither flags nor environment variables are set, the CLI will report an error indicating which values are required.
+
+### Service Account Authentication
+
+Service accounts authenticate using the `approle` method with email and password credentials:
+
+```bash
 sovra login \
   --auth-method approle \
-  --role-id <ROLE_ID> \
-  --secret-id <SECRET_ID>
+  --email pipeline@example.org \
+  --password "$SERVICE_PASSWORD"
 ```
 
-**Device/Certificate Authentication:**
+On success, the CLI prints a token. Set it as an environment variable for subsequent commands:
+
 ```bash
-# Using mTLS certificate
-sovra login \
-  --auth-method cert \
-  --cert /path/to/client.crt \
-  --key /path/to/client.key
+export SOVRA_TOKEN=<token-from-login>
 ```
 
-### Check Your Access
+### Admin Authentication (mTLS)
+
+Administrators authenticate using mutual TLS client certificates rather than passwords. Admin operations require the `--cert` and `--key` flags:
 
 ```bash
-# View your workspaces
+sovra identity list --type admin \
+  --cert /path/to/admin.crt \
+  --key /path/to/admin.key
+```
+
+See the [Administrator Guide](admin-guide.md) for full details on admin authentication.
+
+### Logging Out
+
+To clear stored credentials and end your session:
+
+```bash
+sovra logout
+```
+
+This removes `~/.sovra/credentials.json` and invalidates the current token.
+
+## Requesting Workspace Access
+
+Workspaces are shared cryptographic environments where authorized users can encrypt and decrypt data. Each workspace is bound to an identity group; to use a workspace, you must be a member of its bound group.
+
+### Listing Available Workspaces
+
+View workspaces you already have access to:
+
+```bash
 sovra workspace list
-
-# Output:
-# NAME              ROLE         ORG            CREATED
-# cancer-research   contributor  eth-zurich     2026-01-15
-# genomics-data     viewer       eth-zurich     2026-01-20
-```
-
-## Working with Data
-
-### Encrypting Data
-
-Encrypt data before sharing or storing:
-
-```bash
-# Encrypt a file
-sovra encrypt \
-  --workspace cancer-research \
-  --input patient-data.json \
-  --output patient-data.enc
-
-# Encrypt from stdin
-echo "sensitive data" | sovra encrypt \
-  --workspace cancer-research \
-  --output data.enc
-
-# Encrypt with metadata
-sovra encrypt \
-  --workspace cancer-research \
-  --input data.json \
-  --output data.enc \
-  --context '{"purpose":"analysis","date":"2026-01-30"}'
-```
-
-### Decrypting Data
-
-Decrypt data you have access to:
-
-```bash
-# Decrypt a file
-sovra decrypt \
-  --workspace cancer-research \
-  --input patient-data.enc \
-  --output patient-data.json
-
-# Decrypt to stdout
-sovra decrypt \
-  --workspace cancer-research \
-  --input data.enc
-
-# Decrypt with context verification
-sovra decrypt \
-  --workspace cancer-research \
-  --input data.enc \
-  --context '{"purpose":"analysis"}'
-```
-
-### Batch Operations
-
-```bash
-# Encrypt multiple files
-sovra encrypt \
-  --workspace cancer-research \
-  --input-dir /data/raw/ \
-  --output-dir /data/encrypted/
-
-# Decrypt multiple files
-sovra decrypt \
-  --workspace cancer-research \
-  --input-dir /data/encrypted/ \
-  --output-dir /data/decrypted/
-```
-
-## Workspace Operations
-
-### Viewing Workspace Details
-
-```bash
-# View workspace info
-sovra workspace info cancer-research
-
-# Output:
-# Name: cancer-research
-# Description: Collaborative cancer research data
-# Organizations: eth-zurich, partner-university
-# Your Role: contributor
-# Key Algorithm: AES-256-GCM
-# Created: 2026-01-15T10:00:00Z
-# Last Activity: 2026-01-30T14:30:00Z
-```
-
-### Viewing Participants
-
-```bash
-# List workspace participants (if you have permission)
-sovra workspace participants cancer-research
-
-# Output:
-# EMAIL                    ORG               ROLE
-# alice@eth.ch            eth-zurich         admin
-# bob@partner.edu         partner-university contributor
-# researcher@eth.ch       eth-zurich         contributor
 ```
 
 ### Requesting Access
 
+If you need access to a workspace you are not yet a member of, submit an access request. This resolves the workspace's bound group and creates a join request for an administrator to approve:
+
 ```bash
-# Request access to a workspace
-sovra workspace request-access \
-  --workspace genomics-data \
-  --role contributor \
-  --justification "Need access for project XYZ"
-
-# Check request status
-sovra workspace access-requests
-
-# Output:
-# WORKSPACE      STATUS    REQUESTED    REVIEWED_BY
-# genomics-data  pending   2026-01-30   -
+sovra workspace request-access <workspace-id> \
+  --justification "Need access for genomics analysis project"
 ```
 
-## Viewing Your Activity
+The CLI confirms the request was created and prints the request ID, the resolved group ID, and the current status (typically `pending`).
 
-### Activity History
+### Checking Request Status
+
+An administrator will review your request and either approve or deny it. You can check the status of pending requests by listing your groups (see "Group Operations" below) or by contacting your administrator directly.
+
+## Encrypting and Decrypting Data
+
+Once you have access to a workspace, you can encrypt and decrypt data through it. All encryption and decryption operations require group membership for the workspace's bound group.
+
+### Encrypting Data
+
+**Inline data:**
 
 ```bash
-# View your recent activity
+sovra encrypt --workspace <workspace-id> --data "sensitive payload"
+```
+
+**From a file:**
+
+```bash
+sovra encrypt \
+  --workspace <workspace-id> \
+  --data-file patient-records.json \
+  --output patient-records.enc
+```
+
+**With encryption context (additional authenticated data):**
+
+```bash
+sovra encrypt \
+  --workspace <workspace-id> \
+  --data-file data.json \
+  --output data.enc \
+  --context '{"purpose":"analysis","date":"2026-02-23"}'
+```
+
+If no `--output` flag is provided, the base64-encoded ciphertext is printed to stdout.
+
+### Decrypting Data
+
+**Inline ciphertext (base64-encoded):**
+
+```bash
+sovra decrypt --workspace <workspace-id> --data "BASE64_CIPHERTEXT"
+```
+
+**From a file:**
+
+```bash
+sovra decrypt \
+  --workspace <workspace-id> \
+  --data-file patient-records.enc \
+  --output patient-records.json
+```
+
+**With context verification:**
+
+```bash
+sovra decrypt \
+  --workspace <workspace-id> \
+  --data-file data.enc \
+  --output data.json \
+  --context '{"purpose":"analysis"}'
+```
+
+If no `--output` flag is provided, the decrypted plaintext is printed to stdout.
+
+### Batch Operations
+
+Encrypt or decrypt entire directories of files at once:
+
+```bash
+# Encrypt all files in a directory
+sovra encrypt \
+  --workspace <workspace-id> \
+  --input-dir /data/raw/ \
+  --output-dir /data/encrypted/
+
+# Decrypt all files in a directory
+sovra decrypt \
+  --workspace <workspace-id> \
+  --input-dir /data/encrypted/ \
+  --output-dir /data/decrypted/
+```
+
+## Group Operations
+
+Identity groups control access to workspaces. As a user, you can view available groups and request membership.
+
+### Listing Groups
+
+View all identity groups visible to you:
+
+```bash
+sovra identity group list
+```
+
+### Requesting to Join a Group
+
+Workspace access requests (described above) automatically resolve to the correct group. If you need to join a group directly, contact your administrator, who can add you with:
+
+```bash
+sovra identity group add-member <group-id> \
+  --identity-id <your-identity-id> \
+  --identity-type user
+```
+
+## Viewing Activity
+
+Sovra logs all operations you perform. You can review your own activity without needing to specify an actor ID.
+
+### Listing Your Activity
+
+```bash
 sovra activity list
-
-# Output:
-# TIMESTAMP            ACTION     WORKSPACE         RESULT
-# 2026-01-30 14:30:00  encrypt    cancer-research   success
-# 2026-01-30 14:25:00  decrypt    cancer-research   success
-# 2026-01-30 10:00:00  login      -                 success
 ```
 
-### Export Activity Log
+Filter by time range or limit results:
 
 ```bash
-# Export your activity for a time period
-sovra activity export \
-  --since "30 days ago" \
-  --format json \
-  --output my-activity.json
+sovra activity list \
+  --since 2026-02-01T00:00:00Z \
+  --until 2026-02-23T23:59:59Z \
+  --limit 25
 ```
 
-## Common Use Cases
+### Exporting Your Activity
+
+Export your activity log to a file for record-keeping or compliance purposes:
+
+```bash
+sovra activity export --output my-activity.json
+```
+
+You can also specify a time range and format:
+
+```bash
+sovra activity export \
+  --since 2026-01-01T00:00:00Z \
+  --until 2026-02-01T00:00:00Z \
+  --format csv \
+  --output january-activity.csv
+```
+
+### Viewing a Specific Actor's Activity
+
+To view the activity of another actor (requires appropriate permissions):
+
+```bash
+sovra activity get <actor-id>
+```
+
+With optional filters:
+
+```bash
+sovra activity get <actor-id> \
+  --since 2026-02-01T00:00:00Z \
+  --limit 50
+```
+
+## Common Workflows
 
 ### Secure Data Sharing
 
-Share data with collaborators in a federated workspace:
+Share encrypted data with collaborators through a workspace:
 
 ```bash
-# 1. Encrypt data for the workspace
+# 1. Encrypt data for the shared workspace
 sovra encrypt \
   --workspace cancer-research \
-  --input research-results.json \
-  --output research-results.enc
+  --data-file results.json \
+  --output results.enc
 
-# 2. Upload encrypted file to shared storage
-aws s3 cp research-results.enc s3://shared-bucket/
+# 2. Upload the encrypted file to shared storage
+aws s3 cp results.enc s3://shared-bucket/results.enc
 
-# 3. Collaborator downloads and decrypts
-aws s3 cp s3://shared-bucket/research-results.enc .
+# 3. Collaborator downloads and decrypts (must be a workspace member)
+aws s3 cp s3://shared-bucket/results.enc .
 sovra decrypt \
   --workspace cancer-research \
-  --input research-results.enc \
-  --output research-results.json
+  --data-file results.enc \
+  --output results.json
 ```
 
 ### Data Pipeline Integration
 
+Use Sovra in automated pipelines. Authenticate with a service account, then encrypt and decrypt as part of the workflow:
+
 ```bash
 #!/bin/bash
-# data-pipeline.sh
+set -euo pipefail
 
 # Decrypt input data
 sovra decrypt \
   --workspace genomics-data \
-  --input /data/input/samples.enc \
+  --data-file /data/input/samples.enc \
   --output /tmp/samples.json
 
 # Process data
@@ -240,123 +312,124 @@ sovra decrypt \
 # Encrypt output
 sovra encrypt \
   --workspace genomics-data \
-  --input /tmp/results.json \
+  --data-file /tmp/results.json \
   --output /data/output/results.enc
 
-# Clean up plaintext
+# Securely remove plaintext
 shred -u /tmp/samples.json /tmp/results.json
-```
-
-### Scheduled Encryption
-
-```bash
-# Cron job to encrypt daily backups
-0 2 * * * /usr/local/bin/sovra encrypt \
-  --workspace backup-data \
-  --input /backup/daily-$(date +\%Y\%m\%d).tar \
-  --output /backup/encrypted/daily-$(date +\%Y\%m\%d).enc
 ```
 
 ## Error Handling
 
-### Common Errors
+### Access Denied
 
-**Access Denied:**
 ```
 Error: access denied to workspace 'restricted-data'
-
-Possible causes:
-- You are not a member of this workspace
-- Your access has been revoked
-- Policy restrictions apply
-
-Solution:
-1. Request access: sovra workspace request-access --workspace restricted-data
-2. Contact workspace administrator
 ```
 
-**Session Expired:**
+This means you are not a member of the workspace's bound group, your access was revoked, or a policy restriction applies. Request access:
+
+```bash
+sovra workspace request-access restricted-data \
+  --justification "Need access for project XYZ"
+```
+
+### Session Expired
+
 ```
 Error: authentication session expired
+```
 
-Solution:
+Re-authenticate:
+
+```bash
 sovra login
 ```
 
-**Workspace Not Found:**
+### Workspace Not Found
+
 ```
 Error: workspace 'wrong-name' not found
-
-Solution:
-1. Check workspace name: sovra workspace list
-2. Use correct workspace name
 ```
 
-**Encryption Failed:**
-```
-Error: encryption failed: edge node unavailable
+Verify the workspace name:
 
-Possible causes:
-- Edge node is down
-- Network connectivity issue
-- Vault is sealed
-
-Solution:
-1. Wait and retry
-2. Contact administrator if issue persists
+```bash
+sovra workspace list
 ```
+
+### Encryption or Decryption Failed
+
+```
+Error: encrypt: edge node unavailable
+```
+
+This typically indicates a network issue or that the edge node serving the workspace is down. Wait and retry. If the issue persists, contact your administrator.
 
 ## Best Practices
 
-### Data Handling
+1. **Minimize plaintext exposure.** Decrypt data, process it, and delete the plaintext immediately. Use `shred` or a secure deletion tool rather than `rm`.
 
-1. **Never store plaintext longer than necessary**
-   - Decrypt → Process → Delete plaintext
-   - Use `shred` or secure delete
+2. **Use encryption context.** Attach metadata such as purpose and date to encrypted data using the `--context` flag. This provides additional authenticated data that must match during decryption.
 
-2. **Use meaningful context**
-   ```bash
-   sovra encrypt \
-     --context '{"purpose":"analysis","date":"2026-01-30"}'
-   ```
+3. **Do not share credentials.** Each user and service account should have its own identity. Never share SSO tokens, service account passwords, or client certificates.
 
-3. **Verify decryption context**
-   ```bash
-   sovra decrypt \
-     --require-context '{"purpose":"analysis"}'
-   ```
+4. **Log out when finished.** Run `sovra logout` to clear stored credentials, especially on shared machines.
 
-### Security
+5. **Report anomalies.** If you see unexpected access-denied errors, unfamiliar workspace activity, or other suspicious behavior, report it to your administrator.
 
-1. **Don't share credentials**
-   - Each user/service should have own identity
-   
-2. **Log out when done**
-   ```bash
-   sovra logout
-   ```
+## Direct Messaging
 
-3. **Report suspicious activity**
-   - Unexpected access denied errors
-   - Unfamiliar workspace activity
+Sovra supports encrypted direct messages between users on federated control planes. This allows one-off data exchanges without creating a shared workspace.
+
+### Sending a Message
+
+Send a message to a user on a federated partner organization:
+
+```bash
+sovra message send --to <recipient-id> --to-org <partner-org-id> --subject "Key handoff" --body "See attached rotation schedule"
+```
+
+For same-org messages, omit `--to-org`:
+
+```bash
+sovra message send --to <colleague-id> --subject "Review request" --body-file ./notes.txt
+```
+
+Messages are encrypted at rest using your organization's Vault transit key. Cross-org messages are delivered over the existing mTLS federation channel.
+
+### Reading Messages
+
+```bash
+# List inbox
+sovra message list
+
+# List sent messages
+sovra message list --sent
+
+# Read a specific message (decrypts and marks as read)
+sovra message read <message-id>
+```
+
+### Deleting Messages
+
+```bash
+sovra message delete <message-id>
+```
+
+> **Note:** Cross-org messaging requires an active federation link with the recipient's organization. Contact your administrator if federation is not yet established.
 
 ## Getting Help
 
 ```bash
-# CLI help
+# General CLI help
 sovra help
 
-# Command-specific help
+# Help for a specific command
 sovra encrypt --help
 sovra workspace --help
+sovra activity --help
 
-# View version
+# View CLI version
 sovra version
-
-# Verbose output for debugging
-sovra encrypt \
-  --workspace cancer-research \
-  --input data.json \
-  --output data.enc \
-  --verbose
 ```

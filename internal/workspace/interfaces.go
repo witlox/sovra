@@ -61,7 +61,8 @@ type SignatureVerifier interface {
 // CreateRequest represents a workspace creation request.
 type CreateRequest struct {
 	Name           string
-	Participants   []string
+	Participants   []string // Deprecated: use GroupID for access control
+	GroupID        string
 	Classification models.Classification
 	Mode           models.WorkspaceMode
 	Purpose        string
@@ -101,6 +102,20 @@ type InvitationRepository interface {
 	Update(ctx context.Context, inv *WorkspaceInvitation) error
 }
 
+// GroupBindingRepository handles workspace-group binding persistence.
+type GroupBindingRepository interface {
+	CreateBinding(ctx context.Context, binding *models.WorkspaceGroupBinding) error
+	GetBinding(ctx context.Context, workspaceID, orgID string) (*models.WorkspaceGroupBinding, error)
+	ListByWorkspace(ctx context.Context, workspaceID string) ([]*models.WorkspaceGroupBinding, error)
+	ListByGroup(ctx context.Context, groupID string) ([]*models.WorkspaceGroupBinding, error)
+	DeleteBinding(ctx context.Context, workspaceID, orgID string) error
+}
+
+// GroupMembershipChecker checks if an identity is a member of a group.
+type GroupMembershipChecker interface {
+	IsMember(ctx context.Context, groupID, identityID string) (bool, error)
+}
+
 // UpdateRequest represents a workspace update request.
 type UpdateRequest struct {
 	Purpose        string
@@ -118,10 +133,6 @@ type Service interface {
 	List(ctx context.Context, orgID string, limit, offset int) ([]*models.Workspace, error)
 	// Update updates workspace fields.
 	Update(ctx context.Context, id string, req UpdateRequest) (*models.Workspace, error)
-	// AddParticipant adds a new participant to a workspace.
-	AddParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error
-	// RemoveParticipant removes a participant from a workspace.
-	RemoveParticipant(ctx context.Context, workspaceID, orgID string, signature []byte) error
 	// Archive marks a workspace as read-only.
 	Archive(ctx context.Context, workspaceID string, signature []byte) error
 	// Delete removes a workspace (requires all participants to sign).

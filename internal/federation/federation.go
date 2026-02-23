@@ -212,6 +212,22 @@ func (s *testableService) RotateCertificate(ctx context.Context, partnerOrgID st
 	return cert, nil
 }
 
+func (s *testableService) RelayMessage(ctx context.Context, partnerOrgID string, payload []byte) ([]byte, error) {
+	resp, err := s.client.Request(ctx, partnerOrgID, "POST", "/api/v1/messages/deliver", payload)
+	if err != nil {
+		return nil, fmt.Errorf("relay message: %w", err)
+	}
+	return resp, nil
+}
+
+func (s *testableService) IsFederationActive(ctx context.Context, partnerOrgID string) (bool, error) {
+	fed, err := s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
+	if err != nil {
+		return false, fmt.Errorf("check federation status: %w", err)
+	}
+	return fed.Status == models.FederationStatusActive, nil
+}
+
 // Production implementation methods
 
 // Init initializes federation capability by generating a CSR using Vault PKI.
@@ -561,6 +577,32 @@ func (s *productionServiceImpl) RotateCertificate(ctx context.Context, partnerOr
 	}
 
 	return fed.Certificate, nil
+}
+
+// RelayMessage sends a payload to a federated partner's message delivery endpoint.
+func (s *productionServiceImpl) RelayMessage(ctx context.Context, partnerOrgID string, payload []byte) ([]byte, error) {
+	fed, err := s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
+	if err != nil {
+		return nil, errors.NewFederationError(partnerOrgID, "relay_message", err)
+	}
+	if fed.Status != models.FederationStatusActive {
+		return nil, errors.ErrFederationNotEstablished
+	}
+
+	resp, err := s.mtlsManager.request(ctx, partnerOrgID, "POST", "/api/v1/messages/deliver", payload)
+	if err != nil {
+		return nil, errors.NewFederationError(partnerOrgID, "relay_message", err)
+	}
+	return resp, nil
+}
+
+// IsFederationActive checks whether an active federation exists with the given partner.
+func (s *productionServiceImpl) IsFederationActive(ctx context.Context, partnerOrgID string) (bool, error) {
+	fed, err := s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
+	if err != nil {
+		return false, fmt.Errorf("check federation status: %w", err)
+	}
+	return fed.Status == models.FederationStatusActive, nil
 }
 
 // mTLS manager methods

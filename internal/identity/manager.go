@@ -37,6 +37,7 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, orgID, email string) (*models.UserIdentity, error)
 	GetBySSOSubject(ctx context.Context, provider models.SSOProvider, subject string) (*models.UserIdentity, error)
 	List(ctx context.Context, orgID string) ([]*models.UserIdentity, error)
+	ListActiveSSOBound(ctx context.Context) ([]*models.UserIdentity, error)
 	Update(ctx context.Context, user *models.UserIdentity) error
 	Delete(ctx context.Context, id string) error
 }
@@ -73,6 +74,14 @@ type GroupRepository interface {
 	RemoveMember(ctx context.Context, groupID, identityID string) error
 	GetMembers(ctx context.Context, groupID string) ([]*models.GroupMembership, error)
 	GetGroupsForIdentity(ctx context.Context, identityID string) ([]*models.IdentityGroup, error)
+}
+
+// GroupJoinRequestRepository defines operations for group join request storage.
+type GroupJoinRequestRepository interface {
+	Create(ctx context.Context, req *models.GroupJoinRequest) error
+	Get(ctx context.Context, id string) (*models.GroupJoinRequest, error)
+	ListPending(ctx context.Context, groupID string) ([]*models.GroupJoinRequest, error)
+	Update(ctx context.Context, req *models.GroupJoinRequest) error
 }
 
 // RoleRepository defines operations for role storage.
@@ -127,18 +136,19 @@ type CreateAdminOptions struct {
 
 // Manager provides identity management operations.
 type Manager struct {
-	admins      AdminRepository
-	users       UserRepository
-	services    ServiceRepository
-	devices     DeviceRepository
-	groups      GroupRepository
-	roles       RoleRepository
-	crkProvider CRKProvider
-	tokenGen    TokenGenerator
-	pkiIssuer   PKIIssuer
-	auditor     Auditor
-	certTTL     time.Duration
-	idpChecker  idp.SubjectChecker
+	admins       AdminRepository
+	users        UserRepository
+	services     ServiceRepository
+	devices      DeviceRepository
+	groups       GroupRepository
+	roles        RoleRepository
+	joinRequests GroupJoinRequestRepository
+	crkProvider  CRKProvider
+	tokenGen     TokenGenerator
+	pkiIssuer    PKIIssuer
+	auditor      Auditor
+	certTTL      time.Duration
+	idpChecker   idp.SubjectChecker
 }
 
 // NewManager creates a new identity manager.
@@ -1128,6 +1138,158 @@ func (m *Manager) RotateServiceCredentials(ctx context.Context, id string) (*mod
 	}
 
 	return svc, nil
+}
+
+// SetJoinRequestRepository sets the join request repository.
+func (m *Manager) SetJoinRequestRepository(repo GroupJoinRequestRepository) {
+	m.joinRequests = repo
+}
+
+// IsMember checks if an identity is a member of a group.
+func (m *Manager) IsMember(ctx context.Context, groupID, identityID string) (bool, error) {
+	members, err := m.groups.GetMembers(ctx, groupID)
+	if err != nil {
+		return false, fmt.Errorf("get group members: %w", err)
+	}
+	for _, member := range members {
+		if member.IdentityID == identityID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// DisableUser disables a user identity.
+func (m *Manager) DisableUser(ctx context.Context, userID string) error {
+	user, err := m.users.Get(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+
+	user.Active = false
+	user.UpdatedAt = time.Now()
+
+	if err := m.users.Update(ctx, user); err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+
+	m.auditLog(ctx, user.OrgID, string(models.AuditEventTypeUserReconcileDisabled), "success", map[string]any{
+		"user_id":     userID,
+		"sso_subject": user.SSOSubject,
+	})
+
+	return nil
+}
+
+// RequestGroupJoin creates a request to join a group.
+func (m *Manager) RequestGroupJoin(ctx context.Context, groupID, requesterID, orgID, reason string) (*models.GroupJoinRequest, error) {
+	if m.joinRequests == nil {
+		return nil, fmt.Errorf("join request repository not configured: %w", errors.ErrInvalidInput)
+	}
+
+	req := &models.GroupJoinRequest{
+		ID:          uuid.New().String(),
+		GroupID:     groupID,
+		RequesterID: requesterID,
+		OrgID:       orgID,
+		Reason:      reason,
+		Status:      models.GroupJoinRequestPending,
+		CreatedAt:   time.Now(),
+	}
+
+	if err := m.joinRequests.Create(ctx, req); err != nil {
+		return nil, fmt.Errorf("create join request: %w", err)
+	}
+
+	m.auditLog(ctx, orgID, string(models.AuditEventTypeGroupJoinRequest), "success", map[string]any{
+		"group_id":     groupID,
+		"requester_id": requesterID,
+	})
+
+	return req, nil
+}
+
+// ListPendingJoinRequests returns pending join requests for a group.
+func (m *Manager) ListPendingJoinRequests(ctx context.Context, groupID string) ([]*models.GroupJoinRequest, error) {
+	if m.joinRequests == nil {
+		return nil, fmt.Errorf("join request repository not configured: %w", errors.ErrInvalidInput)
+	}
+	reqs, err := m.joinRequests.ListPending(ctx, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list pending join requests: %w", err)
+	}
+	return reqs, nil
+}
+
+// ApproveJoinRequest approves a group join request.
+func (m *Manager) ApproveJoinRequest(ctx context.Context, requestID, reviewerID string) error {
+	if m.joinRequests == nil {
+		return fmt.Errorf("join request repository not configured: %w", errors.ErrInvalidInput)
+	}
+
+	req, err := m.joinRequests.Get(ctx, requestID)
+	if err != nil {
+		return fmt.Errorf("get join request: %w", err)
+	}
+
+	if req.Status != models.GroupJoinRequestPending {
+		return fmt.Errorf("request is not pending: %w", errors.ErrInvalidInput)
+	}
+
+	req.Status = models.GroupJoinRequestApproved
+	req.ReviewedBy = reviewerID
+	req.ReviewedAt = time.Now()
+
+	if err := m.joinRequests.Update(ctx, req); err != nil {
+		return fmt.Errorf("update join request: %w", err)
+	}
+
+	// Add requester to group
+	if err := m.AddToGroup(ctx, req.GroupID, req.RequesterID, models.IdentityTypeUser); err != nil {
+		return fmt.Errorf("add to group: %w", err)
+	}
+
+	m.auditLog(ctx, req.OrgID, string(models.AuditEventTypeGroupJoinApprove), "success", map[string]any{
+		"request_id":   requestID,
+		"group_id":     req.GroupID,
+		"requester_id": req.RequesterID,
+		"reviewer_id":  reviewerID,
+	})
+
+	return nil
+}
+
+// DenyJoinRequest denies a group join request.
+func (m *Manager) DenyJoinRequest(ctx context.Context, requestID, reviewerID string) error {
+	if m.joinRequests == nil {
+		return fmt.Errorf("join request repository not configured: %w", errors.ErrInvalidInput)
+	}
+
+	req, err := m.joinRequests.Get(ctx, requestID)
+	if err != nil {
+		return fmt.Errorf("get join request: %w", err)
+	}
+
+	if req.Status != models.GroupJoinRequestPending {
+		return fmt.Errorf("request is not pending: %w", errors.ErrInvalidInput)
+	}
+
+	req.Status = models.GroupJoinRequestDenied
+	req.ReviewedBy = reviewerID
+	req.ReviewedAt = time.Now()
+
+	if err := m.joinRequests.Update(ctx, req); err != nil {
+		return fmt.Errorf("update join request: %w", err)
+	}
+
+	m.auditLog(ctx, req.OrgID, string(models.AuditEventTypeGroupJoinDeny), "success", map[string]any{
+		"request_id":   requestID,
+		"group_id":     req.GroupID,
+		"requester_id": req.RequesterID,
+		"reviewer_id":  reviewerID,
+	})
+
+	return nil
 }
 
 // ShareEncryptor handles CRK share encryption for distribution.
