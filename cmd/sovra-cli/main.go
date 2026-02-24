@@ -5153,10 +5153,19 @@ var backupCreateCmd = &cobra.Command{
 			backupType = "full"
 		}
 
+		crkSig, _ := cmd.Flags().GetString("crk-signature")
+		if crkSig == "" {
+			return fmt.Errorf("--crk-signature is required (base64-encoded)")
+		}
+		sigBytes, err := base64.StdEncoding.DecodeString(crkSig)
+		if err != nil {
+			return fmt.Errorf("invalid --crk-signature (must be base64): %w", err)
+		}
+
 		c := getClient(cmd)
 		ctx := context.Background()
 
-		b, err := c.CreateBackup(ctx, client.CreateBackupRequest{Type: backupType})
+		b, err := c.CreateBackup(ctx, client.CreateBackupRequest{Type: backupType, CRKSignature: sigBytes})
 		if err != nil {
 			return fmt.Errorf("create backup: %w", err)
 		}
@@ -5229,20 +5238,31 @@ var backupRestoreCmd = &cobra.Command{
 	Short: "Restore from a backup (requires CRK signature)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		crkSig, _ := cmd.Flags().GetString("crk-signature")
+		if crkSig == "" {
+			return fmt.Errorf("--crk-signature is required (base64-encoded)")
+		}
+		sigBytes, err := base64.StdEncoding.DecodeString(crkSig)
+		if err != nil {
+			return fmt.Errorf("invalid --crk-signature (must be base64): %w", err)
+		}
+
 		c := getClient(cmd)
 		ctx := context.Background()
 
-		if err := c.RestoreBackup(ctx, args[0], client.RestoreBackupRequest{}); err != nil {
+		if err := c.RestoreBackup(ctx, args[0], client.RestoreBackupRequest{CRKSignature: sigBytes}); err != nil {
 			return fmt.Errorf("restore backup: %w", err)
 		}
 
-		fmt.Printf("Restore initiated from backup: %s\n", args[0])
+		fmt.Printf("Restore completed from backup: %s\n", args[0])
 		return nil
 	},
 }
 
 func init() {
 	backupCreateCmd.Flags().String("type", "full", "Backup type (full, incremental)")
+	backupCreateCmd.Flags().String("crk-signature", "", "CRK co-signature (base64-encoded)")
+	backupRestoreCmd.Flags().String("crk-signature", "", "CRK co-signature (base64-encoded)")
 
 	backupCmd.AddCommand(backupCreateCmd)
 	backupCmd.AddCommand(backupListCmd)

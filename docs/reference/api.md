@@ -1089,3 +1089,65 @@ Automatic key rotation policies for workspaces.
 ### GET /api/v1/workspaces/{id}/rotation-policy
 
 **Response:** `200` — RotationPolicy object (or `404` if none set)
+
+---
+
+## Backups
+
+Encrypted backup and restore operations. Backup payloads are encrypted at rest
+using the organization's KEK via Vault transit. Restore is restricted to the same
+organization or a clean (empty) instance.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/backups` | Create a backup |
+| GET | `/api/v1/backups` | List backups |
+| GET | `/api/v1/backups/{id}` | Get backup details |
+| POST | `/api/v1/backups/{id}/restore` | Restore from backup |
+
+### POST /api/v1/backups
+
+Create an encrypted backup of the caller's organization data (workspaces, federations, policies).
+
+**Request:**
+```json
+{
+  "type": "full",
+  "crk_signature": "<base64>"
+}
+```
+
+**Response:** `201` — Backup object
+
+### GET /api/v1/backups
+
+List all backups for the caller's organization.
+
+**Response:** `200`
+```json
+{
+  "backups": [...],
+  "count": 2
+}
+```
+
+### GET /api/v1/backups/{id}
+
+Get details of a specific backup.
+
+**Response:** `200` — Backup object
+
+### POST /api/v1/backups/{id}/restore
+
+Restore from a backup. The caller's organization must match the backup's organization,
+or the target instance must be clean (no existing organizations). The encrypted payload
+is decrypted and its SHA-256 checksum is verified before re-importing data.
+
+**Request:**
+```json
+{
+  "crk_signature": "<base64>"
+}
+```
+
+**Response:** `204` — No Content

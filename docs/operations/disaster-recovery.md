@@ -46,6 +46,30 @@ Comprehensive disaster recovery procedures for Sovra control plane and edge node
 0 2 * * * vault operator raft snapshot save /backup/vault-$(date +%Y%m%d).snap
 ```
 
+### Application-Level Backups
+
+In addition to infrastructure backups, Sovra provides encrypted application-level
+backups that capture organization data (workspaces, federations, policies). These
+backups are encrypted at rest using the organization's KEK via Vault transit and
+require a CRK co-signature for both creation and restoration.
+
+```bash
+# Create an encrypted application backup
+sovra --cert admin.crt --key admin.key backup create \
+  --crk-signature <base64-signature>
+
+# List available backups
+sovra --cert admin.crt --key admin.key backup list
+
+# Restore (same org or clean instance only)
+sovra --cert admin.crt --key admin.key backup restore <backup-id> \
+  --crk-signature <base64-signature>
+```
+
+**Restore restrictions:** A backup can only be restored to the same organization
+or a clean instance with no existing organizations. Cross-organization restore is
+rejected to prevent data leakage.
+
 ### Edge Node Backups
 
 ```bash

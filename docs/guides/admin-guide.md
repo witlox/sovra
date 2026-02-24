@@ -802,14 +802,19 @@ sovra --cert admin.crt --key admin.key edge unregister <edge-id>
 
 ## Backup and Restore
 
+Backup payloads are encrypted at rest using the organization's KEK via Vault
+transit. Both create and restore require a CRK co-signature.
+
 ### Creating Backups
 
 ```bash
 # Full backup (default)
-sovra --cert admin.crt --key admin.key backup create
+sovra --cert admin.crt --key admin.key backup create \
+  --crk-signature <base64-signature>
 
 # Incremental backup
-sovra --cert admin.crt --key admin.key backup create --type incremental
+sovra --cert admin.crt --key admin.key backup create --type incremental \
+  --crk-signature <base64-signature>
 ```
 
 ### Listing and Inspecting Backups
@@ -824,8 +829,10 @@ sovra --cert admin.crt --key admin.key backup get <backup-id>
 
 ### Restoring from Backup
 
-Restore requires a CRK signature. The backup data is verified for integrity
-(SHA-256 checksum) before re-importing.
+Restore decrypts the payload, verifies integrity (SHA-256 checksum), and
+re-imports data. Restore is restricted to the same organization or a clean
+(empty) instance — restoring into an instance that belongs to a different
+organization is rejected.
 
 ```bash
 sovra --cert admin.crt --key admin.key backup restore <backup-id> \

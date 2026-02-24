@@ -1347,15 +1347,17 @@ Manage system backups.
 
 ### backup create
 
-Create a new backup.
+Create a new backup. The backup payload is encrypted at rest using the organization's
+KEK via Vault transit. Requires a CRK co-signature.
 
 ```bash
-sovra backup create --type full
+sovra backup create --type full --crk-signature <base64-signature>
 ```
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--type` | Backup type (e.g. `full`, `incremental`) | |
+| `--type` | Backup type (`full`, `incremental`) | `full` |
+| `--crk-signature` | CRK co-signature (base64-encoded, required) | |
 
 ### backup list
 
@@ -1375,11 +1377,16 @@ sovra backup get backup-123
 
 ### backup restore
 
-Restore from a backup. Requires CRK co-signature. (Not yet implemented.)
+Restore from a backup. Requires a CRK co-signature. Restore is restricted to the
+same organization or a clean (empty) instance — cross-org restore is rejected.
 
 ```bash
-sovra backup restore backup-123
+sovra backup restore backup-123 --crk-signature <base64-signature>
 ```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--crk-signature` | CRK co-signature (base64-encoded, required) | |
 
 ---
 

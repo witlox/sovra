@@ -173,8 +173,8 @@ CRK signatures are required for **high-risk operations** that affect organizatio
 | **Admin creation/bootstrap** | ✅ Yes | Establishing admin identity |
 | **CRK share regeneration** | ✅ Yes | Changing key custodians |
 | **Emergency access approval** | ✅ Yes | Break-glass procedures |
-| **Backup create** | ✅ Yes | Creating system backup |
-| **Backup restore** | ✅ Yes | Disaster recovery |
+| **Backup create** | ✅ Yes | Creating encrypted system backup |
+| **Backup restore** | ✅ Yes | Disaster recovery (same org or clean instance only) |
 
 ### When is CRK NOT Required?
 
