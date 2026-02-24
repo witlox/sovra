@@ -511,6 +511,13 @@ func Migrations() []Migration {
 			);
 			CREATE INDEX IF NOT EXISTS idx_encrypted_shares_crk ON crk_encrypted_shares(crk_id)`,
 		},
+		{
+			Version:     36,
+			Description: "Add crk_protected to workspaces and data/restored_at to backups",
+			SQL: `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS crk_protected BOOLEAN NOT NULL DEFAULT FALSE;
+			ALTER TABLE backups ADD COLUMN IF NOT EXISTS data BYTEA;
+			ALTER TABLE backups ADD COLUMN IF NOT EXISTS restored_at TIMESTAMP`,
+		},
 	}
 }
 

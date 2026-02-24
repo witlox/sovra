@@ -425,7 +425,7 @@ func TestExportImportWorkspace(t *testing.T) {
 		ws, err := svc.Create(ctx, req)
 		require.NoError(t, err)
 
-		bundle, err := svc.ExportWorkspace(ctx, ws.ID)
+		bundle, err := svc.ExportWorkspace(ctx, ws.ID, nil)
 		require.NoError(t, err)
 		assert.NotNil(t, bundle)
 		assert.NotNil(t, bundle.Workspace)
@@ -441,20 +441,20 @@ func TestExportImportWorkspace(t *testing.T) {
 			Participants: []string{"org-eth"},
 		}
 		ws, _ := svc.Create(ctx, req)
-		bundle, _ := svc.ExportWorkspace(ctx, ws.ID)
+		bundle, _ := svc.ExportWorkspace(ctx, ws.ID, nil)
 
 		// Modify bundle for import (new workspace)
 		bundle.Workspace.ID = ""
 		bundle.Workspace.Name = "imported-ws"
 
-		imported, err := svc.ImportWorkspace(ctx, bundle)
+		imported, err := svc.ImportWorkspace(ctx, bundle, nil)
 		require.NoError(t, err)
 		assert.NotEmpty(t, imported.ID)
 		assert.Equal(t, "imported-ws", imported.Name)
 	})
 
 	t.Run("fails export for non-existent workspace", func(t *testing.T) {
-		_, err := svc.ExportWorkspace(ctx, "non-existent")
+		_, err := svc.ExportWorkspace(ctx, "non-existent", nil)
 		assert.Error(t, err)
 	})
 }

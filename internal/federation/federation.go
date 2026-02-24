@@ -33,6 +33,7 @@ type productionServiceImpl struct {
 	repo        Repository
 	vaultClient *vault.Client
 	audit       AuditService
+	sigVerifier SignatureVerifier
 	mtlsManager *mtlsManager
 	orgID       string
 
@@ -232,6 +233,20 @@ func (s *testableService) IsFederationActive(ctx context.Context, partnerOrgID s
 
 // Init initializes federation capability by generating a CSR using Vault PKI.
 func (s *productionServiceImpl) Init(ctx context.Context, req InitRequest) (*InitResponse, error) {
+	// Verify CRK signature (mandatory for federation init)
+	if len(req.CRKSignature) == 0 {
+		return nil, errors.NewValidationError("crk_signature", "CRK signature is required for federation init")
+	}
+	if s.sigVerifier != nil {
+		valid, err := s.sigVerifier.VerifyCRKSignature(ctx, req.OrgID, []byte("federation-init:"+req.OrgID), req.CRKSignature)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify CRK signature: %w", err)
+		}
+		if !valid {
+			return nil, errors.ErrUnauthorized
+		}
+	}
+
 	s.orgID = req.OrgID
 
 	pki := s.vaultClient.PKI(pkiMountPath)
@@ -309,6 +324,20 @@ func (s *productionServiceImpl) ImportCertificate(ctx context.Context, partnerOr
 
 // Establish establishes a bilateral federation with a partner organization.
 func (s *productionServiceImpl) Establish(ctx context.Context, req EstablishRequest) (*models.Federation, error) {
+	// Verify CRK signature (mandatory for federation establishment)
+	if len(req.CRKSignature) == 0 {
+		return nil, errors.NewValidationError("crk_signature", "CRK signature is required for federation establishment")
+	}
+	if s.sigVerifier != nil {
+		valid, err := s.sigVerifier.VerifyCRKSignature(ctx, s.orgID, []byte("federation-establish:"+req.PartnerOrgID), req.CRKSignature)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify CRK signature: %w", err)
+		}
+		if !valid {
+			return nil, errors.ErrUnauthorized
+		}
+	}
+
 	parsedCert, err := parseCertificatePEM(req.PartnerCert)
 	if err != nil {
 		return nil, errors.NewFederationError(req.PartnerOrgID, "parse_partner_cert", err)

@@ -383,9 +383,7 @@ sovra --cert admin.crt --key admin.key workspace import \
 ## Invitation Flow (Cross-Organization)
 
 The invitation flow is the mechanism for adding partner organizations to a
-workspace. The `workspace add-participant` and `workspace remove-participant`
-commands have been removed. Organizations can only join workspaces through the
-invitation flow.
+workspace.
 
 ### Sending an Invitation
 
@@ -826,14 +824,24 @@ sovra --cert admin.crt --key admin.key backup get <backup-id>
 
 ### Restoring from Backup
 
-**Note:** Restore is not yet implemented. The command exists but will return an
-error until the feature is complete.
+Restore requires a CRK signature. The backup data is verified for integrity
+(SHA-256 checksum) before re-importing.
 
 ```bash
-sovra --cert admin.crt --key admin.key backup restore <backup-id>
+sovra --cert admin.crt --key admin.key backup restore <backup-id> \
+  --crk-signature <base64-signature>
 ```
 
-Restore will require CRK signature when implemented.
+**Note:** Restore skips conflicts — if a workspace or federation already exists,
+it will not be overwritten.
+
+### CRK-Protected Workspaces
+
+When a workspace is created with a CRK signature, it becomes **CRK-protected**.
+All subsequent mutating operations on that workspace (update, add/remove
+participant, archive, delete, export, import, invite, accept invitation) will
+require a valid CRK signature. Workspaces created without a CRK signature
+operate normally without this requirement.
 
 ## Policy Management
 

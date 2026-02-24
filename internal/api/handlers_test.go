@@ -4,7 +4,9 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/witlox/sovra/internal/api"
 	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/backup"
 	"github.com/witlox/sovra/internal/compliance"
 	"github.com/witlox/sovra/internal/crk"
 	"github.com/witlox/sovra/internal/edge"
@@ -24,6 +27,7 @@ import (
 	"github.com/witlox/sovra/internal/policy"
 	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
+	"github.com/witlox/sovra/pkg/errors"
 	"github.com/witlox/sovra/pkg/models"
 	"github.com/witlox/sovra/tests/mocks"
 	"github.com/witlox/sovra/tests/testutil/inmemory"
@@ -4501,5 +4505,340 @@ func TestGenerationCeremonyHandlerGetEncryptedShare(t *testing.T) {
 		handler.GetEncryptedShare(w, req)
 
 		assert.GreaterOrEqual(t, w.Code, 400)
+	})
+}
+
+// =============================================================================
+// Backup Handler Tests
+// =============================================================================
+
+// handlerTestTransit is a simple transit encryptor for handler tests.
+type handlerTestTransit struct {
+	store map[string][]byte
+}
+
+func newHandlerTestTransit() *handlerTestTransit {
+	return &handlerTestTransit{store: make(map[string][]byte)}
+}
+
+func (t *handlerTestTransit) Encrypt(_ context.Context, keyName string, plaintext []byte) (string, error) {
+	ct := "vault:v1:" + base64.StdEncoding.EncodeToString(plaintext)
+	t.store[keyName+":"+ct] = plaintext
+	return ct, nil
+}
+
+func (t *handlerTestTransit) Decrypt(_ context.Context, keyName, ciphertext string) ([]byte, error) {
+	pt, ok := t.store[keyName+":"+ciphertext]
+	if !ok {
+		return nil, fmt.Errorf("unknown ciphertext")
+	}
+	return pt, nil
+}
+
+// handlerTestOrgChecker is an in-memory organization checker for handler tests.
+type handlerTestOrgChecker struct {
+	orgs map[string]*models.Organization
+}
+
+func newHandlerTestOrgChecker(orgs ...*models.Organization) *handlerTestOrgChecker {
+	c := &handlerTestOrgChecker{orgs: make(map[string]*models.Organization)}
+	for _, o := range orgs {
+		c.orgs[o.ID] = o
+	}
+	return c
+}
+
+func (c *handlerTestOrgChecker) Get(_ context.Context, id string) (*models.Organization, error) {
+	org, ok := c.orgs[id]
+	if !ok {
+		return nil, errors.ErrNotFound
+	}
+	return org, nil
+}
+
+func (c *handlerTestOrgChecker) List(_ context.Context, limit, offset int) ([]*models.Organization, error) {
+	var result []*models.Organization
+	for _, o := range c.orgs {
+		result = append(result, o)
+	}
+	if offset >= len(result) {
+		return nil, nil
+	}
+	result = result[offset:]
+	if limit > 0 && limit < len(result) {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+// handlerTestSigVerifier always returns valid.
+type handlerTestSigVerifier struct{}
+
+func (v *handlerTestSigVerifier) VerifyCRKSignature(_ context.Context, _ string, _, _ []byte) (bool, error) {
+	return true, nil
+}
+
+func newRealBackupService(transit backup.TransitEncryptor, orgChecker backup.OrganizationChecker) backup.Service {
+	return backup.NewService(
+		mocks.NewBackupRepository(),
+		&handlerTestSigVerifier{},
+		transit,
+		orgChecker,
+		inmemory.NewWorkspaceRepository(),
+		inmemory.NewFederationRepository(),
+		inmemory.NewPolicyRepository(),
+		mocks.NewMockAuditService(),
+	)
+}
+
+func TestBackupHandlerCreate(t *testing.T) {
+	orgID := "test-org"
+	transit := newHandlerTestTransit()
+	orgChecker := newHandlerTestOrgChecker(&models.Organization{ID: orgID, Name: "Test Org"})
+	svc := newRealBackupService(transit, orgChecker)
+	handler := api.NewBackupHandler(svc)
+
+	t.Run("creates backup with CRK signature", func(t *testing.T) {
+		reqBody := map[string]any{
+			"type":          "full",
+			"crk_signature": base64.StdEncoding.EncodeToString([]byte("valid-sig")),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/backups", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = withOrgID(req, orgID)
+		w := httptest.NewRecorder()
+
+		handler.Create(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.Backup
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, orgID, resp.OrgID)
+		assert.Equal(t, "full", resp.Type)
+		assert.NotEmpty(t, resp.ID)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/backups", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		req = withOrgID(req, orgID)
+		w := httptest.NewRecorder()
+
+		handler.Create(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing CRK signature", func(t *testing.T) {
+		reqBody := map[string]any{"type": "full"}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/backups", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = withOrgID(req, orgID)
+		w := httptest.NewRecorder()
+
+		handler.Create(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestBackupHandlerList(t *testing.T) {
+	orgID := "test-org"
+	transit := newHandlerTestTransit()
+	orgChecker := newHandlerTestOrgChecker(&models.Organization{ID: orgID, Name: "Test Org"})
+	svc := newRealBackupService(transit, orgChecker)
+	handler := api.NewBackupHandler(svc)
+
+	// Create a backup to list
+	_, err := svc.Create(context.Background(), orgID, "full", "admin", []byte("sig"))
+	require.NoError(t, err)
+
+	t.Run("lists backups for org", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/backups", nil)
+		req = withOrgID(req, orgID)
+		w := httptest.NewRecorder()
+
+		handler.List(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "backups")
+	})
+}
+
+func TestBackupHandlerGet(t *testing.T) {
+	orgID := "test-org"
+	transit := newHandlerTestTransit()
+	orgChecker := newHandlerTestOrgChecker(&models.Organization{ID: orgID, Name: "Test Org"})
+	svc := newRealBackupService(transit, orgChecker)
+	handler := api.NewBackupHandler(svc)
+
+	b, err := svc.Create(context.Background(), orgID, "full", "admin", []byte("sig"))
+	require.NoError(t, err)
+
+	t.Run("gets backup by ID", func(t *testing.T) {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", b.ID)
+		req := httptest.NewRequest("GET", "/api/v1/backups/"+b.ID, nil)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+
+		handler.Get(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp models.Backup
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, b.ID, resp.ID)
+	})
+
+	t.Run("returns error for missing ID", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/backups/", nil)
+		w := httptest.NewRecorder()
+
+		handler.Get(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestBackupHandlerRestore(t *testing.T) {
+	orgID := "test-org"
+
+	t.Run("restores backup with matching org", func(t *testing.T) {
+		transit := newHandlerTestTransit()
+		orgChecker := newHandlerTestOrgChecker(&models.Organization{ID: orgID, Name: "Test Org"})
+		svc := newRealBackupService(transit, orgChecker)
+		handler := api.NewBackupHandler(svc)
+
+		b, err := svc.Create(context.Background(), orgID, "full", "admin", []byte("sig"))
+		require.NoError(t, err)
+
+		reqBody := map[string]any{
+			"crk_signature": base64.StdEncoding.EncodeToString([]byte("valid-sig")),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", b.ID)
+		req := httptest.NewRequest("POST", "/api/v1/backups/"+b.ID+"/restore", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req = withOrgID(req, orgID)
+		w := httptest.NewRecorder()
+
+		handler.Restore(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("rejects restore with mismatched org", func(t *testing.T) {
+		transit := newHandlerTestTransit()
+		orgChecker := newHandlerTestOrgChecker(
+			&models.Organization{ID: orgID, Name: "Test Org"},
+			&models.Organization{ID: "other-org", Name: "Other"},
+		)
+		svc := newRealBackupService(transit, orgChecker)
+		handler := api.NewBackupHandler(svc)
+
+		b, err := svc.Create(context.Background(), orgID, "full", "admin", []byte("sig"))
+		require.NoError(t, err)
+
+		reqBody := map[string]any{
+			"crk_signature": base64.StdEncoding.EncodeToString([]byte("valid-sig")),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", b.ID)
+		req := httptest.NewRequest("POST", "/api/v1/backups/"+b.ID+"/restore", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req = withOrgID(req, "other-org") // different org
+		w := httptest.NewRecorder()
+
+		handler.Restore(w, req)
+
+		// Should be rejected — 400 or 422
+		assert.GreaterOrEqual(t, w.Code, 400)
+	})
+
+	t.Run("returns 400 for missing CRK signature", func(t *testing.T) {
+		transit := newHandlerTestTransit()
+		orgChecker := newHandlerTestOrgChecker(&models.Organization{ID: orgID, Name: "Test Org"})
+		svc := newRealBackupService(transit, orgChecker)
+		handler := api.NewBackupHandler(svc)
+
+		b, err := svc.Create(context.Background(), orgID, "full", "admin", []byte("sig"))
+		require.NoError(t, err)
+
+		reqBody := map[string]any{}
+		body, _ := json.Marshal(reqBody)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", b.ID)
+		req := httptest.NewRequest("POST", "/api/v1/backups/"+b.ID+"/restore", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req = withOrgID(req, orgID)
+		w := httptest.NewRecorder()
+
+		handler.Restore(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for missing ID", func(t *testing.T) {
+		transit := newHandlerTestTransit()
+		orgChecker := newHandlerTestOrgChecker(&models.Organization{ID: orgID, Name: "Test Org"})
+		svc := newRealBackupService(transit, orgChecker)
+		handler := api.NewBackupHandler(svc)
+
+		reqBody := map[string]any{
+			"crk_signature": base64.StdEncoding.EncodeToString([]byte("valid-sig")),
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req := httptest.NewRequest("POST", "/api/v1/backups//restore", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = withOrgID(req, orgID)
+		w := httptest.NewRecorder()
+
+		handler.Restore(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestBackupRouterIntegration(t *testing.T) {
+	orgID := "test-org"
+	transit := newHandlerTestTransit()
+	orgChecker := newHandlerTestOrgChecker(&models.Organization{ID: orgID, Name: "Test Org"})
+	svc := newRealBackupService(transit, orgChecker)
+	services := &api.Services{
+		Backup: svc,
+	}
+
+	router := api.NewRouter(nil, services)
+
+	t.Run("backup routes are registered", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/backups", bytes.NewReader([]byte("{}")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		// Should not be 404 — the route exists
+		assert.NotEqual(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("restore route is registered", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/backups/some-id/restore", bytes.NewReader([]byte("{}")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.NotEqual(t, http.StatusNotFound, w.Code)
 	})
 }

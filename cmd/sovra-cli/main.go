@@ -1273,6 +1273,7 @@ func init() {
 	workspaceUpdateCmd.Flags().String("purpose", "", "New workspace purpose")
 	workspaceUpdateCmd.Flags().String("classification", "", "New data classification")
 	workspaceUpdateCmd.Flags().String("mode", "", "New workspace mode")
+	workspaceUpdateCmd.Flags().String("crk-signature", "", "CRK signature (base64, required for CRK-protected workspaces)")
 
 	workspaceExtendCmd.Flags().String("expires-at", "", "New expiration time (RFC3339)")
 
@@ -1388,6 +1389,7 @@ var workspaceUpdateCmd = &cobra.Command{
 		purpose, _ := cmd.Flags().GetString("purpose")
 		classification, _ := cmd.Flags().GetString("classification")
 		mode, _ := cmd.Flags().GetString("mode")
+		crkSig, _ := cmd.Flags().GetString("crk-signature")
 
 		req := client.UpdateWorkspaceRequest{}
 		if purpose != "" {
@@ -1398,6 +1400,13 @@ var workspaceUpdateCmd = &cobra.Command{
 		}
 		if mode != "" {
 			req.Mode = models.WorkspaceMode(mode)
+		}
+		if crkSig != "" {
+			sigBytes, err := base64.StdEncoding.DecodeString(crkSig)
+			if err != nil {
+				return fmt.Errorf("invalid crk-signature (must be base64): %w", err)
+			}
+			req.Signature = sigBytes
 		}
 
 		c := getClient(cmd)

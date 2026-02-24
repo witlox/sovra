@@ -113,7 +113,7 @@ func TestWorkspaceExportImportRoundTrip(t *testing.T) {
 			}).
 			When("the workspace is exported", func() {
 				var err error
-				bundle, err = srcSvc.ExportWorkspace(ctx, srcWorkspace.ID)
+				bundle, err = srcSvc.ExportWorkspace(ctx, srcWorkspace.ID, nil)
 				require.NoError(t, err)
 			}).
 			Then("the bundle should contain workspace metadata", func() {
@@ -125,7 +125,7 @@ func TestWorkspaceExportImportRoundTrip(t *testing.T) {
 			}).
 			And("the bundle can be imported to the target environment", func() {
 				var err error
-				importedWorkspace, err = dstSvc.ImportWorkspace(ctx, bundle)
+				importedWorkspace, err = dstSvc.ImportWorkspace(ctx, bundle, nil)
 				require.NoError(t, err)
 				require.NotNil(t, importedWorkspace)
 			}).
@@ -154,7 +154,7 @@ func TestWorkspaceExportImportRoundTrip(t *testing.T) {
 				// Nothing to set up
 			}).
 			When("export is attempted", func() {
-				_, err := svc.ExportWorkspace(ctx, "nonexistent")
+				_, err := svc.ExportWorkspace(ctx, "nonexistent", nil)
 				assert.Error(t, err)
 			}).
 			Then("an error should be returned", func() {
@@ -211,7 +211,7 @@ func TestWorkspaceExportEncryptDecryptIntegrity(t *testing.T) {
 				assert.Equal(t, "follow-up data", string(pt2))
 			}).
 			And("the workspace can be exported and contains metadata", func() {
-				bundle, err := svc.ExportWorkspace(ctx, ws.ID)
+				bundle, err := svc.ExportWorkspace(ctx, ws.ID, nil)
 				require.NoError(t, err)
 				assert.Equal(t, ws.ID, bundle.Workspace.ID)
 				assert.False(t, bundle.ExportedAt.IsZero())

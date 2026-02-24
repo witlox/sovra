@@ -1796,3 +1796,107 @@ func TestGetEncryptedShareNotFound(t *testing.T) {
 	_, err := c.GetEncryptedShare(context.Background(), "nonexistent", 99)
 	require.Error(t, err)
 }
+
+// =============================================================================
+// Backup API Tests
+// =============================================================================
+
+func TestCreateBackup(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/backups", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusCreated, models.Backup{
+				ID:    "backup-1",
+				OrgID: "test-org",
+				Type:  "full",
+			})
+		})
+	})
+	b, err := c.CreateBackup(context.Background(), CreateBackupRequest{
+		Type:         "full",
+		CRKSignature: []byte("sig"),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "backup-1", b.ID)
+	assert.Equal(t, "full", b.Type)
+}
+
+func TestCreateBackupError(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/backups", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusBadRequest, ErrorResponse{Error: "crk_signature required"})
+		})
+	})
+	_, err := c.CreateBackup(context.Background(), CreateBackupRequest{Type: "full"})
+	require.Error(t, err)
+}
+
+func TestListBackups(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/backups", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusOK, BackupListResponse{
+				Backups: []*models.Backup{
+					{ID: "b1", OrgID: "test-org", Type: "full"},
+					{ID: "b2", OrgID: "test-org", Type: "incremental"},
+				},
+				Count: 2,
+			})
+		})
+	})
+	resp, err := c.ListBackups(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, resp.Backups, 2)
+	assert.Equal(t, 2, resp.Count)
+}
+
+func TestGetBackup(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/backups/{id}", func(w http.ResponseWriter, r *http.Request) {
+			id := chi.URLParam(r, "id")
+			assert.Equal(t, "backup-1", id)
+			writeJSONResponse(w, http.StatusOK, models.Backup{
+				ID:    "backup-1",
+				OrgID: "test-org",
+				Type:  "full",
+			})
+		})
+	})
+	b, err := c.GetBackup(context.Background(), "backup-1")
+	require.NoError(t, err)
+	assert.Equal(t, "backup-1", b.ID)
+}
+
+func TestGetBackupNotFound(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Get("/api/v1/backups/{id}", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusNotFound, ErrorResponse{Error: "backup not found"})
+		})
+	})
+	_, err := c.GetBackup(context.Background(), "nonexistent")
+	require.Error(t, err)
+}
+
+func TestRestoreBackup(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/backups/{id}/restore", func(w http.ResponseWriter, r *http.Request) {
+			id := chi.URLParam(r, "id")
+			assert.Equal(t, "backup-1", id)
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	err := c.RestoreBackup(context.Background(), "backup-1", RestoreBackupRequest{
+		CRKSignature: []byte("sig"),
+	})
+	require.NoError(t, err)
+}
+
+func TestRestoreBackupError(t *testing.T) {
+	_, c := mockServer(t, func(r chi.Router) {
+		r.Post("/api/v1/backups/{id}/restore", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONResponse(w, http.StatusBadRequest, ErrorResponse{Error: "cannot restore backup from a different organization"})
+		})
+	})
+	err := c.RestoreBackup(context.Background(), "backup-1", RestoreBackupRequest{
+		CRKSignature: []byte("sig"),
+	})
+	require.Error(t, err)
+}

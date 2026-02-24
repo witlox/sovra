@@ -220,6 +220,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Purpose:        req.Purpose,
 		Classification: req.Classification,
 		Mode:           req.Mode,
+		CRKSignature:   req.Signature,
 	})
 	if err != nil {
 		handleError(w, err)
@@ -2864,6 +2865,11 @@ func (h *IdentityHandler) RotateServiceCredentials(w http.ResponseWriter, r *htt
 // Workspace Export/Import Handlers
 // =============================================================================
 
+// ExportWorkspaceRequest represents an export request.
+type ExportWorkspaceRequest struct {
+	Signature []byte `json:"signature"`
+}
+
 // Export handles POST /api/v1/workspaces/{id}/export.
 func (h *WorkspaceHandler) Export(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -2872,7 +2878,11 @@ func (h *WorkspaceHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bundle, err := h.service.ExportWorkspace(r.Context(), id)
+	var req ExportWorkspaceRequest
+	// Export may be called without a body for non-CRK workspaces
+	_ = readJSON(r, &req)
+
+	bundle, err := h.service.ExportWorkspace(r.Context(), id, req.Signature)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -2881,15 +2891,21 @@ func (h *WorkspaceHandler) Export(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, bundle)
 }
 
+// ImportWorkspaceRequest wraps a workspace bundle with an optional CRK signature.
+type ImportWorkspaceRequest struct {
+	workspace.WorkspaceBundle
+	Signature []byte `json:"signature"`
+}
+
 // Import handles POST /api/v1/workspaces/import.
 func (h *WorkspaceHandler) Import(w http.ResponseWriter, r *http.Request) {
-	var bundle workspace.WorkspaceBundle
-	if err := readJSON(r, &bundle); err != nil {
+	var req ImportWorkspaceRequest
+	if err := readJSON(r, &req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
 		return
 	}
 
-	ws, err := h.service.ImportWorkspace(r.Context(), &bundle)
+	ws, err := h.service.ImportWorkspace(r.Context(), &req.WorkspaceBundle, req.Signature)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -3534,6 +3550,11 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.CRKSignature) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "crk_signature is required for backup operations")
+		return
+	}
+
 	orgID := getOrgID(r)
 	b, err := h.service.Create(r.Context(), orgID, req.Type, "api", req.CRKSignature)
 	if err != nil {
@@ -3595,7 +3616,12 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.service.Restore(r.Context(), id, req.CRKSignature); err != nil {
+	if len(req.CRKSignature) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "crk_signature is required for restore operations")
+		return
+	}
+
+	if err := h.service.Restore(r.Context(), id, getOrgID(r), req.CRKSignature); err != nil {
 		handleError(w, err)
 		return
 	}

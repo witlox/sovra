@@ -172,9 +172,9 @@ func (r *WorkspaceRepository) Create(ctx context.Context, ws *models.Workspace) 
 		}
 
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, name, owner_org_id, classification, mode, purpose, status, archived, created_at, updated_at, expires_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-			id, ws.Name, ownerID, ws.Classification, ws.Mode, ws.Purpose, ws.Status, ws.Archived, ws.CreatedAt, ws.UpdatedAt, expiresAt,
+			`INSERT INTO workspaces (id, name, owner_org_id, classification, mode, purpose, status, archived, crk_protected, created_at, updated_at, expires_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			id, ws.Name, ownerID, ws.Classification, ws.Mode, ws.Purpose, ws.Status, ws.Archived, ws.CRKProtected, ws.CreatedAt, ws.UpdatedAt, expiresAt,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create workspace: %w", err)
@@ -228,10 +228,10 @@ func (r *WorkspaceRepository) Get(ctx context.Context, id string) (*models.Works
 	ws := &models.Workspace{}
 	var expiresAt sql.NullTime
 	err = r.db.QueryRowContext(ctx,
-		`SELECT id, name, owner_org_id, classification, mode, purpose, status, archived, created_at, updated_at, expires_at
+		`SELECT id, name, owner_org_id, classification, mode, purpose, status, archived, crk_protected, created_at, updated_at, expires_at
 		 FROM workspaces WHERE id = $1`,
 		uid,
-	).Scan(&ws.ID, &ws.Name, &ws.OwnerOrgID, &ws.Classification, &ws.Mode, &ws.Purpose, &ws.Status, &ws.Archived, &ws.CreatedAt, &ws.UpdatedAt, &expiresAt)
+	).Scan(&ws.ID, &ws.Name, &ws.OwnerOrgID, &ws.Classification, &ws.Mode, &ws.Purpose, &ws.Status, &ws.Archived, &ws.CRKProtected, &ws.CreatedAt, &ws.UpdatedAt, &expiresAt)
 	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
@@ -352,9 +352,9 @@ func (r *WorkspaceRepository) Update(ctx context.Context, ws *models.Workspace) 
 		}
 
 		result, err := tx.ExecContext(ctx,
-			`UPDATE workspaces SET name = $2, classification = $3, mode = $4, purpose = $5, status = $6, archived = $7, updated_at = $8, expires_at = $9
+			`UPDATE workspaces SET name = $2, classification = $3, mode = $4, purpose = $5, status = $6, archived = $7, crk_protected = $8, updated_at = $9, expires_at = $10
 			 WHERE id = $1`,
-			id, ws.Name, ws.Classification, ws.Mode, ws.Purpose, ws.Status, ws.Archived, ws.UpdatedAt, expiresAt,
+			id, ws.Name, ws.Classification, ws.Mode, ws.Purpose, ws.Status, ws.Archived, ws.CRKProtected, ws.UpdatedAt, expiresAt,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to update workspace: %w", err)
@@ -3674,9 +3674,9 @@ func (r *BackupRepository) Create(ctx context.Context, backup *models.Backup) er
 	}
 
 	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO backups (id, org_id, type, status, created_by, created_at, size, checksum)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		id, orgID, backup.Type, backup.Status, backup.CreatedBy, backup.CreatedAt, backup.Size, backup.Checksum,
+		`INSERT INTO backups (id, org_id, type, status, created_by, created_at, size, checksum, data, restored_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		id, orgID, backup.Type, backup.Status, backup.CreatedBy, backup.CreatedAt, backup.Size, backup.Checksum, backup.Data, backup.RestoredAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create backup: %w", err)
@@ -3693,10 +3693,10 @@ func (r *BackupRepository) Get(ctx context.Context, id string) (*models.Backup, 
 
 	b := &models.Backup{}
 	err = r.db.QueryRowContext(ctx,
-		`SELECT id, org_id, type, status, created_by, created_at, size, checksum
+		`SELECT id, org_id, type, status, created_by, created_at, size, checksum, data, restored_at
 		 FROM backups WHERE id = $1`,
 		uid,
-	).Scan(&b.ID, &b.OrgID, &b.Type, &b.Status, &b.CreatedBy, &b.CreatedAt, &b.Size, &b.Checksum)
+	).Scan(&b.ID, &b.OrgID, &b.Type, &b.Status, &b.CreatedBy, &b.CreatedAt, &b.Size, &b.Checksum, &b.Data, &b.RestoredAt)
 	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
@@ -3714,7 +3714,7 @@ func (r *BackupRepository) List(ctx context.Context, orgID string) ([]*models.Ba
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, org_id, type, status, created_by, created_at, size, checksum
+		`SELECT id, org_id, type, status, created_by, created_at, size, checksum, data, restored_at
 		 FROM backups WHERE org_id = $1 ORDER BY created_at DESC`,
 		oID,
 	)
@@ -3726,7 +3726,7 @@ func (r *BackupRepository) List(ctx context.Context, orgID string) ([]*models.Ba
 	var backups []*models.Backup
 	for rows.Next() {
 		b := &models.Backup{}
-		if err := rows.Scan(&b.ID, &b.OrgID, &b.Type, &b.Status, &b.CreatedBy, &b.CreatedAt, &b.Size, &b.Checksum); err != nil {
+		if err := rows.Scan(&b.ID, &b.OrgID, &b.Type, &b.Status, &b.CreatedBy, &b.CreatedAt, &b.Size, &b.Checksum, &b.Data, &b.RestoredAt); err != nil {
 			return nil, fmt.Errorf("failed to scan backup: %w", err)
 		}
 		backups = append(backups, b)
@@ -3745,8 +3745,8 @@ func (r *BackupRepository) Update(ctx context.Context, backup *models.Backup) er
 	}
 
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE backups SET status = $2, size = $3, checksum = $4 WHERE id = $1`,
-		id, backup.Status, backup.Size, backup.Checksum,
+		`UPDATE backups SET status = $2, size = $3, checksum = $4, data = $5, restored_at = $6 WHERE id = $1`,
+		id, backup.Status, backup.Size, backup.Checksum, backup.Data, backup.RestoredAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update backup: %w", err)

@@ -56,18 +56,29 @@ type AuditService interface {
 	Log(ctx context.Context, event *models.AuditEvent) error
 }
 
+// SignatureVerifier verifies CRK signatures for federation operations.
+type SignatureVerifier interface {
+	// VerifyCRKSignature verifies a signature against the org's CRK.
+	VerifyCRKSignature(ctx context.Context, orgID string, data, signature []byte) (bool, error)
+}
+
 // NewFederationService creates a new production-ready federation service.
 func NewFederationService(
 	repo Repository,
 	vaultClient *vault.Client,
 	audit AuditService,
+	sigVerifier ...SignatureVerifier,
 ) Service {
-	return &productionServiceImpl{
+	svc := &productionServiceImpl{
 		repo:        repo,
 		vaultClient: vaultClient,
 		audit:       audit,
 		mtlsManager: newMTLSManager(vaultClient),
 	}
+	if len(sigVerifier) > 0 {
+		svc.sigVerifier = sigVerifier[0]
+	}
+	return svc
 }
 
 // InitRequest represents a federation initialization request.

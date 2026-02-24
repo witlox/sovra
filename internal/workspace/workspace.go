@@ -58,6 +58,25 @@ type productionService struct {
 	invitations InvitationRepository
 }
 
+// requireCRK enforces CRK signature on CRK-protected workspaces.
+// If the workspace is not CRK-protected, this is a no-op.
+func (s *productionService) requireCRK(ctx context.Context, ws *models.Workspace, data, signature []byte) error {
+	if !ws.CRKProtected {
+		return nil
+	}
+	if len(signature) == 0 {
+		return errors.NewValidationError("crk_signature", "this workspace requires CRK signature")
+	}
+	valid, err := s.verifyCRKSignature(ctx, ws.OwnerOrgID, data, signature)
+	if err != nil {
+		return fmt.Errorf("failed to verify CRK signature: %w", err)
+	}
+	if !valid {
+		return errors.ErrUnauthorized
+	}
+	return nil
+}
+
 func (s *productionService) Create(ctx context.Context, req CreateRequest) (*models.Workspace, error) {
 	if len(req.Participants) == 0 {
 		return nil, errors.NewValidationError("participants", "at least one participant required")
@@ -76,6 +95,18 @@ func (s *productionService) Create(ctx context.Context, req CreateRequest) (*mod
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 		ExpiresAt:       req.ExpiresAt,
+	}
+
+	// If CRK signature provided at creation, verify it and mark workspace as CRK-protected
+	if len(req.CRKSignature) > 0 {
+		valid, err := s.verifyCRKSignature(ctx, ws.OwnerOrgID, []byte(ws.ID+ws.Name), req.CRKSignature)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify CRK signature: %w", err)
+		}
+		if !valid {
+			return nil, errors.ErrUnauthorized
+		}
+		ws.CRKProtected = true
 	}
 
 	// Generate DEK using Vault transit engine
@@ -149,6 +180,10 @@ func (s *productionService) Update(ctx context.Context, id string, req UpdateReq
 		return nil, fmt.Errorf("failed to get workspace: %w", err)
 	}
 
+	if err := s.requireCRK(ctx, ws, []byte(id), req.CRKSignature); err != nil {
+		return nil, err
+	}
+
 	if ws.Archived || ws.Status == models.WorkspaceStatusArchived {
 		return nil, errors.NewValidationError("workspace", "cannot update archived workspace")
 	}
@@ -207,15 +242,9 @@ func (s *productionService) AddParticipant(ctx context.Context, workspaceID, org
 		}
 	}
 
-	// Verify CRK signature (signature over workspaceID + orgID)
-	if signature != nil {
-		valid, err := s.verifyCRKSignature(ctx, ws.OwnerOrgID, []byte(workspaceID+orgID), signature)
-		if err != nil {
-			return fmt.Errorf("failed to verify signature: %w", err)
-		}
-		if !valid {
-			return errors.ErrUnauthorized
-		}
+	// Enforce CRK if workspace is CRK-protected
+	if err := s.requireCRK(ctx, ws, []byte(workspaceID+orgID), signature); err != nil {
+		return err
 	}
 
 	// Get DEK by unwrapping from owner's wrapped key
@@ -274,15 +303,9 @@ func (s *productionService) RemoveParticipant(ctx context.Context, workspaceID, 
 		return errors.NewValidationError("orgID", "cannot remove workspace owner")
 	}
 
-	// Verify CRK signature
-	if signature != nil {
-		valid, err := s.verifyCRKSignature(ctx, ws.OwnerOrgID, []byte(workspaceID+orgID), signature)
-		if err != nil {
-			return fmt.Errorf("failed to verify signature: %w", err)
-		}
-		if !valid {
-			return errors.ErrUnauthorized
-		}
+	// Enforce CRK if workspace is CRK-protected
+	if err := s.requireCRK(ctx, ws, []byte(workspaceID+orgID), signature); err != nil {
+		return err
 	}
 
 	newParticipants := make([]string, 0, len(ws.ParticipantOrgs)-1)
@@ -333,15 +356,9 @@ func (s *productionService) Archive(ctx context.Context, workspaceID string, sig
 		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
-	// Verify CRK signature if provided
-	if signature != nil {
-		valid, err := s.verifyCRKSignature(ctx, ws.OwnerOrgID, []byte(workspaceID), signature)
-		if err != nil {
-			return fmt.Errorf("failed to verify signature: %w", err)
-		}
-		if !valid {
-			return errors.ErrUnauthorized
-		}
+	// Enforce CRK if workspace is CRK-protected
+	if err := s.requireCRK(ctx, ws, []byte(workspaceID), signature); err != nil {
+		return err
 	}
 
 	ws.Archived = true
@@ -360,7 +377,15 @@ func (s *productionService) Delete(ctx context.Context, workspaceID string, sign
 		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
-	// Verify signatures from all participants
+	// For CRK-protected workspaces, require at least the owner's signature
+	if ws.CRKProtected {
+		ownerSig, ok := signatures[ws.OwnerOrgID]
+		if !ok || len(ownerSig) == 0 {
+			return errors.NewValidationError("crk_signature", "this workspace requires CRK signature")
+		}
+	}
+
+	// Verify signatures from all participants who provided them
 	if len(signatures) > 0 {
 		for _, orgID := range ws.ParticipantOrgs {
 			sig, ok := signatures[orgID]
@@ -676,10 +701,15 @@ func (s *productionService) verifyCRKSignature(ctx context.Context, orgID string
 }
 
 // ExportWorkspace exports a workspace for air-gap transfer.
-func (s *productionService) ExportWorkspace(ctx context.Context, workspaceID string) (*WorkspaceBundle, error) {
+func (s *productionService) ExportWorkspace(ctx context.Context, workspaceID string, signature []byte) (*WorkspaceBundle, error) {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("get workspace: %w", err)
+	}
+
+	// Enforce CRK if workspace is CRK-protected
+	if err := s.requireCRK(ctx, ws, []byte(workspaceID), signature); err != nil {
+		return nil, err
 	}
 
 	// Only air-gap workspaces can be exported
@@ -693,8 +723,8 @@ func (s *productionService) ExportWorkspace(ctx context.Context, workspaceID str
 	}
 
 	// Compute checksum of workspace data
-	wsData, _ := fmt.Printf("%+v", ws)
-	checksum := sha256.Sum256([]byte(fmt.Sprintf("%d", wsData)))
+	wsData := fmt.Sprintf("%+v", ws)
+	checksum := sha256.Sum256([]byte(wsData))
 
 	bundle := &WorkspaceBundle{
 		Workspace:  ws,
@@ -707,12 +737,35 @@ func (s *productionService) ExportWorkspace(ctx context.Context, workspaceID str
 }
 
 // ImportWorkspace imports a workspace from an air-gap bundle.
-func (s *productionService) ImportWorkspace(ctx context.Context, bundle *WorkspaceBundle) (*models.Workspace, error) {
+func (s *productionService) ImportWorkspace(ctx context.Context, bundle *WorkspaceBundle, signature []byte) (*models.Workspace, error) {
 	if bundle == nil || bundle.Workspace == nil {
 		return nil, errors.NewValidationError("bundle", "invalid bundle")
 	}
 
 	ws := bundle.Workspace
+
+	// If the source workspace was CRK-protected, enforce CRK on import
+	if ws.CRKProtected {
+		if len(signature) == 0 {
+			return nil, errors.NewValidationError("crk_signature", "this workspace requires CRK signature")
+		}
+		valid, err := s.verifyCRKSignature(ctx, ws.OwnerOrgID, []byte(bundle.Checksum), signature)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify CRK signature: %w", err)
+		}
+		if !valid {
+			return nil, errors.ErrUnauthorized
+		}
+	}
+
+	// Validate checksum integrity
+	wsData := fmt.Sprintf("%+v", ws)
+	checksum := sha256.Sum256([]byte(wsData))
+	expected := base64.StdEncoding.EncodeToString(checksum[:])
+	if expected != bundle.Checksum {
+		return nil, errors.NewValidationError("checksum", "bundle integrity check failed")
+	}
+
 	ws.ID = uuid.New().String()
 	ws.CreatedAt = time.Now()
 	ws.UpdatedAt = time.Now()
@@ -762,6 +815,11 @@ func (s *productionService) InviteParticipant(ctx context.Context, workspaceID, 
 		return nil, fmt.Errorf("get workspace: %w", err)
 	}
 
+	// Enforce CRK if workspace is CRK-protected
+	if err := s.requireCRK(ctx, ws, []byte(workspaceID+orgID), signature); err != nil {
+		return nil, err
+	}
+
 	callerOrg, err := isParticipant(ctx, ws)
 	if err != nil {
 		return nil, err
@@ -801,6 +859,11 @@ func (s *productionService) AcceptInvitation(ctx context.Context, workspaceID, o
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("get workspace: %w", err)
+	}
+
+	// Enforce CRK if workspace is CRK-protected
+	if err := s.requireCRK(ctx, ws, []byte(workspaceID+orgID), signature); err != nil {
+		return err
 	}
 
 	// Add participant
@@ -1082,7 +1145,7 @@ func (s *serviceImpl) RotateDEK(ctx context.Context, workspaceID string, signatu
 	return nil
 }
 
-func (s *serviceImpl) ExportWorkspace(ctx context.Context, workspaceID string) (*WorkspaceBundle, error) {
+func (s *serviceImpl) ExportWorkspace(ctx context.Context, workspaceID string, _ []byte) (*WorkspaceBundle, error) {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("get workspace: %w", err)
@@ -1095,7 +1158,7 @@ func (s *serviceImpl) ExportWorkspace(ctx context.Context, workspaceID string) (
 	}, nil
 }
 
-func (s *serviceImpl) ImportWorkspace(ctx context.Context, bundle *WorkspaceBundle) (*models.Workspace, error) {
+func (s *serviceImpl) ImportWorkspace(ctx context.Context, bundle *WorkspaceBundle, _ []byte) (*models.Workspace, error) {
 	if bundle == nil || bundle.Workspace == nil {
 		return nil, errors.NewValidationError("bundle", "invalid bundle")
 	}

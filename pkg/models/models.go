@@ -105,6 +105,7 @@ type Workspace struct {
 	Purpose         string                 `json:"purpose"`
 	DEKWrapped      map[string][]byte      `json:"dek_wrapped"`
 	Status          WorkspaceStatus        `json:"status"`
+	CRKProtected    bool                   `json:"crk_protected"`
 	CreatedAt       time.Time              `json:"created_at"`
 	UpdatedAt       time.Time              `json:"updated_at"`
 	ExpiresAt       time.Time              `json:"expires_at,omitempty"`
@@ -321,14 +322,16 @@ const (
 
 // Backup represents a system backup record.
 type Backup struct {
-	ID        string       `json:"id"`
-	OrgID     string       `json:"org_id"`
-	Type      string       `json:"type"`
-	Status    BackupStatus `json:"status"`
-	CreatedBy string       `json:"created_by"`
-	CreatedAt time.Time    `json:"created_at"`
-	Size      int64        `json:"size"`
-	Checksum  string       `json:"checksum"`
+	ID         string       `json:"id"`
+	OrgID      string       `json:"org_id"`
+	Type       string       `json:"type"`
+	Status     BackupStatus `json:"status"`
+	CreatedBy  string       `json:"created_by"`
+	CreatedAt  time.Time    `json:"created_at"`
+	Size       int64        `json:"size"`
+	Checksum   string       `json:"checksum"`
+	Data       []byte       `json:"data,omitempty"`
+	RestoredAt *time.Time   `json:"restored_at,omitempty"`
 }
 
 // DirectMessageStatus represents the status of a direct message.

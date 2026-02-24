@@ -258,6 +258,7 @@ type UpdateWorkspaceRequest struct {
 	Purpose        string                `json:"purpose,omitempty"`
 	Classification models.Classification `json:"classification,omitempty"`
 	Mode           models.WorkspaceMode  `json:"mode,omitempty"`
+	Signature      []byte                `json:"signature,omitempty"`
 }
 
 // UpdateWorkspace updates a workspace.

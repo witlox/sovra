@@ -165,13 +165,16 @@ CRK signatures are required for **high-risk operations** that affect organizatio
 
 | Operation | CRK Required | Reason |
 |-----------|--------------|--------|
+| **Federation init** | ✅ Yes | Initializing federation identity |
 | **Federation establishment** | ✅ Yes | Connecting with external partners |
-| **Workspace creation** | ✅ Yes | Creating shared cryptographic domains |
+| **Workspace creation** | ⚡ Optional | If provided, workspace becomes CRK-protected |
 | **Workspace key rotation** | ✅ Yes | Rotating encryption keys |
+| **Workspace expiration extension** | ✅ Yes | Extending workspace lifetime |
+| **Admin creation/bootstrap** | ✅ Yes | Establishing admin identity |
 | **CRK share regeneration** | ✅ Yes | Changing key custodians |
 | **Emergency access approval** | ✅ Yes | Break-glass procedures |
+| **Backup create** | ✅ Yes | Creating system backup |
 | **Backup restore** | ✅ Yes | Disaster recovery |
-| **Organization config changes** | ✅ Yes | Critical settings |
 
 ### When is CRK NOT Required?
 
@@ -181,7 +184,7 @@ Regular operations do not require CRK:
 |-----------|--------------|--------|
 | **Encrypt/decrypt data** | ❌ No | Uses workspace DEK, not CRK |
 | **User login** | ❌ No | Authentication is separate |
-| **Add user to workspace** | ❌ No | Policy-controlled by admins |
+| **Add user to workspace** | ⚡ Conditional | Required if workspace is CRK-protected |
 | **Query audit logs** | ❌ No | Read-only operation |
 | **View workspace list** | ❌ No | Read-only operation |
 | **Health checks** | ❌ No | Monitoring operations |

@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/witlox/sovra/internal/api"
 	"github.com/witlox/sovra/internal/audit"
+	"github.com/witlox/sovra/internal/backup"
 	"github.com/witlox/sovra/internal/compliance"
 	"github.com/witlox/sovra/internal/config"
 	"github.com/witlox/sovra/internal/crk"
@@ -108,7 +109,10 @@ func main() {
 
 	auditSvc := audit.NewService(auditRepo, nil, nil)
 	wsSvc := workspace.NewWorkspaceService(wsRepo, vaultClient, auditSvc, invitationRepo)
-	fedSvc := federation.NewFederationService(fedRepo, vaultClient, auditSvc)
+	// Federation CRK verifier adapter
+	transitClient := vaultClient.Transit(transitMountPath)
+	fedCRKVerifier := &federationCRKVerifier{transit: transitClient}
+	fedSvc := federation.NewFederationService(fedRepo, vaultClient, auditSvc, fedCRKVerifier)
 	policySvc := policy.NewPolicyService(policyRepo, opaClient, auditSvc)
 	crkMgr := crk.NewManagerWithRepo(crkRepo)
 	crkCeremony := crk.NewCeremonyManager(crkMgr)
@@ -267,6 +271,12 @@ func main() {
 	}
 	msgSvc := messaging.NewService(msgRepo, fedSvc, msgEncryptor, msgResolver, auditSvc)
 
+	// Backup service with real implementation
+	backupRepo := postgres.NewBackupRepository(db)
+	backupCRKVerifier := &federationCRKVerifier{transit: transitClient}
+	backupOrgRepo := postgres.NewOrganizationRepository(db)
+	backupSvc := backup.NewService(backupRepo, backupCRKVerifier, transitClient, backupOrgRepo, wsRepo, fedRepo, policyRepo, auditSvc)
+
 	services := &api.Services{
 		Workspace:             wsSvc,
 		Federation:            fedSvc,
@@ -283,6 +293,7 @@ func main() {
 		Compliance:            complianceGen,
 		RotationScheduler:     rotationScheduler,
 		Messaging:             msgSvc,
+		Backup:                backupSvc,
 	}
 
 	routerCfg := api.DefaultRouterConfig()
@@ -375,4 +386,20 @@ func (a *adminResolverAdapter) GetAdminByCertCN(ctx context.Context, cn string) 
 		OrgID:   admin.OrgID,
 		Active:  admin.Active,
 	}, nil
+}
+
+const transitMountPath = "transit"
+
+// federationCRKVerifier adapts Vault transit to federation.SignatureVerifier.
+type federationCRKVerifier struct {
+	transit *vault.TransitClient
+}
+
+func (v *federationCRKVerifier) VerifyCRKSignature(ctx context.Context, orgID string, data, signature []byte) (bool, error) {
+	keyName := "crk-" + orgID
+	valid, err := v.transit.Verify(ctx, keyName, data, string(signature))
+	if err != nil {
+		return false, fmt.Errorf("verify CRK signature: %w", err)
+	}
+	return valid, nil
 }

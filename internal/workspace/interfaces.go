@@ -121,6 +121,7 @@ type UpdateRequest struct {
 	Purpose        string
 	Classification models.Classification
 	Mode           models.WorkspaceMode
+	CRKSignature   []byte
 }
 
 // Service handles workspace business logic.
@@ -144,9 +145,9 @@ type Service interface {
 	// RotateDEK generates a new DEK and re-wraps for all participants.
 	RotateDEK(ctx context.Context, workspaceID string, signature []byte) error
 	// ExportWorkspace exports a workspace for air-gap transfer.
-	ExportWorkspace(ctx context.Context, workspaceID string) (*WorkspaceBundle, error)
+	ExportWorkspace(ctx context.Context, workspaceID string, signature []byte) (*WorkspaceBundle, error)
 	// ImportWorkspace imports a workspace from an air-gap bundle.
-	ImportWorkspace(ctx context.Context, bundle *WorkspaceBundle) (*models.Workspace, error)
+	ImportWorkspace(ctx context.Context, bundle *WorkspaceBundle, signature []byte) (*models.Workspace, error)
 	// ExtendExpiration extends the workspace expiration time.
 	ExtendExpiration(ctx context.Context, workspaceID string, newExpiry time.Time, signature []byte) error
 	// InviteParticipant creates an invitation for a new participant.
