@@ -196,23 +196,24 @@ sovra workspace list
 ### Monthly DR Test
 
 ```bash
-# 1. Take snapshot of production
-./scripts/snapshot-production.sh
+# 1. Snapshot production database
+pg_dump -U sovra sovra > /backup/dr-test/sovra-snapshot.sql
 
-# 2. Deploy DR environment
-terraform -chdir=infrastructure/terraform/dr apply
+# 2. Snapshot Vault
+vault operator raft snapshot save /backup/dr-test/vault-snapshot.snap
 
-# 3. Restore data
-./scripts/restore-to-dr.sh
+# 3. Create application-level backup
+sovra --cert admin.crt --key admin.key backup create \
+  --crk-signature <base64-signature>
 
-# 4. Verify functionality
-./scripts/dr-test-suite.sh
+# 4. Deploy a DR environment and restore
+psql -U sovra sovra_dr < /backup/dr-test/sovra-snapshot.sql
+vault operator raft snapshot restore /backup/dr-test/vault-snapshot.snap
 
-# 5. Document results
-./scripts/generate-dr-report.sh
+# 5. Verify health
+curl -s https://dr-instance.example.com/health | jq .
 
 # 6. Tear down DR environment
-terraform -chdir=infrastructure/terraform/dr destroy
 ```
 
 ## Backup Verification

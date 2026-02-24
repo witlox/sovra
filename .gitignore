@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-sovra-cli
+sovra
 sovra-api-gateway
 
 # Test binary, built with `go test -c`

@@ -61,7 +61,7 @@ func getClient(cmd *cobra.Command) *client.Client {
 }
 
 var rootCmd = &cobra.Command{
-	Use:     "sovra-cli",
+	Use:     "sovra",
 	Short:   "Sovra CLI - Federated Key Management",
 	Long:    `Sovra CLI provides command-line access to Sovra federated key management operations.`,
 	Version: version,

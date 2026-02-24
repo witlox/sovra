@@ -16,7 +16,7 @@ build:
 build-bin:
 	mkdir -p bin
 	go build -o bin/api-gateway ./cmd/api-gateway
-	go build -o bin/sovra-cli ./cmd/sovra-cli
+	go build -o bin/sovra ./cmd/sovra-cli
 
 # Install binaries to GOPATH/bin or /usr/local/bin
 install: build-bin

@@ -155,9 +155,8 @@ The script configures Vault with:
 
 | Path | Type | Purpose |
 |------|------|---------|
-| `sovra-kv` | KV v2 | Key-value secrets storage |
-| `sovra-pki` | PKI | Certificate authority |
-| `sovra-transit` | Transit | Encryption/decryption |
+| `transit` | Transit | Encryption/decryption (org KEK keys, CRK operations) |
+| `pki` | PKI | Certificate authority (edge nodes, mTLS) |
 
 ### PKI Configuration
 
@@ -171,17 +170,37 @@ Vault audit log enabled at `/var/log/vault/audit.log`
 
 ## Database Tables
 
-The migrations create these core tables:
+The migrations create these tables (34 migrations total):
 
 | Table | Purpose |
 |-------|---------|
 | `organizations` | Organization records |
-| `edge_nodes` | Registered edge nodes |
-| `identities` | User/service identities |
+| `crks` | Customer Root Key metadata |
+| `crk_shares` | CRK share data |
+| `crk_encrypted_shares` | Password-protected CRK shares |
 | `workspaces` | Key workspaces |
+| `workspace_participants` | Workspace org membership |
+| `workspace_dek_wrapped` | Wrapped DEKs per org |
+| `workspace_invitations` | Pending workspace invitations |
+| `workspace_group_bindings` | Workspace-to-group bindings |
+| `federations` | Federation partnerships |
+| `policies` | OPA Rego access control policies |
 | `audit_events` | Immutable audit trail |
-| `federations` | Federation relationships |
-| `policies` | Access control policies |
+| `edge_nodes` | Registered edge nodes |
+| `admin_identities` | Admin users (with mTLS cert, enrollment) |
+| `user_identities` | SSO user identities |
+| `service_identities` | Service accounts |
+| `device_identities` | Device identities |
+| `identity_groups` | Identity groups (with optional IdP binding) |
+| `group_memberships` | Group-to-identity membership |
+| `group_join_requests` | Pending group join requests |
+| `roles` | Role definitions |
+| `role_assignments` | Role-to-identity assignments |
+| `share_distributions` | CRK share distribution records |
+| `emergency_access_requests` | Break-glass access requests |
+| `account_recoveries` | Account recovery sessions |
+| `backups` | Backup metadata |
+| `direct_messages` | Encrypted direct messages |
 
 ## Troubleshooting
 
@@ -221,8 +240,8 @@ This is safe - the script is idempotent. The existing admin is unchanged.
 [ERROR] Failed to generate CRK
 ```
 
-- Ensure Vault transit engine is enabled
-- Check Vault token has write permissions to `sovra-transit/`
+- Ensure Vault transit engine is enabled at `transit/`
+- Check Vault token has write permissions to `transit/`
 - Verify database connection for storing CRK metadata
 
 ## Post-Initialization
@@ -246,20 +265,21 @@ After successful initialization:
 
 3. **Start control plane services**
    ```bash
-   # Kubernetes
-   kubectl apply -k infrastructure/kubernetes/control-plane/
-   
-   # Docker Compose
-   docker-compose up -d
+   # Docker
+   docker build -t sovra:latest -f Dockerfile .
+   docker run -d -p 8080:8080 sovra:latest
+
+   # Or run directly
+   ./bin/api-gateway
    ```
 
 4. **Verify deployment**
    ```bash
    # Check health
    curl https://sovra.example.com/health
-   
-   # Login as admin
-   sovra login --email admin@example.com
+
+   # Admin operations use mTLS
+   sovra --cert admin.crt --key admin.key workspace list
    ```
 
 ## Security Considerations

@@ -96,7 +96,7 @@ Validate Terraform, Kubernetes, and OPA configurations.
 
 | Script | Purpose | Requires |
 |--------|---------|----------|
-| dev-setup.sh | Setup dev environment | Go 1.21+ |
+| dev-setup.sh | Setup dev environment | Go 1.25+ |
 | docker-compose-local.sh | Local services | Docker |
 | run-tests.sh | Run test suites | Go, Docker (for integration) |
 | generate-certs.sh | Dev TLS certs | OpenSSL |

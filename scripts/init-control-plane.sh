@@ -69,10 +69,10 @@ check_dependencies() {
         missing+=("vault")
     fi
     
-    if ! command -v sovra-cli &> /dev/null; then
+    if ! command -v sovra &> /dev/null; then
         # Check if built locally
-        if [[ ! -f "./bin/sovra-cli" ]]; then
-            missing+=("sovra-cli")
+        if [[ ! -f "./bin/sovra" ]]; then
+            missing+=("sovra")
         fi
     fi
     
@@ -173,22 +173,21 @@ configure_vault() {
     
     # Enable required secret engines
     log_info "Enabling secret engines..."
-    vault secrets enable -path=sovra-kv kv-v2 2>/dev/null || true
-    vault secrets enable -path=sovra-pki pki 2>/dev/null || true
-    vault secrets enable -path=sovra-transit transit 2>/dev/null || true
-    
+    vault secrets enable -path=transit transit 2>/dev/null || true
+    vault secrets enable -path=pki pki 2>/dev/null || true
+
     # Configure PKI
     log_info "Configuring PKI engine..."
-    vault secrets tune -max-lease-ttl=87600h sovra-pki 2>/dev/null || true
-    
+    vault secrets tune -max-lease-ttl=87600h pki 2>/dev/null || true
+
     # Generate root CA if not exists
-    vault read sovra-pki/cert/ca 2>/dev/null || \
-        vault write sovra-pki/root/generate/internal \
+    vault read pki/cert/ca 2>/dev/null || \
+        vault write pki/root/generate/internal \
             common_name="Sovra Root CA" \
             ttl=87600h > /dev/null
-    
+
     # Create PKI role for edge nodes
-    vault write sovra-pki/roles/edge-node \
+    vault write pki/roles/edge-node \
         allowed_domains="sovra.local,edge.sovra.local" \
         allow_subdomains=true \
         max_ttl=8760h > /dev/null
@@ -203,7 +202,7 @@ create_admin_user() {
     # The api-gateway exposes /api/v1/identities endpoints when running
     log_info "Admin user creation via API requires running api-gateway"
     log_info "Use: curl -X POST http://localhost:8080/api/v1/identities -d '{...}'"
-    log_info "Or start api-gateway and use sovra-cli once implemented"
+    log_info "Or start api-gateway and use sovra once implemented"
     
     log_info "Skipping admin user creation (use API after services start)"
 }
@@ -211,9 +210,9 @@ create_admin_user() {
 generate_admin_crk() {
     log_info "Generating CRK for admin organization..."
     
-    local sovra_cmd="sovra-cli"
-    if [[ -f "./bin/sovra-cli" ]]; then
-        sovra_cmd="./bin/sovra-cli"
+    local sovra_cmd="sovra"
+    if [[ -f "./bin/sovra" ]]; then
+        sovra_cmd="./bin/sovra"
     fi
     
     # Generate CRK using proper flags

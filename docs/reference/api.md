@@ -42,6 +42,22 @@ Returns health status of all components.
 
 ---
 
+## SSO Config
+
+### GET /api/v1/sso-config
+
+Discover SSO configuration for client login. No authentication required.
+
+**Response:** `200`
+```json
+{
+  "issuer_url": "https://idp.example.org",
+  "client_id": "sovra"
+}
+```
+
+---
+
 ## Workspaces
 
 ### POST /api/v1/workspaces
@@ -52,13 +68,15 @@ Create a new workspace.
 ```json
 {
   "name": "genomics-data",
-  "participants": ["org-a", "org-b"],
+  "group_id": "group-123",
   "classification": "CONFIDENTIAL",
   "mode": "standard",
   "purpose": "Shared genomics research",
   "crk_signature": "<base64>"
 }
 ```
+
+The `group_id` binds the workspace to an identity group for access control. The deprecated `participants` array field is still accepted but `group_id` is preferred.
 
 **Response:** `201` — Workspace object
 
@@ -204,32 +222,19 @@ Invite an organization to a workspace.
 
 **Response:** `204`
 
-### POST /api/v1/workspaces/{id}/participants
+### POST /api/v1/workspaces/{id}/request-access
 
-Add a participant to a workspace.
-
-**Request:**
-```json
-{
-  "org_id": "org-c",
-  "signature": "<base64>"
-}
-```
-
-**Response:** `204`
-
-### DELETE /api/v1/workspaces/{id}/participants/{orgId}
-
-Remove a participant from a workspace.
+Request access to a workspace (resolves via group membership).
 
 **Request:**
 ```json
 {
+  "group_id": "group-123",
   "signature": "<base64>"
 }
 ```
 
-**Response:** `204`
+**Response:** `200` — Access result
 
 ### POST /api/v1/workspaces/{id}/archive
 
@@ -325,6 +330,19 @@ Revoke federation with a partner.
 Health check all federation partnerships.
 
 **Response:** `200` — `{"results": {...}}`
+
+### POST /api/v1/federation/{partnerId}/renew-cert
+
+Renew the federation certificate with a partner.
+
+**Request:**
+```json
+{
+  "signature": "<base64>"
+}
+```
+
+**Response:** `200` — Renewed certificate details
 
 ### POST /api/v1/federation/certificate/import
 
@@ -696,6 +714,72 @@ Cancel a ceremony.
 
 **Response:** `204`
 
+### CRK Generation Ceremony (Password-Protected Shares)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/crk/generate-ceremony/start` | Start generation ceremony |
+| POST | `/api/v1/crk/generate-ceremony/{id}/seed` | Submit custodian seed |
+| GET | `/api/v1/crk/generate-ceremony/{id}` | Get ceremony status |
+| POST | `/api/v1/crk/generate-ceremony/{id}/complete` | Complete ceremony |
+| DELETE | `/api/v1/crk/generate-ceremony/{id}` | Cancel ceremony |
+| GET | `/api/v1/crk/shares/{crkId}/{index}` | Get encrypted share |
+
+### POST /api/v1/crk/generate-ceremony/start
+
+Start a password-protected CRK generation ceremony.
+
+**Request:**
+```json
+{
+  "org_id": "org-a",
+  "total_shares": 5,
+  "threshold": 3
+}
+```
+
+**Response:** `200` — GenerationCeremony object
+
+### POST /api/v1/crk/generate-ceremony/{id}/seed
+
+Submit a custodian's password-derived seed for share encryption.
+
+**Request:**
+```json
+{
+  "index": 1,
+  "custodian_name": "Alice",
+  "derived_key": "<base64>",
+  "salt": "<base64>"
+}
+```
+
+**Response:** `204`
+
+### GET /api/v1/crk/generate-ceremony/{id}
+
+Get the status of a generation ceremony.
+
+**Response:** `200` — GenerationCeremony object
+
+### POST /api/v1/crk/generate-ceremony/{id}/complete
+
+Complete the ceremony and generate the CRK with encrypted shares.
+
+**Response:** `200` — Ceremony result with encrypted shares
+
+### DELETE /api/v1/crk/generate-ceremony/{id}
+
+Cancel a generation ceremony.
+
+**Response:** `204`
+
+### GET /api/v1/crk/shares/{crkId}/{index}
+
+Get an encrypted share by CRK ID and share index.
+
+**Response:** `200` — EncryptedCRKShare object
+
 ---
 
 ## Identities
@@ -722,6 +806,12 @@ Cancel a ceremony.
 ```
 
 Roles: `super_admin`, `security_admin`, `operations_admin`, `auditor`
+
+### POST /api/v1/identities/admins/{id}/certificate/renew
+
+Renew an admin's mTLS certificate.
+
+**Response:** `200` — New certificate
 
 **PUT /api/v1/identities/admins/{id}:**
 ```json
@@ -811,8 +901,13 @@ Auth methods: `approle`, `kubernetes`, `cert`
 | POST | `/api/v1/identities/groups` | Create group |
 | GET | `/api/v1/identities/groups` | List groups |
 | GET | `/api/v1/identities/groups/{id}` | Get group |
+| PUT | `/api/v1/identities/groups/{id}` | Update group |
 | POST | `/api/v1/identities/groups/{id}/members` | Add member |
 | DELETE | `/api/v1/identities/groups/{id}/members/{identityId}` | Remove member |
+| POST | `/api/v1/identities/groups/{id}/join-requests` | Submit join request |
+| GET | `/api/v1/identities/groups/{id}/join-requests` | List join requests |
+| POST | `/api/v1/identities/groups/{id}/join-requests/{requestId}/approve` | Approve join request |
+| POST | `/api/v1/identities/groups/{id}/join-requests/{requestId}/deny` | Deny join request |
 
 **POST /api/v1/identities/groups:**
 ```json
@@ -1151,3 +1246,148 @@ is decrypted and its SHA-256 checksum is verified before re-importing data.
 ```
 
 **Response:** `204` — No Content
+
+---
+
+## Admin Enrollment
+
+Unauthenticated endpoints for initial admin setup.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/bootstrap/admin` | Bootstrap first admin |
+| GET | `/api/v1/enrollment/admins/{id}/setup` | Get enrollment setup info |
+| POST | `/api/v1/enrollment/admins/{id}` | Complete admin enrollment |
+
+### POST /api/v1/bootstrap/admin
+
+Bootstrap the first admin on a clean instance. Only succeeds when no admins exist.
+
+**Request:**
+```json
+{
+  "email": "admin@example.org",
+  "name": "First Admin",
+  "crk_signature": "<base64>"
+}
+```
+
+**Response:** `201` — Admin object with enrollment token
+
+### POST /api/v1/enrollment/admins/{id}
+
+Complete enrollment using the enrollment token. Generates mTLS certificate.
+
+**Request:**
+```json
+{
+  "enrollment_token": "<token>",
+  "csr": "<base64-pem>"
+}
+```
+
+**Response:** `200` — Signed certificate
+
+---
+
+## Messages
+
+End-to-end encrypted direct messaging between organizations.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/messages` | Send message |
+| GET | `/api/v1/messages` | List inbox |
+| GET | `/api/v1/messages/sent` | List sent messages |
+| GET | `/api/v1/messages/{id}` | Read message |
+| DELETE | `/api/v1/messages/{id}` | Delete message |
+| POST | `/api/v1/messages/deliver` | Deliver federated message |
+
+### POST /api/v1/messages
+
+Send a direct message.
+
+**Request:**
+```json
+{
+  "recipient_org_id": "org-b",
+  "recipient_id": "admin-456",
+  "subject": "Federation certificate renewal",
+  "body": "<base64-encrypted>",
+  "expires_at": "2026-03-01T00:00:00Z"
+}
+```
+
+**Response:** `201` — Message object
+
+### GET /api/v1/messages
+
+List inbox messages.
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `limit` | int | Maximum results (default: 50) |
+
+**Response:** `200` — `{"messages": [...]}`
+
+### GET /api/v1/messages/sent
+
+List sent messages.
+
+**Response:** `200` — `{"messages": [...]}`
+
+### GET /api/v1/messages/{id}
+
+Read a message. Marks it as read.
+
+**Response:** `200` — Message object
+
+### POST /api/v1/messages/deliver
+
+Deliver a message from a federated partner (server-to-server).
+
+**Request:** Message object
+
+**Response:** `201`
+
+---
+
+## Activity
+
+Activity feed for audit and monitoring.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/activity` | List activity events |
+| POST | `/api/v1/activity/export` | Export activity log |
+
+### GET /api/v1/activity
+
+List recent activity events.
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `since` | string | Start time (RFC3339) |
+| `until` | string | End time (RFC3339) |
+| `limit` | int | Maximum results (default: 100) |
+
+**Response:** `200` — `{"events": [...]}`
+
+### POST /api/v1/activity/export
+
+Export activity log to file.
+
+**Request:**
+```json
+{
+  "since": "2026-01-01T00:00:00Z",
+  "until": "2026-02-01T00:00:00Z",
+  "format": "json"
+}
+```
+
+**Response:** `200` — Binary file download

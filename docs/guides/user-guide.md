@@ -41,11 +41,11 @@ You can override the auto-discovered configuration with flags or environment var
 
 ```bash
 # Using flags
-sovra login --issuer-url https://idp.example.org --client-id sovra-cli
+sovra login --issuer-url https://idp.example.org --client-id sovra
 
 # Using environment variables
 export SOVRA_SSO_ISSUER_URL=https://idp.example.org
-export SOVRA_SSO_CLIENT_ID=sovra-cli
+export SOVRA_SSO_CLIENT_ID=sovra
 sovra login
 ```
 

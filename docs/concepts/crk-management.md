@@ -27,11 +27,11 @@ Shamir's Secret Sharing is a cryptographic algorithm that splits a secret (the C
 Original CRK: abc123xyz789...
 
 Split into 5 shares:
-├─ Share 1: xf83jd92kd...
-├─ Share 2: 92kdj3nf8x...
-├─ Share 3: 3nf8x1j92k...
-├─ Share 4: 1j92kf83jd...
-└─ Share 5: f83jd3nf8x...
+├─ Share 1 (index: 1, data: <bytes>)
+├─ Share 2 (index: 2, data: <bytes>)
+├─ Share 3 (index: 3, data: <bytes>)
+├─ Share 4 (index: 4, data: <bytes>)
+└─ Share 5 (index: 5, data: <bytes>)
 
 Reconstruction requires ANY 3 shares:
 - Shares 1+2+3 → Recovers CRK ✓
@@ -44,7 +44,9 @@ Reconstruction requires ANY 3 shares:
 
 ## Generating Your CRK
 
-### Step 1: Generate CRK with Shares
+Sovra supports three generation methods with increasing security:
+
+### Method 1: Simple Generation (Development/Testing)
 
 ```bash
 # Generate CRK with default 5-of-3 split
@@ -55,56 +57,112 @@ sovra crk generate \
   --output crk-shares.json
 ```
 
-**Output:**
+**Output format:**
 ```json
 {
+  "crk_id": "550e8400-e29b-41d4-a716-446655440000",
   "org_id": "eth-zurich",
-  "public_key": "sovra:crk:pub:4f8a3b9c2d1e...",
-  "created_at": "2026-01-30T10:00:00Z",
+  "public_key": "<base64-encoded Ed25519 public key>",
   "shares": [
-    {
-      "share_number": 1,
-      "share_data": "sovra:crk:share:1:xf83jd92kd3nf8x1j92kf83jd..."
-    },
-    {
-      "share_number": 2,
-      "share_data": "sovra:crk:share:2:92kdj3nf8x1j92kf83jdxf83j..."
-    },
-    {
-      "share_number": 3,
-      "share_data": "sovra:crk:share:3:3nf8x1j92kf83jd92kdjxf83j..."
-    },
-    {
-      "share_number": 4,
-      "share_data": "sovra:crk:share:4:1j92kf83jd3nf8x92kdjxf83j..."
-    },
-    {
-      "share_number": 5,
-      "share_data": "sovra:crk:share:5:f83jd3nf8x92kdj1j92kxf83j..."
-    }
+    { "index": 1, "data": "<base64-encoded bytes>" },
+    { "index": 2, "data": "<base64-encoded bytes>" },
+    { "index": 3, "data": "<base64-encoded bytes>" },
+    { "index": 4, "data": "<base64-encoded bytes>" },
+    { "index": 5, "data": "<base64-encoded bytes>" }
   ],
   "threshold": 3,
   "total_shares": 5
 }
 ```
 
-### Step 2: Split Shares into Separate Files
+> **Warning:** Shares are in plaintext. Use Method 2 or 3 for production.
+
+### Method 2: Password-Protected Generation Ceremony
+
+Each shareholder chooses a password to protect their share. Keys are derived
+client-side via Argon2id and never leave the shareholder's machine.
 
 ```bash
-# Extract individual shares
-sovra crk split-shares \
-  --input crk-shares.json \
-  --output-dir crk-shares/
+# 1. Admin starts the ceremony
+sovra --cert admin.crt --key admin.key \
+  crk generate-ceremony start \
+  --org-id eth-zurich \
+  --shares 5 \
+  --threshold 3
+# Returns: ceremony-id
 
-# Creates:
-# crk-shares/share-1.json
-# crk-shares/share-2.json
-# crk-shares/share-3.json
-# crk-shares/share-4.json
-# crk-shares/share-5.json
+# 2. Each custodian provides a password (interactive prompt)
+sovra --cert admin.crt --key admin.key \
+  crk generate-ceremony seed <ceremony-id> \
+  --index 1 \
+  --custodian-name "Alice"
+# Prompts for password, derives key client-side
+
+# 3. Repeat for all custodians (index 2..5)
+
+# 4. Check status
+sovra --cert admin.crt --key admin.key \
+  crk generate-ceremony status <ceremony-id>
+
+# 5. Complete the ceremony
+sovra --cert admin.crt --key admin.key \
+  crk generate-ceremony complete <ceremony-id> \
+  --output encrypted-shares.json
 ```
 
-### Step 3: Secure Each Share
+**Air-gapped variant:** Custodians can prepare seeds offline:
+
+```bash
+# Custodian runs offline (no server connection)
+sovra crk generate-ceremony prepare-seed <ceremony-id> \
+  --index 1 \
+  --custodian-name "Alice" \
+  --output alice-seed.json
+
+# Admin imports all seeds
+sovra --cert admin.crt --key admin.key \
+  crk generate-ceremony import-seed <ceremony-id> \
+  --seed-file alice-seed.json \
+  --seed-file bob-seed.json \
+  --seed-file charlie-seed.json
+```
+
+### Method 3: Two-Factor Offline Init (Recommended for Production)
+
+Fully offline operation. Each share is protected by two factors:
+a random seed code (distributed out-of-band) and a custodian-chosen password.
+
+```bash
+# Step 1: Admin generates CRK offline
+sovra crk init \
+  --org-id eth-zurich \
+  --shares 5 \
+  --threshold 3 \
+  --output crk-init.json
+# Prints seed codes to stdout — record and distribute to custodians
+
+# Step 2: Each custodian binds their share (offline)
+sovra crk bind-seed \
+  --init-file crk-init.json \
+  --index 1 \
+  --seed-code <hex-seed-code> \
+  --output custodian-1.json
+# Prompts for password (second factor)
+
+# Step 3: Admin assembles the final secured CRK file
+sovra crk import-seeds \
+  --init-file crk-init.json \
+  --seed-file custodian-1.json \
+  --seed-file custodian-2.json \
+  --seed-file custodian-3.json \
+  --seed-file custodian-4.json \
+  --seed-file custodian-5.json \
+  --output secured-crk.json
+```
+
+To reconstruct, each custodian needs both their seed code AND password.
+
+### Secure Each Share
 
 **CRITICAL:** Each share must be stored in a **different secure location**.
 
@@ -165,16 +223,16 @@ CRK signatures are required for **high-risk operations** that affect organizatio
 
 | Operation | CRK Required | Reason |
 |-----------|--------------|--------|
-| **Federation init** | ✅ Yes | Initializing federation identity |
-| **Federation establishment** | ✅ Yes | Connecting with external partners |
-| **Workspace creation** | ⚡ Optional | If provided, workspace becomes CRK-protected |
-| **Workspace key rotation** | ✅ Yes | Rotating encryption keys |
-| **Workspace expiration extension** | ✅ Yes | Extending workspace lifetime |
-| **Admin creation/bootstrap** | ✅ Yes | Establishing admin identity |
-| **CRK share regeneration** | ✅ Yes | Changing key custodians |
-| **Emergency access approval** | ✅ Yes | Break-glass procedures |
-| **Backup create** | ✅ Yes | Creating encrypted system backup |
-| **Backup restore** | ✅ Yes | Disaster recovery (same org or clean instance only) |
+| **Federation init** | Yes | Initializing federation identity |
+| **Federation establishment** | Yes | Connecting with external partners |
+| **Workspace creation** | Optional | If provided, workspace becomes CRK-protected |
+| **Workspace key rotation** | Yes | Rotating encryption keys |
+| **Workspace expiration extension** | Yes | Extending workspace lifetime |
+| **Admin creation/bootstrap** | Yes | Establishing admin identity |
+| **CRK rotation** | Yes | Rotating the CRK itself |
+| **Emergency access approval** | Yes | Break-glass procedures |
+| **Backup create** | Yes | Creating encrypted system backup |
+| **Backup restore** | Yes | Disaster recovery (same org or clean instance only) |
 
 ### When is CRK NOT Required?
 
@@ -182,13 +240,13 @@ Regular operations do not require CRK:
 
 | Operation | CRK Required | Reason |
 |-----------|--------------|--------|
-| **Encrypt/decrypt data** | ❌ No | Uses workspace DEK, not CRK |
-| **User login** | ❌ No | Authentication is separate |
-| **Add user to workspace** | ⚡ Conditional | Required if workspace is CRK-protected |
-| **Query audit logs** | ❌ No | Read-only operation |
-| **View workspace list** | ❌ No | Read-only operation |
-| **Health checks** | ❌ No | Monitoring operations |
-| **Certificate renewal** | ❌ No | Automated by system |
+| **Encrypt/decrypt data** | No | Uses workspace DEK, not CRK |
+| **User login** | No | Authentication is separate |
+| **Add user to workspace** | Conditional | Required if workspace is CRK-protected |
+| **Query audit logs** | No | Read-only operation |
+| **View workspace list** | No | Read-only operation |
+| **Health checks** | No | Monitoring operations |
+| **Certificate renewal** | No | Automated by system |
 
 ### Understanding the Difference
 
@@ -212,56 +270,65 @@ CRK (Organization Root of Trust)
         └── Encrypt/Decrypt user data
 ```
 
-### Reconstructing CRK for Use
+### Signing with CRK
 
-#### Option 1: Temporary Reconstruction (Recommended)
+#### Option 1: Local Signing with Shares File
 
 ```bash
-# Collect 3 shares from custodians
-# Share custodians provide their shares
-
-# Reconstruct temporarily in memory
+# Collect shares into a JSON file, then sign
 sovra crk sign \
-  --operation workspace-create \
-  --share-1 <SHARE_1_DATA> \
-  --share-2 <SHARE_2_DATA> \
-  --share-3 <SHARE_3_DATA> \
-  --output signature.json
+  --shares-file crk-shares.json \
+  --data "operation data to sign"
 
-# CRK is reconstructed, signs operation, then immediately destroyed
-# Never written to disk
+# Or sign data from a file
+sovra crk sign \
+  --shares-file crk-shares.json \
+  --data-file operation.json
 ```
 
-#### Option 2: Ceremony-Based Reconstruction
+The `crk sign` command auto-detects share format (plaintext, password-protected,
+or two-factor secured) and prompts for passwords as needed.
 
-For sensitive operations, conduct a **key ceremony:**
+#### Option 2: Ceremony-Based Signing (Server-Side)
+
+For distributed operations where custodians cannot be in the same location:
 
 ```bash
-# 1. Schedule key ceremony
-# Location: Secure conference room
-# Required attendees: 3 share custodians + auditor
+# 1. Admin starts the ceremony
+sovra --cert admin.crt --key admin.key \
+  crk ceremony start \
+  --shares 5 \
+  --threshold 3
 
-# 2. Each custodian brings their share
-# 3. Custodians input shares into air-gapped machine
+# Returns: ceremony-id
 
-# Custodian 1 enters:
-sovra crk ceremony start --share-1 <SHARE_1_DATA>
+# 2. Each custodian adds their share
+sovra --cert admin.crt --key admin.key \
+  crk ceremony add-share <ceremony-id> \
+  --share-file custodian-1.json
 
-# Custodian 2 enters:
-sovra crk ceremony add-share --share-2 <SHARE_2_DATA>
+# Or provide share data directly
+sovra --cert admin.crt --key admin.key \
+  crk ceremony add-share <ceremony-id> \
+  --share-data <base64-data> \
+  --share-index 2
 
-# Custodian 3 enters:
-sovra crk ceremony add-share --share-3 <SHARE_3_DATA>
+# 3. Complete the ceremony (once threshold reached)
+sovra --cert admin.crt --key admin.key \
+  crk ceremony complete <ceremony-id>
 
-# 4. Perform operation
-sovra crk ceremony sign-operation \
-  --operation workspace-create \
-  --workspace-config config.json
+# 4. Cancel if needed
+sovra --cert admin.crt --key admin.key \
+  crk ceremony cancel <ceremony-id>
+```
 
-# 5. Ceremony complete - CRK destroyed
-sovra crk ceremony complete
+#### Option 3: Verify a Signature
 
-# 6. Auditor witnesses and logs ceremony
+```bash
+sovra crk verify \
+  --public-key <base64-public-key> \
+  --signature <base64-signature> \
+  --data "original data"
 ```
 
 ---
@@ -270,111 +337,64 @@ sovra crk ceremony complete
 
 ### DO:
 
-✅ **Store shares in different physical locations**
-- Office safe, bank deposit box, home safe, secure data center
+- **Store shares in different physical locations**
+  - Office safe, bank deposit box, home safe, secure data center
 
-✅ **Use multiple custodians**
-- No single person should have access to threshold shares
+- **Use multiple custodians**
+  - No single person should have access to threshold shares
 
-✅ **Encrypt share files**
-- Even if stored on USB drives: `gpg --encrypt share-1.json`
+- **Use two-factor protection** (`crk init` workflow)
+  - Each share requires both seed code and password
 
-✅ **Maintain paper backups**
-- Print shares as QR codes or text
-- Store in fireproof safes
+- **Maintain paper backups**
+  - Print shares as QR codes or text
+  - Store in fireproof safes
 
-✅ **Document custodians**
-- Keep secure registry of who holds which share
-- Update when custodians change roles
+- **Document custodians**
+  - Keep secure registry of who holds which share
+  - Update when custodians change roles
 
-✅ **Test recovery annually**
-- Verify shares can reconstruct CRK
-- Practice key ceremony procedures
+- **Test recovery annually**
+  - Verify shares can reconstruct CRK
+  - Practice key ceremony procedures
 
-✅ **Audit access**
-- Log every time CRK is reconstructed
-- Require witnessing for key ceremonies
+- **Audit access**
+  - Log every time CRK is reconstructed
+  - Require witnessing for key ceremonies
 
 ### DON'T:
 
-❌ **Store all shares together**
-- Defeats purpose of secret sharing
+- **Store all shares together**
+  - Defeats purpose of secret sharing
 
-❌ **Store shares on the same device**
-- Even in different folders or encrypted volumes
+- **Store shares on the same device**
+  - Even in different folders or encrypted volumes
 
-❌ **Email or message shares**
-- Never send via email, Slack, or unencrypted channels
+- **Email or message shares**
+  - Never send via email, Slack, or unencrypted channels
 
-❌ **Store threshold shares with same person**
-- One person should never be able to reconstruct CRK alone
+- **Store threshold shares with same person**
+  - One person should never be able to reconstruct CRK alone
 
-❌ **Forget about share holders**
-- Document who has which share
-- Plan for personnel changes
+- **Forget about share holders**
+  - Document who has which share
+  - Plan for personnel changes
 
-❌ **Skip backups**
-- If you lose too many shares, CRK is permanently lost
+- **Skip backups**
+  - If you lose too many shares, CRK is permanently lost
 
 ---
 
-## Share Distribution Ceremony
+## CRK Rotation
 
-### Initial Setup (One-Time)
-
-```bash
-# Day 1: Generate CRK
-sovra crk generate \
-  --org-id eth-zurich \
-  --shares 5 \
-  --threshold 3 \
-  --output crk-shares.json
-
-# Split shares
-sovra crk split-shares \
-  --input crk-shares.json \
-  --output-dir shares/
-
-# Encrypt each share
-for i in {1..5}; do
-  gpg --encrypt --recipient custodian$i@eth.ch shares/share-$i.json
-done
-
-# Distribute to custodians
-# Hand-deliver encrypted shares to each custodian
-# Document distribution in secure registry
-```
-
-### Change of Custodian
+When custodians change or a share may be compromised, rotate the CRK:
 
 ```bash
-# Scenario: Share 3 custodian leaves organization
+# Rotate CRK (requires existing CRK ceremony)
+sovra --cert admin.crt --key admin.key \
+  crk rotate --threshold 3
 
-# Option 1: Transfer share
-# Old custodian securely transfers share to new custodian
-# Update custodian registry
-
-# Option 2: Regenerate all shares (more secure)
-# 1. Reconstruct CRK with old shares
-sovra crk reconstruct \
-  --share-1 <SHARE_1> \
-  --share-2 <SHARE_2> \
-  --share-3 <SHARE_3>
-
-# 2. Generate new shares
-sovra crk regenerate-shares \
-  --shares 5 \
-  --threshold 3 \
-  --output new-crk-shares.json
-
-# 3. Destroy old shares
-# All old custodians securely delete their shares
-
-# 4. Distribute new shares
-# Hand-deliver new encrypted shares
-
-# 5. Verify old shares are revoked
-sovra crk verify-revocation --old-share <OLD_SHARE>
+# Then re-generate shares using any of the three methods above
 ```
 
 ---
@@ -384,12 +404,11 @@ sovra crk verify-revocation --old-share <OLD_SHARE>
 ### Higher Security: 7-of-4
 
 ```bash
-# More shares, higher threshold
-sovra crk generate \
+sovra crk init \
   --org-id defense-agency \
   --shares 7 \
   --threshold 4 \
-  --output crk-shares.json
+  --output crk-init.json
 
 # Requires 4 of 7 shares to reconstruct
 # Can lose 3 shares without compromise
@@ -398,7 +417,6 @@ sovra crk generate \
 ### Higher Availability: 5-of-2
 
 ```bash
-# Lower threshold (less secure but more available)
 sovra crk generate \
   --org-id small-startup \
   --shares 5 \
@@ -410,27 +428,6 @@ sovra crk generate \
 # NOT RECOMMENDED for sensitive data
 ```
 
-### Hierarchical Shares: Multi-Level Reconstruction
-
-```bash
-# Level 1: Board members (3 shares, need 2)
-sovra crk generate \
-  --shares 3 \
-  --threshold 2 \
-  --output board-shares.json
-
-# Level 2: Each board share becomes input for next level
-# Share 1 from Level 1 → Generate Level 2 shares
-sovra crk generate \
-  --seed-share board-share-1.json \
-  --shares 3 \
-  --threshold 2 \
-  --output exec-shares-1.json
-
-# Result: Need 2 board members, each providing 2 of 3 exec shares
-# Total: 4 people minimum to reconstruct
-```
-
 ---
 
 ## Emergency Recovery
@@ -440,30 +437,22 @@ sovra crk generate \
 **Scenario:** 2 of 5 shares lost (3 remaining)
 
 ```bash
-# 1. Verify remaining shares
-sovra crk verify-shares \
-  --share-1 <SHARE_1> \
-  --share-3 <SHARE_3> \
-  --share-5 <SHARE_5>
+# 1. Verify remaining shares can sign
+sovra crk sign \
+  --shares-file remaining-shares.json \
+  --data "test"
 
-# Status: ✓ Can reconstruct (have 3, need 3)
-
-# 2. Reconstruct CRK
-sovra crk reconstruct \
-  --share-1 <SHARE_1> \
-  --share-3 <SHARE_3> \
-  --share-5 <SHARE_5> \
-  --output reconstructed-crk.json
-
-# 3. Generate new shares immediately
-sovra crk regenerate-shares \
-  --crk reconstructed-crk.json \
+# If successful, immediately rotate:
+# 2. Generate new CRK shares
+sovra crk init \
+  --org-id eth-zurich \
   --shares 5 \
   --threshold 3 \
-  --output new-shares.json
+  --output new-crk-init.json
 
-# 4. Distribute new shares
-# 5. Securely delete reconstructed-crk.json
+# 3. Have custodians bind new shares
+# 4. Register new CRK with the organization
+# 5. Securely destroy old shares
 ```
 
 ### Compromised Share
@@ -471,61 +460,22 @@ sovra crk regenerate-shares \
 **Scenario:** Share 2 suspected compromised
 
 ```bash
-# 1. Emergency regeneration
-# Collect threshold shares EXCLUDING compromised share
-sovra crk reconstruct \
-  --share-1 <SHARE_1> \
-  --share-3 <SHARE_3> \
-  --share-4 <SHARE_4>
+# 1. Collect threshold shares EXCLUDING compromised share
+# 2. Rotate CRK immediately
+sovra --cert admin.crt --key admin.key \
+  crk rotate --threshold 3
 
-# 2. Generate new shares with different split
-sovra crk regenerate-shares \
+# 3. Generate new shares for new custodians
+sovra crk init \
+  --org-id eth-zurich \
   --shares 5 \
   --threshold 3 \
-  --output emergency-shares.json
+  --output new-crk-init.json
 
-# 3. Immediate distribution to new custodians
-# 4. Revoke all old shares
-sovra crk revoke-old-shares
-
+# 4. Distribute to new custodians
 # 5. Audit all operations signed with old CRK
-sovra audit query --crk-operations
-```
-
----
-
-## Testing & Validation
-
-### Annual CRK Recovery Test
-
-```bash
-# Test without exposing CRK
-sovra crk test-recovery \
-  --share-1 <SHARE_1> \
-  --share-2 <SHARE_2> \
-  --share-3 <SHARE_3> \
-  --verify-only
-
-# Output:
-# ✓ Shares are valid
-# ✓ Reconstruction possible
-# ✓ Public key matches: sovra:crk:pub:4f8a3b9c2d1e...
-# Note: CRK was not actually reconstructed
-```
-
-### Share Integrity Check
-
-```bash
-# Verify each share independently
-sovra crk verify-share \
-  --share <SHARE_DATA> \
-  --public-key <CRK_PUBLIC_KEY>
-
-# Output:
-# ✓ Share format valid
-# ✓ Share number: 3
-# ✓ Belongs to CRK: sovra:crk:pub:4f8a3b9c2d1e...
-# ✓ Not compromised
+sovra --cert admin.crt --key admin.key \
+  activity list --limit 100
 ```
 
 ---
@@ -535,40 +485,40 @@ sovra crk verify-share \
 ### CRK (Shamir Secret Sharing)
 
 **Pros:**
-- ✅ No single point of failure
-- ✅ Threshold access (need multiple people)
-- ✅ Redundancy (can lose shares)
-- ✅ Offline storage possible
-- ✅ No external dependencies
+- No single point of failure
+- Threshold access (need multiple people)
+- Redundancy (can lose shares)
+- Offline storage possible
+- No external dependencies
 
 **Cons:**
-- ❌ Operational complexity (key ceremonies)
-- ❌ Share management overhead
-- ❌ No automatic recovery
+- Operational complexity (key ceremonies)
+- Share management overhead
+- No automatic recovery
 
 ### Hardware Security Module (HSM)
 
 **Pros:**
-- ✅ Tamper-resistant
-- ✅ Fast operations
-- ✅ Compliance certifications
+- Tamper-resistant
+- Fast operations
+- Compliance certifications
 
 **Cons:**
-- ❌ Single point of failure (device)
-- ❌ Expensive ($5,000-$100,000)
-- ❌ Vendor lock-in
+- Single point of failure (device)
+- Expensive ($5,000-$100,000)
+- Vendor lock-in
 
 ### Cloud KMS (AWS KMS, Azure Key Vault, GCP KMS)
 
 **Pros:**
-- ✅ Managed service
-- ✅ High availability
-- ✅ Automatic backups
+- Managed service
+- High availability
+- Automatic backups
 
 **Cons:**
-- ❌ Not sovereign (vendor controls keys)
-- ❌ Subject to CLOUD Act
-- ❌ Cannot be air-gapped
+- Not sovereign (vendor controls keys)
+- Subject to CLOUD Act
+- Cannot be air-gapped
 
 **Why Sovra uses CRK:** Sovereignty is the primary requirement. Organizations must have complete control over their cryptographic root of trust.
 
@@ -578,22 +528,18 @@ sovra crk verify-share \
 
 ### Audit Trail
 
-Every CRK operation must be logged:
+Every CRK operation is logged as an audit event:
 
 ```json
 {
   "timestamp": "2026-01-30T14:30:00Z",
-  "operation": "crk.sign",
-  "operation_type": "workspace.create",
-  "workspace": "cancer-research",
-  "shares_used": [1, 3, 5],
-  "custodians_present": [
-    "alice@eth.ch",
-    "bob@eth.ch",
-    "charlie@eth.ch"
-  ],
-  "witness": "auditor@eth.ch",
-  "result": "success"
+  "event_type": "crk.sign",
+  "actor": "admin@eth.ch",
+  "result": "success",
+  "metadata": {
+    "share_count": 3,
+    "data_size": 256
+  }
 }
 ```
 
@@ -616,23 +562,22 @@ CRK management meets GDPR requirements:
 **Solutions:**
 
 ```bash
-# 1. Verify share format
-sovra crk verify-share --share <SHARE_DATA>
+# 1. Verify share format — use crk verify with your public key
+sovra crk verify \
+  --public-key <CRK_PUBLIC_KEY> \
+  --signature <test-signature> \
+  --data "test"
 
-# 2. Check share numbers (no duplicates)
-# Share 1, Share 3, Share 5 ✓
-# Share 1, Share 1, Share 3 ✗ (duplicate)
+# 2. Check share indices (no duplicates)
+# Index 1, Index 3, Index 5 ✓
+# Index 1, Index 1, Index 3 ✗ (duplicate)
 
-# 3. Verify shares belong to same CRK
-sovra crk verify-shares \
-  --share-1 <SHARE_1> \
-  --share-3 <SHARE_3> \
-  --share-5 <SHARE_5> \
-  --public-key <CRK_PUBLIC_KEY>
-
-# 4. Check threshold
+# 3. Ensure you have at least threshold shares
 # Have 2 shares, need 3 ✗
 # Have 3 shares, need 3 ✓
+
+# 4. For two-factor protected shares, ensure both
+#    seed code and password are correct
 ```
 
 ### Share Corruption
@@ -640,50 +585,46 @@ sovra crk verify-shares \
 **Problem:** Share file damaged
 
 **Solutions:**
-
-```bash
-# If you have paper backup
-sovra crk import-paper-backup \
-  --qr-code /path/to/qr-code.png \
-  --output recovered-share.json
-
-# If backup unavailable and below threshold
-# CRK is PERMANENTLY LOST
-# Must regenerate new CRK and re-establish federation
-```
+- If you have a paper/USB backup, use that copy
+- If backup unavailable and below threshold: **CRK is permanently lost**
+- Must regenerate new CRK and re-establish federation
 
 ---
 
 ## Quick Reference
 
-### Generate CRK
+### Generate CRK (simple)
 ```bash
-sovra crk generate --org-id <ORG> --shares 5 --threshold 3
+sovra crk generate --org-id <ORG> --shares 5 --threshold 3 --output shares.json
 ```
 
-### Sign Operation
+### Generate CRK (two-factor, production)
 ```bash
-sovra crk sign \
-  --operation <OP> \
-  --share-1 <S1> --share-2 <S2> --share-3 <S3>
+sovra crk init --org-id <ORG> --shares 5 --threshold 3 --output init.json
+sovra crk bind-seed --init-file init.json --index 1 --seed-code <HEX> --output c1.json
+sovra crk import-seeds --init-file init.json --seed-file c1.json ... --output secured.json
 ```
 
-### Test Recovery
+### Sign Data
 ```bash
-sovra crk test-recovery \
-  --share-1 <S1> --share-2 <S2> --share-3 <S3> --verify-only
+sovra crk sign --shares-file shares.json --data "data to sign"
 ```
 
-### Regenerate Shares
+### Verify Signature
 ```bash
-sovra crk regenerate-shares --shares 5 --threshold 3
+sovra crk verify --public-key <KEY> --signature <SIG> --data "original data"
+```
+
+### Rotate CRK
+```bash
+sovra --cert admin.crt --key admin.key crk rotate --threshold 3
 ```
 
 ---
 
-**CRITICAL REMINDER:** 
+**CRITICAL REMINDER:**
 
-⚠️ **If you lose too many shares (below threshold), your CRK is PERMANENTLY LOST**
+If you lose too many shares (below threshold), your CRK is PERMANENTLY LOST.
 
 - You cannot recover your organization's identity
 - You must create a new organization with new CRK

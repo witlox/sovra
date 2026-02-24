@@ -19,7 +19,7 @@ COPY pkg/ ./pkg/
 
 # Build binaries
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION}" -o /bin/api-gateway ./cmd/api-gateway
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION}" -o /bin/sovra-cli ./cmd/sovra-cli
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION}" -o /bin/sovra ./cmd/sovra-cli
 
 # Runtime stage - minimal image
 FROM alpine:3.23
@@ -34,7 +34,7 @@ WORKDIR /app
 
 # Copy binaries from builder
 COPY --from=builder /bin/api-gateway /app/
-COPY --from=builder /bin/sovra-cli /app/
+COPY --from=builder /bin/sovra /app/
 
 USER sovra
 

@@ -223,7 +223,7 @@ groups:
           summary: "PostgreSQL is down"
           
       - alert: FederationDown
-        expr: sovra_federation_connections{status="healthy"} < 1
+        expr: sovra_federation_connections_active{status="healthy"} < 1
         for: 5m
         labels:
           severity: critical
@@ -237,7 +237,7 @@ groups:
   - name: sovra-warning
     rules:
       - alert: HighLatency
-        expr: histogram_quantile(0.95, sovra_api_request_duration_seconds) > 0.5
+        expr: histogram_quantile(0.95, rate(sovra_api_gateway_http_request_duration_seconds_bucket[5m])) > 0.5
         for: 10m
         labels:
           severity: warning
@@ -245,7 +245,7 @@ groups:
           summary: "API latency is high (p95 > 500ms)"
           
       - alert: HighErrorRate
-        expr: rate(sovra_api_errors_total[5m]) > 0.05
+        expr: rate(sovra_api_gateway_errors_total[5m]) > 0.05
         for: 5m
         labels:
           severity: warning
@@ -261,7 +261,7 @@ groups:
           summary: "Certificate {{ $labels.node }} expires in < 7 days"
           
       - alert: AuditLagHigh
-        expr: sovra_audit_lag_seconds > 300
+        expr: sovra_audit_sync_lag_seconds > 300
         for: 5m
         labels:
           severity: warning
@@ -344,14 +344,9 @@ kubectl apply -f infrastructure/kubernetes/monitoring/promtail/
 
 ```bash
 # API endpoint latency
-rate(sovra_api_request_duration_seconds_sum[5m])
+rate(sovra_api_gateway_http_request_duration_seconds_sum[5m])
 /
-rate(sovra_api_request_duration_seconds_count[5m])
-
-# Database query time
-rate(sovra_database_query_duration_seconds_sum[5m])
-/
-rate(sovra_database_query_duration_seconds_count[5m])
+rate(sovra_api_gateway_http_request_duration_seconds_count[5m])
 ```
 
 ### Resource Usage

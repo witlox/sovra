@@ -211,14 +211,20 @@ kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=sovra -n sovra 
 ### Step 6: Initialize
 
 ```bash
-# Run init script (modified for air-gap)
-./scripts/init-control-plane-airgap.sh
+# Run the standard init script
+./binaries/sovra --api-url https://localhost:8080 \
+  identity admin bootstrap \
+  --email admin@example.org \
+  --name "First Admin" \
+  --shares 5 \
+  --threshold 3
 
-# This creates:
-# - Database schema
-# - Admin user
-# - Initial policies
-# - Organization CRK
+# Generate CRK with two-factor protection (fully offline)
+./binaries/sovra crk init \
+  --org-id admin-org \
+  --shares 5 \
+  --threshold 3 \
+  --output crk-init.json
 ```
 
 ## Edge Node Deployment
@@ -294,10 +300,11 @@ POLICYEOF
 # Transfer to air-gap via USB
 
 # On air-gap: apply policy
-sovra policy create \
+sovra --cert admin.crt --key admin.key \
+  policy create \
+  --name classified-project-policy \
   --workspace classified-project \
-  --policy new-policy.rego \
-  --crk-sign crk-shares.json
+  --rego-file new-policy.rego
 ```
 
 ### Audit Log Export
@@ -328,49 +335,54 @@ sovra audit export \
 Two air-gapped organizations can federate via manual certificate exchange.
 
 ```bash
-# Org A: Generate federation cert
-sovra federation init \
-  --org-id org-a \
-  --output org-a-federation-cert.json
+# Org A: Initialize federation
+sovra --cert admin.crt --key admin.key \
+  federation init
 
-# Transfer org-a-federation-cert.json to Org B via courier
-# (classified courier with appropriate clearance)
+# Export federation certificate (out-of-band to Org B via courier)
 
-# Org B: Import and establish
-sovra federation import \
-  --cert org-a-federation-cert.json \
-  --crk-sign org-b-crk.json
+# Org B: Import Org A's certificate
+sovra --cert admin.crt --key admin.key \
+  federation import-cert \
+  --partner-org org-a \
+  --cert-file org-a-federation-cert.pem
 
-# Org B: Generate response
-sovra federation respond \
-  --partner org-a \
-  --output org-b-federation-response.json
+# Org B: Establish federation
+sovra --cert admin.crt --key admin.key \
+  federation establish \
+  --partner-org org-a \
+  --partner-url https://org-a-control-plane:8080
 
-# Transfer org-b-federation-response.json back to Org A
+# Transfer Org B's certificate back to Org A
 
-# Org A: Finalize
-sovra federation finalize \
-  --cert org-b-federation-response.json \
-  --crk-sign org-a-crk.json
+# Org A: Import Org B's certificate
+sovra --cert admin.crt --key admin.key \
+  federation import-cert \
+  --partner-org org-b \
+  --cert-file org-b-federation-cert.pem
 ```
 
 ## Workspace Sharing (Air-Gap)
 
 ```bash
-# Org A: Create workspace
-sovra workspace create \
+# Org A: Create workspace with group binding
+sovra --cert admin.crt --key admin.key \
+  workspace create \
   --name classified-intel \
-  --participants org-a,org-b \
-  --classification SECRET \
-  --mode airgap \
-  --output workspace-package/
+  --group-id group-123 \
+  --classification SECRET
 
-# Transfer workspace-package/ to Org B via courier
+# Org A: Invite Org B
+sovra --cert admin.crt --key admin.key \
+  workspace invite ws-123 --org-id org-b
+
+# Export workspace bundle (transfer via courier)
+sovra --cert admin.crt --key admin.key \
+  workspace export ws-123 --output workspace-bundle.json
 
 # Org B: Import workspace
-sovra workspace import \
-  --input workspace-package/ \
-  --crk-sign org-b-crk.json
+sovra --cert admin.crt --key admin.key \
+  workspace import --input workspace-bundle.json
 ```
 
 ## Security Considerations
@@ -404,13 +416,21 @@ sovra workspace import \
 ### Backup Procedure
 
 ```bash
-# Weekly backup to encrypted USB
-./scripts/airgap-backup.sh
+# Database backup
+pg_dump -U sovra sovra > /media/usb-secret/sovra-backup.sql
 
-# This backs up:
-# - PostgreSQL database
-# - Kubernetes manifests
-# - Certificates
-# - CRK shares (separate USB)
-# - Audit logs
+# Vault snapshot
+vault operator raft snapshot save /media/usb-secret/vault-snapshot.snap
+
+# Application-level backup (encrypted)
+sovra --cert admin.crt --key admin.key \
+  backup create --crk-signature <base64-signature>
+
+# Export audit logs
+sovra --cert admin.crt --key admin.key \
+  audit export \
+  --since "2026-01-01" \
+  --output /media/usb-secret/audit-export.json
+
+# CRK shares on SEPARATE encrypted USB
 ```

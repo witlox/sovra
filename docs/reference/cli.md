@@ -16,15 +16,14 @@ Complete reference for the `sovra` command-line tool.
 | `--org-id` | Organization ID | |
 | `--api-url` | API Gateway URL | `http://localhost:8080` |
 | `--json` | Output in JSON format | `false` |
+| `--cert` | Client certificate file for mTLS admin authentication | |
+| `--key` | Client private key file for mTLS admin authentication | |
+| `--ca-cert` | CA certificate file for server verification | |
 
----
-
-## health
-
-Check API health status.
+Admin operations require mTLS authentication. Pass `--cert` and `--key` for every admin command:
 
 ```bash
-sovra health
+sovra --cert admin.crt --key admin.key workspace list
 ```
 
 ---
@@ -39,7 +38,7 @@ configuration from the server via `GET /api/v1/sso-config`. You can also set
 
 ```bash
 sovra login                                      # auto-discover from server
-sovra login --issuer-url https://idp.example.org --client-id sovra-cli
+sovra login --issuer-url https://idp.example.org --client-id sovra
 ```
 
 | Flag | Description | Default |
@@ -62,74 +61,6 @@ Log out from the Sovra API.
 
 ```bash
 sovra logout
-```
-
----
-
-## config
-
-Show and validate CLI configuration.
-
-### config show
-
-```bash
-sovra config show
-```
-
-### config validate
-
-```bash
-sovra config validate
-```
-
----
-
-## encrypt
-
-Encrypt data in a workspace.
-
-```bash
-sovra encrypt --workspace ws-123 --data-file input.json --output encrypted.bin
-```
-
-| Flag | Description |
-|------|-------------|
-| `--workspace` | Workspace ID (required) |
-| `--data` | Data to encrypt (inline) |
-| `--data-file` | File containing data to encrypt |
-| `--output` | Output file |
-| `--input-dir` | Directory of files to encrypt (batch mode) |
-| `--output-dir` | Output directory for batch mode |
-| `--context` | Encryption context (JSON string) |
-
----
-
-## decrypt
-
-Decrypt data from a workspace.
-
-```bash
-sovra decrypt --workspace ws-123 --data-file encrypted.bin --output output.json
-```
-
-| Flag | Description |
-|------|-------------|
-| `--workspace` | Workspace ID (required) |
-| `--data` | Base64 encoded ciphertext (inline) |
-| `--data-file` | File containing ciphertext |
-| `--output` | Output file |
-| `--input-dir` | Directory of files to decrypt (batch mode) |
-| `--output-dir` | Output directory for batch mode |
-| `--context` | Decryption context (JSON string) |
-
----
-
-## metrics
-
-Retrieve Prometheus metrics from the API gateway.
-
-```bash
-sovra metrics
 ```
 
 ---
@@ -170,20 +101,6 @@ sovra activity export \
 | `--until` | End time (RFC3339) | |
 | `--output` | Output file | |
 | `--format` | Export format (`json`, `csv`) | `json` |
-
-### activity get
-
-View activity log for a specific actor.
-
-```bash
-sovra activity get actor-123 --since 2026-01-01T00:00:00Z --limit 50
-```
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--since` | Start time (RFC3339) | |
-| `--until` | End time (RFC3339) | |
-| `--limit` | Maximum results | `100` |
 
 ---
 
@@ -236,6 +153,7 @@ sovra workspace update ws-123 --purpose "Updated purpose"
 | `--purpose` | New workspace purpose |
 | `--classification` | New data classification |
 | `--mode` | New workspace mode |
+| `--crk-signature` | CRK co-signature (base64, required for CRK-protected workspaces) |
 
 ### workspace rotate-dek
 
@@ -910,6 +828,47 @@ Rotate credentials for a service identity.
 
 ```bash
 sovra identity service rotate service-123
+```
+
+### identity admin bootstrap
+
+Bootstrap the first admin on a clean instance. Generates a CRK and creates the initial admin identity.
+
+```bash
+sovra --api-url https://control.example.com \
+  identity admin bootstrap \
+  --email admin@example.org \
+  --name "First Admin" \
+  --shares 5 \
+  --threshold 3
+```
+
+### identity admin enroll
+
+Complete admin enrollment using an enrollment token (received from another admin). Generates an mTLS certificate.
+
+```bash
+sovra --api-url https://control.example.com \
+  identity admin enroll \
+  --enrollment-token <TOKEN>
+```
+
+### identity admin renew-cert
+
+Renew the current admin's mTLS certificate.
+
+```bash
+sovra --cert admin.crt --key admin.key \
+  identity admin renew-cert
+```
+
+### identity admin sign-message
+
+Sign a message using the admin's mTLS key (for CRK operations).
+
+```bash
+sovra --cert admin.crt --key admin.key \
+  identity admin sign-message --data "data to sign"
 ```
 
 ### identity enroll-device

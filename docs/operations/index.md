@@ -49,37 +49,32 @@ kubectl port-forward -n monitoring svc/prometheus 9090:9090
 ### Health Checks
 
 ```bash
-# Control plane health
-sovra health check
+# Control plane health (via API)
+curl -s https://control.example.com/health | jq .
 
-# Edge node status
-sovra edge-node status --all
-
-# Federation status
-sovra federation status --all
+# Readiness / liveness probes
+curl -s https://control.example.com/ready
+curl -s https://control.example.com/live
 ```
 
 ### Audit Review
 
 ```bash
-# Failed operations (last 24 hours)
-sovra audit query \
-  --since "24 hours ago" \
-  --result error
+# Review recent audit events via API
+sovra --cert admin.crt --key admin.key activity list --limit 50
 
-# Policy violations
-sovra audit query \
-  --event-type policy.violation
+# Filter by workspace
+sovra --cert admin.crt --key admin.key activity list --workspace-id <id>
 ```
 
-### Certificate Status
+### Certificate Management
 
 ```bash
-# Check expiring certificates (next 30 days)
-sovra cert list --expiring 30d
+# Renew admin certificate
+sovra --cert admin.crt --key admin.key identity admin renew-cert
 
-# Rotate certificates
-sovra cert rotate --all
+# Rotate edge node certificates
+./scripts/rotate-certificates.sh --namespace sovra-edge
 ```
 
 ## Recommended Weekly Operations
@@ -87,23 +82,25 @@ sovra cert rotate --all
 ### Backup Verification
 
 ```bash
-# Verify last backup
-./scripts/verify-backup.sh
+# Verify Vault snapshot
+vault operator raft snapshot inspect /backup/vault-latest.snap
 
-# Test restore (staging)
-./scripts/test-restore.sh --environment staging
+# Verify database backup
+pg_restore --list /backup/sovra-latest.sql > /dev/null && echo "DB backup valid"
+
+# List application backups
+sovra --cert admin.crt --key admin.key backup list
 ```
 
 ### Security Review
 
 ```bash
-# Review access logs
-sovra audit query \
-  --since "7 days ago" \
-  --event-type auth.*
+# Review access logs via activity endpoint
+sovra --cert admin.crt --key admin.key activity list --limit 100
 
-# Check policy compliance
-sovra policy validate --all
+# Review compliance report
+sovra --cert admin.crt --key admin.key compliance report generate \
+  --period 7d --format json
 ```
 
 ## Recommended Monthly Operations
@@ -115,39 +112,38 @@ sovra policy validate --all
 kubectl top nodes
 kubectl top pods -n sovra
 
-# Check database growth
-sovra metrics database-size
+# Check database growth (via PostgreSQL)
+psql -U sovra sovra -c "SELECT pg_size_pretty(pg_database_size('sovra'));"
 
-# Review audit log size
-sovra metrics audit-size
+# Review audit event count
+psql -U sovra sovra -c "SELECT COUNT(*) FROM audit_events WHERE created_at > now() - interval '30 days';"
 ```
 
 ### Security Patching
 
 ```bash
 # Check for updates
-sovra version check
+go list -m -u all
 
 # Review CVEs
-./scripts/check-cves.sh
-
-# Plan upgrade window
+gosec ./...
 ```
 
-### Key Metrics to monitor 
+### Key Metrics to Monitor
 
 ```
-Control Plane:
-├── sovra_api_requests_total (counter)
-├── sovra_api_request_duration_seconds (histogram)
-├── sovra_policy_evaluations_total (counter)
-├── sovra_audit_events_total (counter)
-└── sovra_federation_connections (gauge)
+Control Plane (subsystem = "api_gateway"):
+├── sovra_api_gateway_http_requests_total{method,path,status} (counter)
+├── sovra_api_gateway_http_request_duration_seconds{method,path} (histogram)
+├── sovra_api_gateway_http_active_requests (gauge)
+├── sovra_api_gateway_auth_attempts_total{method,result} (counter)
+├── sovra_api_gateway_errors_total{type} (counter)
+└── sovra_api_gateway_info{version,go_version} (gauge)
 
-Edge Nodes:
+Edge Nodes (Vault built-in):
 ├── vault_core_unsealed (gauge)
 ├── vault_runtime_alloc_bytes (gauge)
-└── sovra_edge_heartbeat_seconds (gauge)
+└── vault_runtime_num_goroutines (gauge)
 ```
 
 ## Automation
@@ -155,15 +151,12 @@ Edge Nodes:
 ### Scheduled Tasks
 
 ```bash
-# Automated certificate rotation
-0 2 * * * /usr/local/bin/sovra-cert-rotate.sh
+# Certificate rotation
+0 2 * * * /path/to/scripts/rotate-certificates.sh --namespace sovra-edge
 
-# Backup
-0 3 * * * /usr/local/bin/sovra-backup.sh
+# Vault backup
+0 3 * * * /path/to/scripts/backup-vault.sh --snapshot --retain 14
 
-# Audit log export
-0 4 * * * /usr/local/bin/sovra-audit-export.sh
-
-# Health check
-*/5 * * * * /usr/local/bin/sovra-health-check.sh
+# Health check (via readiness probe)
+*/5 * * * * curl -sf https://control.example.com/ready || echo "ALERT: control plane not ready"
 ```
