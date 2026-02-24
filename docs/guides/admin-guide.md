@@ -517,7 +517,7 @@ admin:
   idp_issuer_url: "https://login.microsoftonline.com/<tenant-id>/v2.0"
   idp_client_id: "<application-client-id>"
   idp_client_secret: "<client-secret>"
-  idp_group_endpoint: "https://graph.microsoft.com/v1.0/groups/{group_id}/members"
+  idp_group_endpoint: "https://graph.microsoft.com/v1.0/groups/{{groupId}}/members"
 ```
 
 ### Provider Setup: Okta
@@ -530,15 +530,19 @@ admin:
 5. Copy the **Client ID** — this is your `idp_client_id`.
 6. Your issuer URL is `https://<your-okta-domain>/oauth2/default` (or a custom
    authorization server URL).
-7. For group sync, ensure the Okta Groups API is accessible with an API token
-   and configure the group endpoint:
+7. For group sync, Sovra's group checker parses Microsoft Graph-style responses
+   (`{"value": [{"id": "...", "userPrincipalName": "..."}]}`) or flat arrays
+   (`{"members": ["sub1", "sub2"]}`). The native Okta Groups API returns a
+   different format. If you need Okta group sync, use a proxy or middleware that
+   transforms the Okta response into one of the supported formats, or use Okta's
+   Microsoft Graph-compatible API if available via an Okta OIN integration.
 
 ```yaml
 admin:
   idp_issuer_url: "https://<your-okta-domain>/oauth2/default"
   idp_client_id: "<client-id>"
   idp_client_secret: "<client-secret>"
-  idp_group_endpoint: "https://<your-okta-domain>/api/v1/groups/{group_id}/users"
+  # idp_group_endpoint: requires a proxy that returns Graph-style or flat-array JSON
 ```
 
 ### Provider Setup: Google Workspace
@@ -548,22 +552,25 @@ admin:
 2. Select **Desktop app** as the application type.
 3. Copy the **Client ID** and **Client secret**.
 4. The issuer URL for Google is always `https://accounts.google.com`.
-5. For group sync, enable the **Admin SDK API** in the Cloud Console and use
-   a service account with domain-wide delegation. The group endpoint uses the
-   Directory API:
+5. For group sync, the Google Directory API returns
+   `{"members": [{"id": "...", "email": "..."}]}` which differs from the
+   flat-array and Microsoft Graph formats that Sovra's group checker supports.
+   Group sync with Google Workspace requires a proxy that transforms the
+   response into `{"value": [{"id": "...", "userPrincipalName": "..."}]}` or
+   `{"members": ["sub1", "sub2"]}` format. SSO login works without group sync.
 
 ```yaml
 admin:
   idp_issuer_url: "https://accounts.google.com"
   idp_client_id: "<client-id>.apps.googleusercontent.com"
   idp_client_secret: "<client-secret>"
-  idp_group_endpoint: "https://admin.googleapis.com/admin/directory/v1/groups/{group_id}/members"
+  # idp_group_endpoint: requires a proxy that returns Graph-style or flat-array JSON
 ```
 
 ### Provider Setup: Generic OIDC
 
-Any OIDC-compliant provider works with Sovra. You need three values from your
-provider:
+Any OIDC-compliant provider works with Sovra for SSO login. You need three
+values from your provider:
 
 - **Issuer URL** — the base URL that serves `/.well-known/openid-configuration`
 - **Client ID** — from the application/client registration
@@ -574,11 +581,19 @@ Configure your provider's application with:
 - **Redirect URI**: `http://127.0.0.1/callback` (localhost, any port)
 - **Scopes**: `openid profile email`
 
+For group sync, the `idp_group_endpoint` must return one of two JSON formats:
+- **Microsoft Graph-style**: `{"value": [{"id": "...", "userPrincipalName": "..."}]}`
+- **Flat array**: `{"members": ["subject1", "subject2"]}`
+
+The URL template uses `{{groupId}}` as the placeholder for the group's
+`idp_group_id`.
+
 ```yaml
 admin:
   idp_issuer_url: "https://idp.example.org/realms/sovra"
   idp_client_id: "<client-id>"
   idp_client_secret: "<client-secret>"
+  idp_group_endpoint: "https://idp.example.org/api/groups/{{groupId}}/members"
 ```
 
 ### IdP Group Synchronization
@@ -589,11 +604,11 @@ the IdP and updates local groups to match:
 ```yaml
 admin:
   group_sync_enabled: true
-  idp_group_endpoint: "https://graph.example.org/v1.0/groups/{group_id}/members"
+  idp_group_endpoint: "https://graph.example.org/v1.0/groups/{{groupId}}/members"
   group_sync_interval: 5m
 ```
 
-The `idp_group_endpoint` is a URL template. Sovra substitutes `{group_id}`
+The `idp_group_endpoint` is a URL template. Sovra substitutes `{{groupId}}`
 with each group's external identifier when polling membership.
 
 When group sync is active, manual membership changes made via
