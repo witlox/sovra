@@ -211,7 +211,8 @@ sovra --cert admin.crt --key admin.key identity create admin \
   --sso-subject <SSO_SUBJECT_ID>
 ```
 
-Supported SSO providers: `azure_ad`, `okta`, `google`, `oidc`.
+Supported SSO providers: `azure_ad`, `okta`, `google`, `oidc`. See
+[Provider Setup](#provider-setup-azure-ad-entra-id) for configuration details.
 
 ### Disabling and Enabling Admins
 
@@ -492,6 +493,92 @@ admin:
   cert_ttl: 24h                    # Short-lived admin certs (default)
   reconciliation_enabled: true     # Enable IdP-to-local admin reconciliation
   reconciliation_interval: 5m
+```
+
+### Provider Setup: Azure AD (Entra ID)
+
+1. In the Azure portal, go to **Azure Active Directory > App registrations > New registration**.
+2. Set the name to `Sovra` and the redirect URI to `http://127.0.0.1:<port>/callback`
+   (the CLI binds a random port at login time; you can use a wildcard localhost
+   redirect or register `http://127.0.0.1:0/callback` as a mobile/desktop redirect).
+3. Under **Authentication**, enable **Allow public client flows** (required for
+   PKCE without a client secret).
+4. Copy the **Application (client) ID** — this is your `idp_client_id`.
+5. Copy your tenant's **OpenID Connect metadata document** URL, typically
+   `https://login.microsoftonline.com/<tenant-id>/v2.0`. This is your
+   `idp_issuer_url`.
+6. If you need a client secret (for server-side reconciliation), create one
+   under **Certificates & secrets** and set it as `idp_client_secret`.
+7. For group sync, grant the application **GroupMember.Read.All** (application
+   permission) and configure the group endpoint:
+
+```yaml
+admin:
+  idp_issuer_url: "https://login.microsoftonline.com/<tenant-id>/v2.0"
+  idp_client_id: "<application-client-id>"
+  idp_client_secret: "<client-secret>"
+  idp_group_endpoint: "https://graph.microsoft.com/v1.0/groups/{group_id}/members"
+```
+
+### Provider Setup: Okta
+
+1. In the Okta Admin Console, go to **Applications > Create App Integration**.
+2. Select **OIDC - OpenID Connect** and **Native Application** (for PKCE).
+3. Set the sign-in redirect URI to `http://127.0.0.1/callback` (Okta supports
+   localhost wildcards for native apps).
+4. Under **Assignments**, assign the users or groups that should have access.
+5. Copy the **Client ID** — this is your `idp_client_id`.
+6. Your issuer URL is `https://<your-okta-domain>/oauth2/default` (or a custom
+   authorization server URL).
+7. For group sync, ensure the Okta Groups API is accessible with an API token
+   and configure the group endpoint:
+
+```yaml
+admin:
+  idp_issuer_url: "https://<your-okta-domain>/oauth2/default"
+  idp_client_id: "<client-id>"
+  idp_client_secret: "<client-secret>"
+  idp_group_endpoint: "https://<your-okta-domain>/api/v1/groups/{group_id}/users"
+```
+
+### Provider Setup: Google Workspace
+
+1. In the Google Cloud Console, go to **APIs & Services > Credentials > Create
+   OAuth client ID**.
+2. Select **Desktop app** as the application type.
+3. Copy the **Client ID** and **Client secret**.
+4. The issuer URL for Google is always `https://accounts.google.com`.
+5. For group sync, enable the **Admin SDK API** in the Cloud Console and use
+   a service account with domain-wide delegation. The group endpoint uses the
+   Directory API:
+
+```yaml
+admin:
+  idp_issuer_url: "https://accounts.google.com"
+  idp_client_id: "<client-id>.apps.googleusercontent.com"
+  idp_client_secret: "<client-secret>"
+  idp_group_endpoint: "https://admin.googleapis.com/admin/directory/v1/groups/{group_id}/members"
+```
+
+### Provider Setup: Generic OIDC
+
+Any OIDC-compliant provider works with Sovra. You need three values from your
+provider:
+
+- **Issuer URL** — the base URL that serves `/.well-known/openid-configuration`
+- **Client ID** — from the application/client registration
+- **Client secret** (optional) — only needed for server-side reconciliation
+
+Configure your provider's application with:
+- **Grant type**: Authorization Code with PKCE
+- **Redirect URI**: `http://127.0.0.1/callback` (localhost, any port)
+- **Scopes**: `openid profile email`
+
+```yaml
+admin:
+  idp_issuer_url: "https://idp.example.org/realms/sovra"
+  idp_client_id: "<client-id>"
+  idp_client_secret: "<client-secret>"
 ```
 
 ### IdP Group Synchronization
