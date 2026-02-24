@@ -124,12 +124,7 @@ func (s *ProductionService) verifyCRK(ctx context.Context, orgID string, data, s
 
 // Create collects all org data, serializes it, computes a checksum, and stores the backup.
 func (s *ProductionService) Create(ctx context.Context, orgID, backupType, createdBy string, crkSignature []byte) (*models.Backup, error) {
-	// Verify CRK signature (mandatory)
-	if err := s.verifyCRK(ctx, orgID, []byte("backup-create:"+orgID), crkSignature); err != nil {
-		return nil, err
-	}
-
-	// Collect org data
+	// Collect org data first so we can sign over actual content
 	data := &BackupData{
 		OrgID:      orgID,
 		ExportedAt: time.Now(),
@@ -175,6 +170,11 @@ func (s *ProductionService) Create(ctx context.Context, orgID, backupType, creat
 	// Compute SHA-256 checksum on plaintext
 	checksum := sha256.Sum256(payload)
 	checksumStr := base64.StdEncoding.EncodeToString(checksum[:])
+
+	// Verify CRK signature over the actual data checksum (mandatory)
+	if err := s.verifyCRK(ctx, orgID, []byte("backup-create:"+checksumStr), crkSignature); err != nil {
+		return nil, err
+	}
 
 	// Encrypt payload with org KEK via Vault transit
 	storedData := payload
@@ -269,8 +269,8 @@ func (s *ProductionService) Restore(ctx context.Context, id string, callerOrgID 
 		}
 	}
 
-	// Verify CRK signature (mandatory)
-	if err := s.verifyCRK(ctx, b.OrgID, []byte("backup-restore:"+id), crkSignature); err != nil {
+	// Verify CRK signature over the backup checksum (mandatory)
+	if err := s.verifyCRK(ctx, b.OrgID, []byte("backup-restore:"+b.Checksum), crkSignature); err != nil {
 		return err
 	}
 
@@ -302,13 +302,17 @@ func (s *ProductionService) Restore(ctx context.Context, id string, callerOrgID 
 		return fmt.Errorf("unmarshal backup data: %w", err)
 	}
 
+	// Track import results
+	var imported, skipped int
+
 	// Re-import workspaces (skip conflicts)
 	if s.workspaces != nil {
 		for _, ws := range data.Workspaces {
 			if err := s.workspaces.Create(ctx, ws); err != nil {
-				// Skip conflicts (workspace already exists)
+				skipped++
 				continue
 			}
+			imported++
 		}
 	}
 
@@ -316,8 +320,10 @@ func (s *ProductionService) Restore(ctx context.Context, id string, callerOrgID 
 	if s.federations != nil {
 		for _, fed := range data.Federations {
 			if err := s.federations.Create(ctx, fed); err != nil {
+				skipped++
 				continue
 			}
+			imported++
 		}
 	}
 
@@ -325,8 +331,10 @@ func (s *ProductionService) Restore(ctx context.Context, id string, callerOrgID 
 	if s.policies != nil {
 		for _, pol := range data.Policies {
 			if err := s.policies.Create(ctx, pol); err != nil {
+				skipped++
 				continue
 			}
+			imported++
 		}
 	}
 
@@ -337,7 +345,7 @@ func (s *ProductionService) Restore(ctx context.Context, id string, callerOrgID 
 		return fmt.Errorf("update backup status: %w", err)
 	}
 
-	// Audit log
+	// Audit log with import results
 	if s.audit != nil {
 		_ = s.audit.Log(ctx, &models.AuditEvent{
 			ID:        uuid.New().String(),
@@ -347,7 +355,9 @@ func (s *ProductionService) Restore(ctx context.Context, id string, callerOrgID 
 			Actor:     "api",
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
-				"backup_id": id,
+				"backup_id":      id,
+				"items_imported": imported,
+				"items_skipped":  skipped,
 			},
 		})
 	}

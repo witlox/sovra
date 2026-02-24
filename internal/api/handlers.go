@@ -80,6 +80,54 @@ func handleError(w http.ResponseWriter, err error) {
 	}
 }
 
+// maxNameLength is the maximum allowed length for name fields.
+const maxNameLength = 256
+
+// maxDescriptionLength is the maximum allowed length for description/purpose fields.
+const maxDescriptionLength = 4096
+
+// isValidUUID checks whether a string looks like a valid UUID.
+func isValidUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+			continue
+		}
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// validateStringLength checks that s does not exceed maxLen.
+func validateStringLength(field, s string, maxLen int) (string, bool) {
+	if len(s) > maxLen {
+		return fmt.Sprintf("%s exceeds maximum length of %d characters", field, maxLen), false
+	}
+	return "", true
+}
+
+// requireIDParam extracts and validates a UUID path parameter.
+// Returns the ID and true, or writes an error response and returns false.
+func requireIDParam(w http.ResponseWriter, r *http.Request, param, label string) (string, bool) {
+	id := chi.URLParam(r, param)
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", label+" is required")
+		return "", false
+	}
+	if !isValidUUID(id) {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", label+" must be a valid UUID")
+		return "", false
+	}
+	return id, true
+}
+
 // getOrgID extracts organization ID from context.
 func getOrgID(r *http.Request) string {
 	if orgID, ok := r.Context().Value(ContextKeyOrgID).(string); ok {
@@ -142,6 +190,14 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "name is required")
 		return
 	}
+	if msg, ok := validateStringLength("name", req.Name, maxNameLength); !ok {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", msg)
+		return
+	}
+	if msg, ok := validateStringLength("purpose", req.Purpose, maxDescriptionLength); !ok {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", msg)
+		return
+	}
 
 	ws, err := h.service.Create(r.Context(), workspace.CreateRequest{
 		Name:           req.Name,
@@ -179,9 +235,8 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Get handles GET /api/v1/workspaces/{id}.
 func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "workspace id is required")
+	id, ok := requireIDParam(w, r, "id", "workspace id")
+	if !ok {
 		return
 	}
 
@@ -767,6 +822,10 @@ func (h *PolicyHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name == "" || req.Rego == "" {
 		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "name and rego are required")
+		return
+	}
+	if msg, ok := validateStringLength("name", req.Name, maxNameLength); !ok {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", msg)
 		return
 	}
 
@@ -1911,6 +1970,14 @@ func (h *IdentityHandler) CreateAdmin(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "name is required")
 		return
 	}
+	if msg, ok := validateStringLength("name", req.Name, maxNameLength); !ok {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", msg)
+		return
+	}
+	if msg, ok := validateStringLength("email", req.Email, maxNameLength); !ok {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", msg)
+		return
+	}
 	if len(req.CRKSignature) == 0 {
 		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "crk_signature is required")
 		return
@@ -2456,6 +2523,14 @@ func (h *IdentityHandler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name == "" {
 		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "name is required")
+		return
+	}
+	if msg, ok := validateStringLength("name", req.Name, maxNameLength); !ok {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", msg)
+		return
+	}
+	if msg, ok := validateStringLength("description", req.Description, maxDescriptionLength); !ok {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", msg)
 		return
 	}
 
@@ -3582,9 +3657,8 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Get handles GET /api/v1/backups/{id}.
 func (h *BackupHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "backup id is required")
+	id, ok := requireIDParam(w, r, "id", "backup id")
+	if !ok {
 		return
 	}
 
@@ -3604,9 +3678,8 @@ type RestoreBackupRequest struct {
 
 // Restore handles POST /api/v1/backups/{id}/restore.
 func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "backup id is required")
+	id, ok := requireIDParam(w, r, "id", "backup id")
+	if !ok {
 		return
 	}
 

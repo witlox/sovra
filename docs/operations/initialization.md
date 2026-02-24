@@ -170,7 +170,7 @@ Vault audit log enabled at `/var/log/vault/audit.log`
 
 ## Database Tables
 
-The migrations create these tables (34 migrations total):
+The migrations create these tables (36 migrations total):
 
 | Table | Purpose |
 |-------|---------|

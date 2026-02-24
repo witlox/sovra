@@ -106,8 +106,9 @@ func main() {
 	crkRepo := postgres.NewCRKRepository(db)
 
 	invitationRepo := postgres.NewWorkspaceInvitationRepository(db)
+	groupBindingRepo := postgres.NewWorkspaceGroupBindingRepository(db)
 
-	auditSvc := audit.NewService(auditRepo, nil, nil)
+	auditSvc := audit.NewAuditService(auditRepo)
 	wsSvc := workspace.NewWorkspaceService(wsRepo, vaultClient, auditSvc, invitationRepo)
 	// Federation CRK verifier adapter
 	transitClient := vaultClient.Transit(transitMountPath)
@@ -294,11 +295,25 @@ func main() {
 		RotationScheduler:     rotationScheduler,
 		Messaging:             msgSvc,
 		Backup:                backupSvc,
+		GroupBindingRepo:      groupBindingRepo,
 	}
 
 	routerCfg := api.DefaultRouterConfig()
 	routerCfg.Logger = logger
 	routerCfg.AdminIdentityResolver = &adminResolverAdapter{mgr: identityMgr}
+
+	// Register health checkers for critical dependencies
+	routerCfg.HealthCheckers["database"] = func() error {
+		return db.PingContext(ctx)
+	}
+	routerCfg.HealthCheckers["vault"] = func() error {
+		_, err := vaultClient.Health(ctx)
+		if err != nil {
+			return fmt.Errorf("vault health check: %w", err)
+		}
+		return nil
+	}
+
 	router := api.NewRouter(routerCfg, services)
 
 	server := &http.Server{

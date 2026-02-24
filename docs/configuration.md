@@ -87,6 +87,17 @@ federation:
   health_interval: 30s
   certificate_expiry: 8760h  # 1 year
 
+# Admin / Identity Provider (optional, omit for air-gap)
+admin:
+  cert_ttl: 24h
+  reconciliation_enabled: true
+  reconciliation_interval: 5m
+  idp_issuer_url: https://idp.example.org
+  idp_client_id: sovra-admin
+  idp_client_secret: ${SOVRA_ADMIN_IDP_CLIENT_SECRET}
+  group_sync_enabled: true
+  group_sync_interval: 5m
+
 # Telemetry (OpenTelemetry)
 telemetry:
   enabled: true
@@ -164,6 +175,20 @@ telemetry:
 | `federation.enabled` | `SOVRA_FEDERATION_ENABLED` | `true` | Enable federation |
 | `federation.health_interval` | `SOVRA_FEDERATION_HEALTH_INTERVAL` | `30s` | Partner health check interval |
 | `federation.certificate_expiry` | `SOVRA_FEDERATION_CERTIFICATE_EXPIRY` | `8760h` | Federation certificate validity |
+
+### Admin / Identity Provider Configuration
+
+| Option | Environment Variable | Default | Description |
+|--------|---------------------|---------|-------------|
+| `admin.cert_ttl` | `SOVRA_ADMIN_CERT_TTL` | `24h` | Admin certificate validity period (extended automatically in air-gap mode) |
+| `admin.reconciliation_enabled` | `SOVRA_ADMIN_RECONCILIATION_ENABLED` | `false` | Enable IdP reconciliation (disables admins/users removed from IdP) |
+| `admin.reconciliation_interval` | `SOVRA_ADMIN_RECONCILIATION_INTERVAL` | `5m` | How often to reconcile against IdP |
+| `admin.idp_issuer_url` | `SOVRA_ADMIN_IDP_ISSUER_URL` | - | OIDC issuer URL for admin IdP integration |
+| `admin.idp_client_id` | `SOVRA_ADMIN_IDP_CLIENT_ID` | - | OIDC client ID for IdP integration |
+| `admin.idp_client_secret` | `SOVRA_ADMIN_IDP_CLIENT_SECRET` | - | OIDC client secret for IdP integration |
+| `admin.idp_group_endpoint` | `SOVRA_ADMIN_IDP_GROUP_ENDPOINT` | - | IdP group membership endpoint template |
+| `admin.group_sync_enabled` | `SOVRA_ADMIN_GROUP_SYNC_ENABLED` | `false` | Enable automatic group membership sync from IdP |
+| `admin.group_sync_interval` | `SOVRA_ADMIN_GROUP_SYNC_INTERVAL` | `5m` | How often to sync group membership |
 
 ### Telemetry Configuration
 

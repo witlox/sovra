@@ -64,5 +64,13 @@ Temporary Items
 *.tfstate.*
 .terraform.lock.hcl
 
+# Secrets and credentials
+*.key
+*.pem
+*.crt
+*.cert
+.env
+.env.*
+
 # JetBrains
 .idea/

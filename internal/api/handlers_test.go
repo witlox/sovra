@@ -2694,7 +2694,8 @@ func TestWorkspaceHandlerGetNotFound(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/api/v1/workspaces/{id}", handler.Get)
 
-	req := httptest.NewRequest("GET", "/api/v1/workspaces/nonexistent-id", nil)
+	// Use a valid UUID format so validation passes, but ID doesn't exist
+	req := httptest.NewRequest("GET", "/api/v1/workspaces/00000000-0000-0000-0000-000000000000", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
