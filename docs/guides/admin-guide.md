@@ -51,31 +51,54 @@ The CRK underpins all high-trust operations. Initial CRK generation is always
 performed **offline** — the control plane does not exist yet at this stage, so
 the online ceremony endpoints are not available.
 
+#### Production: Two-Factor Protected Shares
+
+For production deployments, use `crk init` to generate shares that are each
+protected by two factors (a random seed code + a custodian-chosen password):
+
+```bash
+# Step 1: Admin generates the CRK and encrypted init file
+sovra crk init --org-id my-org --shares 5 --threshold 3 --output crk-init.json
+# Prints seed codes to stdout — one per share. Distribute each seed code
+# to the corresponding custodian via a secure out-of-band channel.
+
+# Step 2: Each custodian binds their password to their share (offline)
+sovra crk bind-seed \
+  --init-file crk-init.json \
+  --index 1 \
+  --seed-code <HEX_SEED_CODE> \
+  --output custodian-1.json
+# CLI prompts for a password (twice, with confirmation).
+
+# Step 3: Admin assembles all custodian seed files into the final secured CRK
+sovra crk import-seeds \
+  --init-file crk-init.json \
+  --seed-file custodian-1.json \
+  --seed-file custodian-2.json \
+  --seed-file custodian-3.json \
+  --seed-file custodian-4.json \
+  --seed-file custodian-5.json \
+  --output crk-secured.json
+```
+
+The resulting `crk-secured.json` is the file used for signing and ceremonies.
+Each share requires both the seed code and the custodian's password to decrypt.
+
+#### Dev/Test: Plaintext Shares
+
+For development and testing only, `crk generate` outputs plaintext shares:
+
 ```bash
 sovra crk generate --shares 5 --threshold 3 --output crk.json
 ```
 
-This runs entirely locally (no API calls). The output file contains the CRK
-public key and Shamir shares. Distribute the shares to custodians via secure
-out-of-band channels (USB drives, secure courier, etc.).
+> **Warning:** Plaintext shares are not suitable for production. Use `crk init`
+> for any deployment where share confidentiality matters.
 
 > **Note:** The online generation ceremony (`generate-ceremony start/seed/complete`)
 > requires an authenticated control plane and is intended for **CRK rotation**
 > after the platform is bootstrapped. See
 > [CRK Rotation Ceremony](#crk-rotation-ceremony) below.
-
-#### Air-Gap Seed Preparation
-
-Custodians who want to contribute a password-derived seed without network access
-can use `prepare-seed` independently:
-
-```bash
-# Each custodian prepares a seed file OFFLINE (no server needed)
-sovra crk generate-ceremony prepare-seed --index 1 --custodian-name "Alice" --output seed-alice.json
-```
-
-These seed files can later be imported into an online rotation ceremony after
-the platform is running.
 
 ### 2. Sign the Bootstrap Message
 

@@ -174,16 +174,35 @@ func init() {
 	crkGenCeremonyCmd.AddCommand(crkGenCeremonyPrepareSeedCmd)
 	crkGenCeremonyCmd.AddCommand(crkGenCeremonyImportSeedCmd)
 
+	// CRK offline init flags
+	crkInitCmd.Flags().String("org-id", "", "Organization ID")
+	crkInitCmd.Flags().Int("shares", 5, "Total number of shares")
+	crkInitCmd.Flags().Int("threshold", 3, "Threshold required to reconstruct")
+	crkInitCmd.Flags().String("output", "", "Output file for init file (required)")
+
+	// CRK bind-seed flags
+	crkBindSeedCmd.Flags().String("init-file", "", "Path to CRK init file (required)")
+	crkBindSeedCmd.Flags().Int("index", 0, "Share index (1-based, required)")
+	crkBindSeedCmd.Flags().String("seed-code", "", "Seed code in hex (required)")
+	crkBindSeedCmd.Flags().String("output", "", "Output file for custodian seed file (required)")
+
+	// CRK import-seeds flags
+	crkImportSeedsCmd.Flags().String("init-file", "", "Path to CRK init file (required)")
+	crkImportSeedsCmd.Flags().StringArray("seed-file", nil, "Custodian seed file path (repeatable, required)")
+	crkImportSeedsCmd.Flags().String("output", "", "Output file for secured CRK file (required)")
+
 	crkCmd.AddCommand(crkGenerateCmd)
 	crkCmd.AddCommand(crkSignCmd)
 	crkCmd.AddCommand(crkVerifyCmd)
 	crkCmd.AddCommand(crkCeremonyCmd)
 	crkCmd.AddCommand(crkRotateCmd)
 	crkCmd.AddCommand(crkGenCeremonyCmd)
+	crkCmd.AddCommand(crkInitCmd)
+	crkCmd.AddCommand(crkBindSeedCmd)
+	crkCmd.AddCommand(crkImportSeedsCmd)
 }
 
 func runCRKGenerate(cmd *cobra.Command, args []string) error {
-	fmt.Fprintln(os.Stderr, "WARNING: 'crk generate' outputs plaintext shares. Consider using 'crk generate-ceremony' for password-protected shares.")
 	orgID, _ := cmd.Flags().GetString("org-id")
 	if orgID == "" {
 		orgID, _ = cmd.Root().PersistentFlags().GetString("org-id")
@@ -239,6 +258,7 @@ func runCRKGenerate(cmd *cobra.Command, args []string) error {
 		fmt.Println(string(data))
 	}
 
+	fmt.Fprintln(os.Stderr, "\nNOTE: 'crk generate' outputs plaintext shares. For production, use 'crk init'.")
 	return nil
 }
 
@@ -275,29 +295,94 @@ func runCRKSign(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read shares file: %w", err)
 	}
 
-	// Try encrypted shares format first
-	var encSharesInput struct {
-		EncryptedShares []models.EncryptedCRKShare `json:"encrypted_shares"`
-	}
+	// Try secured CRK file format first (two-factor: seed code + password)
+	var securedFile crk.SecuredCRKFile
 	var sharesInput struct {
 		Shares []models.CRKShare `json:"shares"`
 	}
 
-	if json.Unmarshal(sharesData, &encSharesInput) == nil && len(encSharesInput.EncryptedShares) > 0 {
-		// Decrypt each share with password
-		for i := range encSharesInput.EncryptedShares {
-			plaintext, err := readPasswordForShare(&encSharesInput.EncryptedShares[i])
-			if err != nil {
-				return fmt.Errorf("decrypt share %d: %w", encSharesInput.EncryptedShares[i].Index, err)
+	if json.Unmarshal(sharesData, &securedFile) == nil && securedFile.Type == "sovra-crk-secured" {
+		fmt.Fprintf(os.Stderr, "Detected secured CRK file (threshold %d/%d)\n", securedFile.Threshold, securedFile.TotalShares)
+		for collected := 0; collected < securedFile.Threshold; {
+			fmt.Fprintf(os.Stderr, "Share index to decrypt (%d more needed): ", securedFile.Threshold-collected)
+			var idxStr string
+			if _, err := fmt.Fscanln(os.Stdin, &idxStr); err != nil {
+				return fmt.Errorf("read share index: %w", err)
 			}
+			var idx int
+			if _, err := fmt.Sscanf(idxStr, "%d", &idx); err != nil {
+				fmt.Fprintf(os.Stderr, "Invalid index: %s\n", idxStr)
+				continue
+			}
+
+			// Find the share
+			var share *crk.SecuredShareEntry
+			for i := range securedFile.Shares {
+				if securedFile.Shares[i].Index == idx {
+					share = &securedFile.Shares[i]
+					break
+				}
+			}
+			if share == nil {
+				fmt.Fprintf(os.Stderr, "Share index %d not found\n", idx)
+				continue
+			}
+
+			fmt.Fprint(os.Stderr, "Seed code (hex): ")
+			var seedHex string
+			if _, err := fmt.Fscanln(os.Stdin, &seedHex); err != nil {
+				return fmt.Errorf("read seed code: %w", err)
+			}
+			seedCode, err := hex.DecodeString(seedHex)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Invalid hex: %v\n", err)
+				continue
+			}
+
+			fmt.Fprint(os.Stderr, "Password: ")
+			password, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			if err != nil {
+				return fmt.Errorf("read password: %w", err)
+			}
+
+			plaintext, err := crk.DecryptSecuredShare(share, seedCode, password)
+			crk.ZeroBytes(seedCode)
+			crk.ZeroBytes(password)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Decrypt failed: %v\n", err)
+				continue
+			}
+
 			sharesInput.Shares = append(sharesInput.Shares, models.CRKShare{
-				Index: encSharesInput.EncryptedShares[i].Index,
+				Index: idx,
 				Data:  plaintext,
-				CRKID: encSharesInput.EncryptedShares[i].CRKID,
+				CRKID: securedFile.CRKID,
 			})
+			collected++
+			fmt.Fprintf(os.Stderr, "Share %d decrypted successfully\n", idx)
 		}
-	} else if err := json.Unmarshal(sharesData, &sharesInput); err != nil {
-		return fmt.Errorf("failed to parse shares: %w", err)
+	} else {
+		// Try encrypted shares format (password-only)
+		var encSharesInput struct {
+			EncryptedShares []models.EncryptedCRKShare `json:"encrypted_shares"`
+		}
+
+		if json.Unmarshal(sharesData, &encSharesInput) == nil && len(encSharesInput.EncryptedShares) > 0 {
+			for i := range encSharesInput.EncryptedShares {
+				plaintext, err := readPasswordForShare(&encSharesInput.EncryptedShares[i])
+				if err != nil {
+					return fmt.Errorf("decrypt share %d: %w", encSharesInput.EncryptedShares[i].Index, err)
+				}
+				sharesInput.Shares = append(sharesInput.Shares, models.CRKShare{
+					Index: encSharesInput.EncryptedShares[i].Index,
+					Data:  plaintext,
+					CRKID: encSharesInput.EncryptedShares[i].CRKID,
+				})
+			}
+		} else if err := json.Unmarshal(sharesData, &sharesInput); err != nil {
+			return fmt.Errorf("failed to parse shares: %w", err)
+		}
 	}
 
 	// Decode public key
@@ -422,21 +507,63 @@ var crkCeremonyAddShareCmd = &cobra.Command{
 				return fmt.Errorf("read share file: %w", err)
 			}
 
-			// Auto-detect encrypted share format
-			var encShare models.EncryptedCRKShare
-			if json.Unmarshal(content, &encShare) == nil && len(encShare.EncryptedData) > 0 && len(encShare.Salt) > 0 {
-				// Encrypted share — prompt for password and decrypt locally
-				plaintext, err := readPasswordForShare(&encShare)
+			// Auto-detect custodian seed file (two-factor: seed code + password)
+			var custSeedFile crk.CustodianSeedFile
+			if json.Unmarshal(content, &custSeedFile) == nil && custSeedFile.Type == "sovra-crk-custodian-seed" {
+				fmt.Fprint(os.Stderr, "Detected custodian seed file (two-factor protected)\n")
+				fmt.Fprint(os.Stderr, "Seed code (hex): ")
+				var seedHex string
+				if _, err := fmt.Fscanln(os.Stdin, &seedHex); err != nil {
+					return fmt.Errorf("read seed code: %w", err)
+				}
+				seedCode, err := hex.DecodeString(seedHex)
 				if err != nil {
-					return fmt.Errorf("decrypt share: %w", err)
+					return fmt.Errorf("invalid seed code hex: %w", err)
 				}
+
+				fmt.Fprint(os.Stderr, "Password: ")
+				password, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Fprintln(os.Stderr)
+				if err != nil {
+					crk.ZeroBytes(seedCode)
+					return fmt.Errorf("read password: %w", err)
+				}
+
+				entry := crk.SecuredShareEntry{
+					Index:            custSeedFile.Index,
+					EncryptedData:    custSeedFile.EncryptedData,
+					Salt:             custSeedFile.Salt,
+					KDFParams:        custSeedFile.KDFParams,
+					VerificationHash: custSeedFile.VerificationHash,
+				}
+				plaintext, err := crk.DecryptSecuredShare(&entry, seedCode, password)
+				crk.ZeroBytes(seedCode)
+				crk.ZeroBytes(password)
+				if err != nil {
+					return fmt.Errorf("decrypt custodian seed: %w", err)
+				}
+
 				share = models.CRKShare{
-					Index: encShare.Index,
+					Index: custSeedFile.Index,
 					Data:  plaintext,
-					CRKID: encShare.CRKID,
+					CRKID: custSeedFile.CRKID,
 				}
-			} else if err := json.Unmarshal(content, &share); err != nil {
-				return fmt.Errorf("parse share file: %w", err)
+			} else {
+				// Auto-detect encrypted share format (password-only)
+				var encShare models.EncryptedCRKShare
+				if json.Unmarshal(content, &encShare) == nil && len(encShare.EncryptedData) > 0 && len(encShare.Salt) > 0 {
+					plaintext, err := readPasswordForShare(&encShare)
+					if err != nil {
+						return fmt.Errorf("decrypt share: %w", err)
+					}
+					share = models.CRKShare{
+						Index: encShare.Index,
+						Data:  plaintext,
+						CRKID: encShare.CRKID,
+					}
+				} else if err := json.Unmarshal(content, &share); err != nil {
+					return fmt.Errorf("parse share file: %w", err)
+				}
 			}
 		} else if shareData != "" {
 			decoded, err := base64.StdEncoding.DecodeString(shareData)
@@ -895,6 +1022,213 @@ func readPasswordForShare(encShare *models.EncryptedCRKShare) ([]byte, error) {
 	}
 
 	return plaintext, nil
+}
+
+// ============================================================================
+// CRK Offline Init Commands
+// ============================================================================
+
+var crkInitCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Generate a new CRK with two-factor protected shares (offline)",
+	Long: `Generate a new Customer Root Key, Shamir-split it, and encrypt each share
+with a random seed code. Prints seed codes to stdout — distribute them to
+custodians via secure out-of-band channels. No server connection required.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		orgID, _ := cmd.Flags().GetString("org-id")
+		if orgID == "" {
+			orgID, _ = cmd.Root().PersistentFlags().GetString("org-id")
+		}
+		if orgID == "" {
+			return fmt.Errorf("--org-id is required")
+		}
+
+		shares, _ := cmd.Flags().GetInt("shares")
+		threshold, _ := cmd.Flags().GetInt("threshold")
+		output, _ := cmd.Flags().GetString("output")
+		if output == "" {
+			return fmt.Errorf("--output is required")
+		}
+
+		initFile, seedCodes, err := crk.InitCRK(orgID, shares, threshold)
+		if err != nil {
+			return fmt.Errorf("init CRK: %w", err)
+		}
+
+		data, err := json.MarshalIndent(initFile, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal init file: %w", err)
+		}
+
+		if err := os.WriteFile(output, data, 0600); err != nil {
+			return fmt.Errorf("write init file: %w", err)
+		}
+
+		fmt.Printf("CRK initialized. Init file written to %s\n", output)
+		fmt.Printf("CRK ID:     %s\n", initFile.CRKID)
+		fmt.Printf("Public Key: %x\n", initFile.PublicKey)
+		fmt.Printf("Shares:     %d (threshold %d)\n\n", shares, threshold)
+		fmt.Println("Seed codes (distribute to custodians via secure channel):")
+		fmt.Println(strings.Repeat("-", 72))
+		for i, sc := range seedCodes {
+			fmt.Printf("  Share %d: %s\n", i+1, hex.EncodeToString(sc))
+		}
+		fmt.Println(strings.Repeat("-", 72))
+		fmt.Println("\nEach custodian must run 'sovra crk bind-seed' with their seed code.")
+
+		return nil
+	},
+}
+
+var crkBindSeedCmd = &cobra.Command{
+	Use:   "bind-seed",
+	Short: "Bind a password to a CRK share (offline)",
+	Long: `Decrypt a share using the seed code, then re-encrypt it with
+(seed_code || password). The custodian chooses the password. No server
+connection required.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		initFilePath, _ := cmd.Flags().GetString("init-file")
+		index, _ := cmd.Flags().GetInt("index")
+		seedCodeHex, _ := cmd.Flags().GetString("seed-code")
+		output, _ := cmd.Flags().GetString("output")
+
+		if initFilePath == "" {
+			return fmt.Errorf("--init-file is required")
+		}
+		if index < 1 {
+			return fmt.Errorf("--index is required (1-based)")
+		}
+		if seedCodeHex == "" {
+			return fmt.Errorf("--seed-code is required (hex)")
+		}
+		if output == "" {
+			return fmt.Errorf("--output is required")
+		}
+
+		seedCode, err := hex.DecodeString(seedCodeHex)
+		if err != nil {
+			return fmt.Errorf("invalid seed code hex: %w", err)
+		}
+
+		initData, err := os.ReadFile(initFilePath)
+		if err != nil {
+			return fmt.Errorf("read init file: %w", err)
+		}
+		var initFile crk.CRKInitFile
+		if err := json.Unmarshal(initData, &initFile); err != nil {
+			return fmt.Errorf("parse init file: %w", err)
+		}
+
+		// Prompt for password
+		fmt.Fprint(os.Stderr, "Enter password for share: ")
+		password, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return fmt.Errorf("read password: %w", err)
+		}
+
+		fmt.Fprint(os.Stderr, "Confirm password: ")
+		confirm, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return fmt.Errorf("read password confirmation: %w", err)
+		}
+
+		if string(password) != string(confirm) {
+			crk.ZeroBytes(password)
+			crk.ZeroBytes(confirm)
+			return fmt.Errorf("passwords do not match")
+		}
+		crk.ZeroBytes(confirm)
+
+		custFile, err := crk.BindSeed(&initFile, index, seedCode, password)
+		crk.ZeroBytes(password)
+		crk.ZeroBytes(seedCode)
+		if err != nil {
+			return fmt.Errorf("bind seed: %w", err)
+		}
+
+		data, err := json.MarshalIndent(custFile, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal custodian seed file: %w", err)
+		}
+
+		if err := os.WriteFile(output, data, 0600); err != nil {
+			return fmt.Errorf("write custodian seed file: %w", err)
+		}
+
+		fmt.Printf("Custodian seed file written to %s\n", output)
+		fmt.Printf("Share index: %d\n", index)
+		fmt.Println("Transfer this file to the admin for assembly.")
+
+		return nil
+	},
+}
+
+var crkImportSeedsCmd = &cobra.Command{
+	Use:   "import-seeds",
+	Short: "Assemble custodian seed files into a secured CRK file (offline)",
+	Long: `Combine all custodian seed files with the init file to produce a final
+secured CRK file where every share is protected by two factors (seed code +
+password). No server connection required.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		initFilePath, _ := cmd.Flags().GetString("init-file")
+		seedFilePaths, _ := cmd.Flags().GetStringArray("seed-file")
+		output, _ := cmd.Flags().GetString("output")
+
+		if initFilePath == "" {
+			return fmt.Errorf("--init-file is required")
+		}
+		if len(seedFilePaths) == 0 {
+			return fmt.Errorf("at least one --seed-file is required")
+		}
+		if output == "" {
+			return fmt.Errorf("--output is required")
+		}
+
+		initData, err := os.ReadFile(initFilePath)
+		if err != nil {
+			return fmt.Errorf("read init file: %w", err)
+		}
+		var initFile crk.CRKInitFile
+		if err := json.Unmarshal(initData, &initFile); err != nil {
+			return fmt.Errorf("parse init file: %w", err)
+		}
+
+		custFiles := make([]*crk.CustodianSeedFile, len(seedFilePaths))
+		for i, path := range seedFilePaths {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("read seed file %s: %w", path, err)
+			}
+			var cf crk.CustodianSeedFile
+			if err := json.Unmarshal(data, &cf); err != nil {
+				return fmt.Errorf("parse seed file %s: %w", path, err)
+			}
+			custFiles[i] = &cf
+		}
+
+		secured, err := crk.AssembleSecuredCRK(&initFile, custFiles)
+		if err != nil {
+			return fmt.Errorf("assemble secured CRK: %w", err)
+		}
+
+		data, err := json.MarshalIndent(secured, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal secured CRK file: %w", err)
+		}
+
+		if err := os.WriteFile(output, data, 0600); err != nil {
+			return fmt.Errorf("write secured CRK file: %w", err)
+		}
+
+		fmt.Printf("Secured CRK file written to %s\n", output)
+		fmt.Printf("CRK ID:     %s\n", secured.CRKID)
+		fmt.Printf("Public Key: %x\n", secured.PublicKey)
+		fmt.Printf("Shares:     %d (threshold %d)\n", secured.TotalShares, secured.Threshold)
+
+		return nil
+	},
 }
 
 // ============================================================================

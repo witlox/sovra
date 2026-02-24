@@ -355,6 +355,161 @@ func TestPasswordProtectedCRKGeneration(t *testing.T) {
 	})
 }
 
+// TestOfflineCRKInit tests the fully offline CRK init flow:
+// crk init → crk bind-seed (per custodian) → crk import-seeds → decrypt → sign → verify.
+// No server connection is required for any of these operations.
+func TestOfflineCRKInit(t *testing.T) {
+	totalShares := 5
+	threshold := 3
+
+	t.Run("Scenario: Full offline CRK init with two-factor share protection", func(t *testing.T) {
+		var initFile *crk.CRKInitFile
+		var seedCodes [][]byte
+		custodianPasswords := []string{"alice-secret-pw", "bob-secret-pw", "charlie-secret-pw", "david-secret-pw", "eve-secret-pw"}
+		custFiles := make([]*crk.CustodianSeedFile, totalShares)
+		var securedFile *crk.SecuredCRKFile
+		var signature []byte
+		message := []byte("bootstrap-admin:org-eth:admin@eth.ch:super_admin")
+
+		testutil.NewScenario(t, "Offline CRK Init").
+			Given("an organization that needs a CRK before the control plane exists", func() {
+				// No server, no auth — fully offline
+			}).
+			When("admin runs 'crk init' to generate the CRK and seed codes", func() {
+				var err error
+				initFile, seedCodes, err = crk.InitCRK("org-eth", totalShares, threshold)
+				require.NoError(t, err)
+			}).
+			Then("an init file with encrypted shares should be produced", func() {
+				assert.Equal(t, "sovra-crk-init", initFile.Type)
+				assert.Equal(t, "org-eth", initFile.OrgID)
+				assert.Equal(t, totalShares, initFile.TotalShares)
+				assert.Equal(t, threshold, initFile.Threshold)
+				assert.Len(t, initFile.EncryptedShares, totalShares)
+				assert.NotEmpty(t, initFile.PublicKey)
+			}).
+			And("a unique seed code should be generated for each share", func() {
+				assert.Len(t, seedCodes, totalShares)
+				seen := make(map[string]bool)
+				for _, sc := range seedCodes {
+					assert.Len(t, sc, crk.SeedCodeSize)
+					h := string(sc)
+					assert.False(t, seen[h], "seed codes must be unique")
+					seen[h] = true
+				}
+			}).
+			And("each custodian can bind their password to their share", func() {
+				for i := 0; i < totalShares; i++ {
+					var err error
+					custFiles[i], err = crk.BindSeed(initFile, i+1, seedCodes[i], []byte(custodianPasswords[i]))
+					require.NoError(t, err, "BindSeed for custodian %d", i+1)
+					assert.Equal(t, "sovra-crk-custodian-seed", custFiles[i].Type)
+					assert.Equal(t, initFile.CRKID, custFiles[i].CRKID)
+					assert.Equal(t, i+1, custFiles[i].Index)
+					assert.NotEmpty(t, custFiles[i].VerificationHash)
+				}
+			}).
+			And("admin can assemble custodian files into a secured CRK", func() {
+				var err error
+				securedFile, err = crk.AssembleSecuredCRK(initFile, custFiles)
+				require.NoError(t, err)
+				assert.Equal(t, "sovra-crk-secured", securedFile.Type)
+				assert.Equal(t, initFile.CRKID, securedFile.CRKID)
+				assert.Len(t, securedFile.Shares, totalShares)
+			}).
+			And("threshold custodians can decrypt their shares to sign", func() {
+				var decryptedShares []models.CRKShare
+				for i := 0; i < threshold; i++ {
+					plaintext, err := crk.DecryptSecuredShare(&securedFile.Shares[i], seedCodes[i], []byte(custodianPasswords[i]))
+					require.NoError(t, err, "DecryptSecuredShare for custodian %d", i+1)
+					decryptedShares = append(decryptedShares, models.CRKShare{
+						Index: securedFile.Shares[i].Index,
+						Data:  plaintext,
+					})
+				}
+
+				manager := crk.NewManager()
+				var err error
+				signature, err = manager.Sign(decryptedShares, securedFile.PublicKey, message)
+				require.NoError(t, err)
+			}).
+			And("the signature should verify against the public key", func() {
+				manager := crk.NewManager()
+				valid, err := manager.Verify(securedFile.PublicKey, message, signature)
+				require.NoError(t, err)
+				assert.True(t, valid)
+			})
+	})
+
+	t.Run("Scenario: Wrong seed code cannot decrypt a share", func(t *testing.T) {
+		testutil.NewScenario(t, "Wrong Seed Code Rejection").
+			Given("a secured CRK file", func() {}).
+			When("a custodian provides the wrong seed code", func() {}).
+			Then("decryption should fail", func() {
+				initFile, seedCodes, err := crk.InitCRK("org-eth", 3, 2)
+				require.NoError(t, err)
+
+				custFile, err := crk.BindSeed(initFile, 1, seedCodes[0], []byte("pw"))
+				require.NoError(t, err)
+
+				entry := crk.SecuredShareEntry{
+					Index:            custFile.Index,
+					EncryptedData:    custFile.EncryptedData,
+					Salt:             custFile.Salt,
+					KDFParams:        custFile.KDFParams,
+					VerificationHash: custFile.VerificationHash,
+				}
+
+				wrongSeed := make([]byte, crk.SeedCodeSize)
+				_, err = crk.DecryptSecuredShare(&entry, wrongSeed, []byte("pw"))
+				assert.Error(t, err)
+			})
+	})
+
+	t.Run("Scenario: Wrong password cannot decrypt a share", func(t *testing.T) {
+		testutil.NewScenario(t, "Wrong Password Rejection").
+			Given("a secured CRK file", func() {}).
+			When("a custodian provides the wrong password", func() {}).
+			Then("decryption should fail", func() {
+				initFile, seedCodes, err := crk.InitCRK("org-eth", 3, 2)
+				require.NoError(t, err)
+
+				custFile, err := crk.BindSeed(initFile, 1, seedCodes[0], []byte("correct-pw"))
+				require.NoError(t, err)
+
+				entry := crk.SecuredShareEntry{
+					Index:            custFile.Index,
+					EncryptedData:    custFile.EncryptedData,
+					Salt:             custFile.Salt,
+					KDFParams:        custFile.KDFParams,
+					VerificationHash: custFile.VerificationHash,
+				}
+
+				_, err = crk.DecryptSecuredShare(&entry, seedCodes[0], []byte("wrong-pw"))
+				assert.Error(t, err)
+			})
+	})
+
+	t.Run("Scenario: Incomplete custodian files rejected by assembly", func(t *testing.T) {
+		testutil.NewScenario(t, "Incomplete Assembly Rejection").
+			Given("an init file with 5 shares", func() {}).
+			When("admin tries to assemble with only 3 custodian files", func() {}).
+			Then("assembly should fail", func() {
+				initFile, seedCodes, err := crk.InitCRK("org-eth", 5, 3)
+				require.NoError(t, err)
+
+				partial := make([]*crk.CustodianSeedFile, 3)
+				for i := 0; i < 3; i++ {
+					partial[i], err = crk.BindSeed(initFile, i+1, seedCodes[i], []byte("pw"))
+					require.NoError(t, err)
+				}
+
+				_, err = crk.AssembleSecuredCRK(initFile, partial)
+				assert.Error(t, err)
+			})
+	})
+}
+
 func BenchmarkCRKOperations(b *testing.B) {
 	ctx := context.Background()
 	generator := mocks.NewCRKGenerator()

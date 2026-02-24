@@ -549,9 +549,65 @@ sovra audit verify \
 
 Customer Root Key management.
 
+### crk init
+
+Generate a new CRK with two-factor protected shares (fully offline). Each share is encrypted with a random seed code. The admin distributes seed codes to custodians, who then bind their own password via `crk bind-seed`.
+
+```bash
+sovra crk init --org-id my-org --shares 5 --threshold 3 --output crk-init.json
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--org-id` | Organization ID (required) | |
+| `--shares` | Total number of shares | `5` |
+| `--threshold` | Threshold to reconstruct | `3` |
+| `--output` | Output file for init file (required) | |
+
+Prints seed codes to stdout. Distribute each seed code to the corresponding custodian via a secure out-of-band channel.
+
+### crk bind-seed
+
+Decrypt a share using the seed code, re-encrypt with (seed code + password). Run by each custodian offline.
+
+```bash
+sovra crk bind-seed \
+  --init-file crk-init.json \
+  --index 1 \
+  --seed-code <HEX_SEED_CODE> \
+  --output custodian-1.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--init-file` | Path to CRK init file (required) |
+| `--index` | Share index, 1-based (required) |
+| `--seed-code` | Seed code in hex (required) |
+| `--output` | Output file for custodian seed file (required) |
+
+The CLI prompts for a password (twice, with confirmation). The password never leaves the custodian's machine.
+
+### crk import-seeds
+
+Assemble custodian seed files into a final secured CRK file (fully offline).
+
+```bash
+sovra crk import-seeds \
+  --init-file crk-init.json \
+  --seed-file custodian-1.json \
+  --seed-file custodian-2.json \
+  --output crk-secured.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--init-file` | Path to CRK init file (required) |
+| `--seed-file` | Custodian seed file path (repeatable, required) |
+| `--output` | Output file for secured CRK file (required) |
+
 ### crk generate
 
-> **Deprecated:** Outputs plaintext shares. Use `crk generate-ceremony` for production deployments with password-protected shares.
+> **Note:** Outputs plaintext shares. For production, use `crk init` which provides two-factor share protection.
 
 Generate a new CRK with Shamir secret sharing.
 
@@ -583,7 +639,10 @@ sovra crk sign \
 | `--data` | Data to sign (inline) |
 | `--data-file` | File containing data to sign |
 
-Supports both plaintext and password-encrypted shares. If the shares file contains encrypted shares, the CLI prompts for each custodian's password to decrypt their share locally before signing.
+Supports three share formats:
+- **Secured CRK file** (`type: "sovra-crk-secured"`): Prompts for share index, seed code (hex), and password for each share until threshold is met.
+- **Password-encrypted shares**: Prompts for each custodian's password to decrypt locally.
+- **Plaintext shares**: Used directly.
 
 ### crk verify
 
@@ -640,7 +699,10 @@ sovra crk ceremony add-share ceremony-123 \
 | `--share-data` | Base64-encoded share data |
 | `--share-index` | Share index |
 
-Supports both plaintext and password-encrypted shares. If the share file contains encrypted data (with `encrypted_data`, `salt`, and KDF fields), the CLI prompts for the custodian's password to decrypt the share locally before submitting it to the ceremony.
+Supports three share formats:
+- **Custodian seed file** (`type: "sovra-crk-custodian-seed"`): Prompts for seed code (hex) and password, decrypts locally.
+- **Password-encrypted share**: Prompts for password, decrypts locally.
+- **Plaintext share**: Used directly.
 
 ### crk ceremony complete
 

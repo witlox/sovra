@@ -121,6 +121,68 @@ type GenerationCeremony struct {
 	StartedAt       time.Time                  `json:"started_at"`
 }
 
+// SeedCodeSize is the size of a random seed code in bytes (displayed as 64-char hex).
+const SeedCodeSize = 32
+
+// CRKInitFile is the JSON output of `crk init`. Contains the CRK public key
+// and Shamir shares encrypted with random seed codes.
+type CRKInitFile struct {
+	FormatVersion   int              `json:"format_version"`
+	Type            string           `json:"type"` // "sovra-crk-init"
+	OrgID           string           `json:"org_id"`
+	CRKID           string           `json:"crk_id"`
+	PublicKey       []byte           `json:"public_key"`
+	Threshold       int              `json:"threshold"`
+	TotalShares     int              `json:"total_shares"`
+	EncryptedShares []InitShareEntry `json:"encrypted_shares"`
+	CreatedAt       time.Time        `json:"created_at"`
+}
+
+// InitShareEntry holds one Shamir share encrypted with DeriveKey(seedCode, salt).
+type InitShareEntry struct {
+	Index         int       `json:"index"`
+	EncryptedData []byte    `json:"encrypted_data"`
+	Salt          []byte    `json:"salt"`
+	KDFParams     KDFParams `json:"kdf_params"`
+}
+
+// CustodianSeedFile is the JSON output of `crk bind-seed`. The share has been
+// re-encrypted with DeriveKey(seedCode || password, newSalt).
+type CustodianSeedFile struct {
+	FormatVersion    int       `json:"format_version"`
+	Type             string    `json:"type"` // "sovra-crk-custodian-seed"
+	CRKID            string    `json:"crk_id"`
+	Index            int       `json:"index"`
+	EncryptedData    []byte    `json:"encrypted_data"`
+	Salt             []byte    `json:"salt"`
+	KDFParams        KDFParams `json:"kdf_params"`
+	VerificationHash []byte    `json:"verification_hash"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// SecuredCRKFile is the final assembled output of `crk import-seeds`.
+// All shares are protected by two-factor (seed code + password) encryption.
+type SecuredCRKFile struct {
+	FormatVersion int                 `json:"format_version"`
+	Type          string              `json:"type"` // "sovra-crk-secured"
+	OrgID         string              `json:"org_id"`
+	CRKID         string              `json:"crk_id"`
+	PublicKey     []byte              `json:"public_key"`
+	Threshold     int                 `json:"threshold"`
+	TotalShares   int                 `json:"total_shares"`
+	Shares        []SecuredShareEntry `json:"shares"`
+	CreatedAt     time.Time           `json:"created_at"`
+}
+
+// SecuredShareEntry holds one two-factor encrypted Shamir share.
+type SecuredShareEntry struct {
+	Index            int       `json:"index"`
+	EncryptedData    []byte    `json:"encrypted_data"`
+	Salt             []byte    `json:"salt"`
+	KDFParams        KDFParams `json:"kdf_params"`
+	VerificationHash []byte    `json:"verification_hash"`
+}
+
 // GenerationCeremonyManager handles password-protected CRK generation ceremonies.
 type GenerationCeremonyManager interface {
 	// StartGenerationCeremony initiates a new generation ceremony.
