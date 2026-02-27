@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/witlox/sovra/internal/workspace"
+	"github.com/witlox/sovra/pkg/models"
 )
 
 // Policy defines a key rotation policy for a workspace.
@@ -17,14 +19,25 @@ type Policy struct {
 	Enabled     bool          `json:"enabled"`
 }
 
+// AuditService allows emitting audit events.
+type AuditService interface {
+	Log(ctx context.Context, event *models.AuditEvent) error
+}
+
 // Scheduler manages rotation policies and triggers key rotation when needed.
 type Scheduler struct {
 	policies     map[string]*Policy
 	workspaceSvc workspace.Service
+	audit        AuditService
 	mu           sync.RWMutex
 	stopCh       chan struct{}
 	interval     time.Duration
 	logger       *slog.Logger
+}
+
+// SetAudit sets the audit service for rotation events.
+func (s *Scheduler) SetAudit(audit AuditService) {
+	s.audit = audit
 }
 
 // NewScheduler creates a new rotation policy scheduler.
@@ -66,10 +79,25 @@ func (s *Scheduler) Stop() {
 }
 
 // SetPolicy sets a rotation policy for a workspace.
-func (s *Scheduler) SetPolicy(workspaceID string, policy *Policy) {
+func (s *Scheduler) SetPolicy(ctx context.Context, workspaceID string, policy *Policy) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.policies[workspaceID] = policy
+	s.mu.Unlock()
+
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			Workspace: workspaceID,
+			EventType: models.AuditEventTypeRotationPolicySet,
+			Actor:     "system",
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"max_age": policy.MaxAge.String(),
+				"enabled": policy.Enabled,
+			},
+		})
+	}
 }
 
 // GetPolicy returns the rotation policy for a workspace.
@@ -80,10 +108,21 @@ func (s *Scheduler) GetPolicy(workspaceID string) *Policy {
 }
 
 // RemovePolicy removes a rotation policy for a workspace.
-func (s *Scheduler) RemovePolicy(workspaceID string) {
+func (s *Scheduler) RemovePolicy(ctx context.Context, workspaceID string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.policies, workspaceID)
+	s.mu.Unlock()
+
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			Workspace: workspaceID,
+			EventType: models.AuditEventTypeRotationPolicyRemove,
+			Actor:     "system",
+			Result:    models.AuditEventResultSuccess,
+		})
+	}
 }
 
 // ListPolicies returns all rotation policies.

@@ -174,6 +174,13 @@ spec:
 
 ### Audit Logging
 
+Sovra emits audit events for all state-changing operations across workspace,
+identity, policy, federation, edge, and rotation services. Each event includes
+the authenticated caller (actor), organization, event type, result, and
+operation-specific metadata. See the
+[Administrator Guide](../guides/admin-guide.md#audit-event-types) for a
+complete list of event types.
+
 **1. Enable comprehensive logging:**
 ```yaml
 audit:

@@ -9,8 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-policy-agent/opa/ast"
+	"go.opentelemetry.io/otel"
+
+	"github.com/witlox/sovra/internal/auth/jwt"
 	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/metrics"
 	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/telemetry"
 )
 
 // serviceImpl is the production service implementation using repository and OPA interfaces.
@@ -19,6 +24,7 @@ type serviceImpl struct {
 	opa      OPAClient
 	audit    AuditService
 	versRepo VersionedRepository // optional: for version history
+	metrics  *metrics.PolicyMetrics
 }
 
 // validateRego validates Rego policy syntax using OPA's AST parser.
@@ -58,7 +64,24 @@ func (s *serviceImpl) opaPolicyID(policy *models.Policy) string {
 	return fmt.Sprintf("sovra-policy-%s", policy.ID)
 }
 
+// SetMetrics sets the policy metrics collector.
+func (s *serviceImpl) SetMetrics(m *metrics.PolicyMetrics) {
+	s.metrics = m
+}
+
+// callerFromContext extracts orgID and actor from JWT claims in context.
+func callerFromContext(ctx context.Context) (orgID, actor string) {
+	claims, ok := jwt.ClaimsFromContext(ctx)
+	if !ok {
+		return "", "system"
+	}
+	return claims.Organization, claims.Subject
+}
+
 func (s *serviceImpl) Create(ctx context.Context, req CreateRequest) (*models.Policy, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "policy.create")
+	defer span.End()
+
 	// Validate Rego syntax
 	if err := s.validateRego(req.Rego); err != nil {
 		return nil, err
@@ -94,11 +117,14 @@ func (s *serviceImpl) Create(ctx context.Context, req CreateRequest) (*models.Po
 
 	// Audit log
 	if s.audit != nil {
+		orgID, actor := callerFromContext(ctx)
 		_ = s.audit.Log(ctx, &models.AuditEvent{
 			ID:        uuid.New().String(),
 			Timestamp: now,
+			OrgID:     orgID,
 			Workspace: policy.WorkspaceID,
-			EventType: "policy.create",
+			EventType: models.AuditEventTypePolicyCreate,
+			Actor:     actor,
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
 				"policy_id":      policy.ID,
@@ -128,6 +154,9 @@ func (s *serviceImpl) GetForWorkspace(ctx context.Context, workspaceID string) (
 }
 
 func (s *serviceImpl) Update(ctx context.Context, id string, rego string, signature []byte) (*models.Policy, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "policy.update")
+	defer span.End()
+
 	// Validate Rego syntax
 	if err := s.validateRego(rego); err != nil {
 		return nil, err
@@ -159,11 +188,14 @@ func (s *serviceImpl) Update(ctx context.Context, id string, rego string, signat
 
 	// Audit log
 	if s.audit != nil {
+		orgID, actor := callerFromContext(ctx)
 		_ = s.audit.Log(ctx, &models.AuditEvent{
 			ID:        uuid.New().String(),
 			Timestamp: policy.UpdatedAt,
+			OrgID:     orgID,
 			Workspace: policy.WorkspaceID,
-			EventType: "policy.update",
+			EventType: models.AuditEventTypePolicyUpdate,
+			Actor:     actor,
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
 				"policy_id":      policy.ID,
@@ -177,6 +209,9 @@ func (s *serviceImpl) Update(ctx context.Context, id string, rego string, signat
 }
 
 func (s *serviceImpl) Delete(ctx context.Context, id string, signature []byte) error {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "policy.delete")
+	defer span.End()
+
 	// Get policy first for audit logging
 	policy, err := s.repo.Get(ctx, id)
 	if err != nil {
@@ -195,11 +230,14 @@ func (s *serviceImpl) Delete(ctx context.Context, id string, signature []byte) e
 
 	// Audit log
 	if s.audit != nil {
+		orgID, actor := callerFromContext(ctx)
 		_ = s.audit.Log(ctx, &models.AuditEvent{
 			ID:        uuid.New().String(),
 			Timestamp: time.Now(),
+			OrgID:     orgID,
 			Workspace: policy.WorkspaceID,
-			EventType: "policy.delete",
+			EventType: models.AuditEventTypePolicyDelete,
+			Actor:     actor,
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
 				"policy_id":   policy.ID,
@@ -212,6 +250,9 @@ func (s *serviceImpl) Delete(ctx context.Context, id string, signature []byte) e
 }
 
 func (s *serviceImpl) Evaluate(ctx context.Context, input models.PolicyInput) (*EvaluationResult, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "policy.evaluate")
+	defer span.End()
+
 	startTime := time.Now()
 
 	// Build decision path based on workspace
@@ -240,6 +281,23 @@ func (s *serviceImpl) Evaluate(ctx context.Context, input models.PolicyInput) (*
 		DenyReason: decision.Reason,
 		EvalTimeMs: time.Since(startTime).Milliseconds(),
 	}
+
+	// Record metrics
+	if s.metrics != nil {
+		evalResult := "allow"
+		if !decision.Allow {
+			evalResult = "deny"
+		}
+		s.metrics.EvaluationsTotal.WithLabelValues(evalResult).Inc()
+		s.metrics.EvaluationLatency.WithLabelValues().Observe(time.Since(startTime).Seconds())
+	}
+
+	span.SetAttributes(telemetry.NewSafeAttributes().Operation("evaluate").Result(func() string {
+		if decision.Allow {
+			return "allow"
+		}
+		return "deny"
+	}()).Build()...)
 
 	// Audit log for policy violations
 	if s.audit != nil && !decision.Allow {

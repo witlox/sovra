@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+
 	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/metrics"
 	"github.com/witlox/sovra/pkg/models"
 	"github.com/witlox/sovra/pkg/vault"
 )
@@ -236,6 +239,7 @@ type edgeService struct {
 	vaultFactory VaultFactory
 	audit        AuditService
 	logger       *slog.Logger
+	metrics      *metrics.EdgeMetrics
 
 	mu          sync.RWMutex
 	syncStatus  map[string]*SyncStatus
@@ -243,7 +247,15 @@ type edgeService struct {
 	edgeTokens  map[string]string
 }
 
+// SetMetrics sets the edge metrics collector.
+func (s *edgeService) SetMetrics(m *metrics.EdgeMetrics) {
+	s.metrics = m
+}
+
 func (s *edgeService) Register(ctx context.Context, orgID string, config *NodeConfig) (*models.EdgeNode, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "edge.register")
+	defer span.End()
+
 	if config.Name == "" {
 		return nil, fmt.Errorf("name is required: %w", errors.ErrInvalidInput)
 	}
@@ -305,7 +317,7 @@ func (s *edgeService) Register(ctx context.Context, orgID string, config *NodeCo
 			ID:        uuid.New().String(),
 			Timestamp: time.Now(),
 			OrgID:     orgID,
-			EventType: "edge.register",
+			EventType: models.AuditEventTypeEdgeRegister,
 			Actor:     "system",
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
@@ -315,6 +327,11 @@ func (s *edgeService) Register(ctx context.Context, orgID string, config *NodeCo
 				"classification": node.Classification,
 			},
 		})
+	}
+
+	if s.metrics != nil {
+		s.metrics.OperationsTotal.WithLabelValues("register", "success").Inc()
+		s.metrics.NodesTotal.WithLabelValues(string(node.Status)).Inc()
 	}
 
 	return node, nil
@@ -430,7 +447,7 @@ func (s *edgeService) Unregister(ctx context.Context, nodeID string) error {
 			ID:        uuid.New().String(),
 			Timestamp: time.Now(),
 			OrgID:     node.OrgID,
-			EventType: "edge.unregister",
+			EventType: models.AuditEventTypeEdgeUnregister,
 			Actor:     "system",
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
@@ -438,6 +455,10 @@ func (s *edgeService) Unregister(ctx context.Context, nodeID string) error {
 				"node_name": node.Name,
 			},
 		})
+	}
+
+	if s.metrics != nil {
+		s.metrics.OperationsTotal.WithLabelValues("unregister", "success").Inc()
 	}
 
 	return nil
@@ -567,6 +588,9 @@ func (s *edgeService) RotateKey(ctx context.Context, nodeID, keyName string) err
 }
 
 func (s *edgeService) SyncPolicies(ctx context.Context, nodeID string, policies []*models.Policy) error {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "edge.sync_policies")
+	defer span.End()
+
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
 		return fmt.Errorf("get edge node for sync policies: %w", err)
@@ -622,7 +646,7 @@ func (s *edgeService) SyncPolicies(ctx context.Context, nodeID string, policies 
 			ID:        uuid.New().String(),
 			Timestamp: time.Now(),
 			OrgID:     node.OrgID,
-			EventType: "edge.sync.policies",
+			EventType: models.AuditEventTypeEdgeSyncPolicy,
 			Actor:     "system",
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
@@ -633,10 +657,17 @@ func (s *edgeService) SyncPolicies(ctx context.Context, nodeID string, policies 
 		})
 	}
 
+	if s.metrics != nil {
+		s.metrics.OperationsTotal.WithLabelValues("sync_policies", "success").Inc()
+	}
+
 	return nil
 }
 
 func (s *edgeService) SyncWorkspaceKeys(ctx context.Context, nodeID, workspaceID string, wrappedDEK []byte) error {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "edge.sync_workspace_keys")
+	defer span.End()
+
 	node, err := s.repo.Get(ctx, nodeID)
 	if err != nil {
 		return fmt.Errorf("get edge node for sync workspace keys: %w", err)
@@ -714,7 +745,7 @@ func (s *edgeService) SyncWorkspaceKeys(ctx context.Context, nodeID, workspaceID
 			Timestamp: time.Now(),
 			OrgID:     node.OrgID,
 			Workspace: workspaceID,
-			EventType: "edge.sync.keys",
+			EventType: models.AuditEventTypeEdgeSyncKeys,
 			Actor:     "system",
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
@@ -722,6 +753,10 @@ func (s *edgeService) SyncWorkspaceKeys(ctx context.Context, nodeID, workspaceID
 				"workspace_id": workspaceID,
 			},
 		})
+	}
+
+	if s.metrics != nil {
+		s.metrics.OperationsTotal.WithLabelValues("sync_keys", "success").Inc()
 	}
 
 	return nil

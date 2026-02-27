@@ -69,7 +69,7 @@ This enables distributed tracing across:
 Only the following attributes are included in traces:
 
 ```go
-// HTTP attributes (sanitized)
+// HTTP middleware attributes (sanitized)
 semconv.HTTPMethod("POST")
 semconv.HTTPRoute("/v1/workspace/{workspace}/encrypt")
 semconv.HTTPStatusCode(200)
@@ -78,23 +78,58 @@ semconv.HTTPStatusCode(200)
 semconv.DBSystem("postgresql")
 semconv.DBOperation("SELECT")
 
-// Custom attributes
+// Service-level span attributes (via telemetry.NewSafeAttributes)
 attribute.String("operation", "encrypt")
 attribute.String("result", "success")
 attribute.Int64("duration_ms", 42)
 ```
+
+Service-level spans use the `telemetry.NewSafeAttributes()` builder to ensure
+only approved attributes are attached:
+
+```go
+ctx, span := otel.Tracer("sovra").Start(ctx, "workspace.encrypt")
+defer span.End()
+// ... operation logic ...
+span.SetAttributes(telemetry.NewSafeAttributes().
+    Operation("encrypt").
+    Result("success").
+    Build()...)
+```
+
+On error, spans record the error and set the result attribute:
+
+```go
+span.RecordError(err)
+span.SetAttributes(telemetry.NewSafeAttributes().
+    Operation("encrypt").
+    Result("error").
+    Build()...)
+```
+
+### Instrumented Operations
+
+The following services have operation-level spans:
+
+| Service | Spans |
+|---------|-------|
+| Workspace | `workspace.create`, `workspace.encrypt`, `workspace.decrypt`, `workspace.rotate_dek`, `workspace.archive`, `workspace.delete` |
+| Policy | `policy.create`, `policy.update`, `policy.delete`, `policy.evaluate` |
+| Federation | `federation.init`, `federation.establish`, `federation.revoke`, `federation.rotate_certificate` |
+| Identity | `identity.create_admin`, `identity.bootstrap_admin`, `identity.enroll_admin` |
+| Edge | `edge.register`, `edge.sync_policies`, `edge.sync_keys` |
 
 ### Example Trace
 
 ```
 Trace: 4b3a9c2d-1e5f-4a8b-9c2d-1e5f4a8b9c2d
 ├── sovra-api-gateway: POST /v1/workspace/{workspace}/encrypt (42ms)
-│   ├── policy: evaluate-policy (5ms)
-│   │   └── opa: query (3ms)
-│   ├── edge-agent: encrypt (30ms)
-│   │   └── vault: transit/encrypt (25ms)
-│   └── audit: record-event (2ms)
-│       └── postgresql: INSERT (1ms)
+│   ├── workspace.encrypt (35ms)
+│   │   ├── policy.evaluate (5ms)
+│   │   │   └── opa: query (3ms)
+│   │   ├── vault: transit/encrypt (25ms)
+│   │   └── audit: record-event (2ms)
+│   │       └── postgresql: INSERT (1ms)
 ```
 
 ## Metrics

@@ -941,6 +941,25 @@ sovra --cert admin.crt --key admin.key rotation-policy delete <workspace-id>
 
 ## Audit and Compliance
 
+All state-changing operations emit audit events with the authenticated caller,
+organization, and relevant metadata. Use the `--event-type` filter to narrow
+queries to specific event categories.
+
+### Audit Event Types
+
+| Category | Event Types |
+|----------|-------------|
+| Workspace | `workspace.create`, `workspace.update`, `workspace.archive`, `workspace.delete`, `workspace.export`, `workspace.import`, `workspace.extend` |
+| Workspace Access | `workspace.access`, `workspace.invite`, `workspace.invite.accept`, `workspace.invite.decline`, `admission.grant`, `admission.revoke`, `admission.auto` |
+| Encryption | `workspace.encrypt`, `workspace.decrypt`, `dek.rotate` |
+| Policy | `policy.create`, `policy.update`, `policy.delete`, `policy.rollback` |
+| Rotation | `rotation.policy.set`, `rotation.policy.remove` |
+| Identity | `admin.create`, `admin.bootstrap`, `admin.enroll`, `user.create.sso`, `service.create`, `service.rotate`, `device.enroll`, `device.revoke` |
+| Groups & Roles | `group.create`, `group.update`, `group.member.add`, `group.member.remove`, `role.create`, `role.assign`, `role.unassign` |
+| Federation | `federation.init`, `federation.establish`, `federation.revoke`, `federation.cert.rotate` |
+| Edge | `edge.register`, `edge.unregister`, `edge.sync.policies`, `edge.sync.keys` |
+| Emergency | `emergency.request`, `emergency.approve`, `emergency.deny`, `emergency.complete` |
+
 ### Querying Audit Logs
 
 ```bash

@@ -217,6 +217,45 @@ const (
 	AuditEventTypeAdmissionRevoke AuditEventType = "workspace.admission.revoke"
 	AuditEventTypeAdmissionDenied AuditEventType = "workspace.admission.denied"
 	AuditEventTypeAutoAdmit       AuditEventType = "workspace.auto_admit"
+
+	// Policy lifecycle
+	AuditEventTypePolicyCreate   AuditEventType = "policy.create"
+	AuditEventTypePolicyUpdate   AuditEventType = "policy.update"
+	AuditEventTypePolicyDelete   AuditEventType = "policy.delete"
+	AuditEventTypePolicyRollback AuditEventType = "policy.rollback"
+
+	// Workspace lifecycle (additional)
+	AuditEventTypeWorkspaceUpdate     AuditEventType = "workspace.update"
+	AuditEventTypeWorkspaceArchive    AuditEventType = "workspace.archive"
+	AuditEventTypeWorkspaceDelete     AuditEventType = "workspace.delete"
+	AuditEventTypeWorkspaceExport     AuditEventType = "workspace.export"
+	AuditEventTypeWorkspaceImport     AuditEventType = "workspace.import"
+	AuditEventTypeWorkspaceExtend     AuditEventType = "workspace.extend"
+	AuditEventTypeWorkspaceInvite     AuditEventType = "workspace.invite"
+	AuditEventTypeWorkspaceAcceptInv  AuditEventType = "workspace.invite.accept"
+	AuditEventTypeWorkspaceDeclineInv AuditEventType = "workspace.invite.decline"
+
+	// Edge node
+	AuditEventTypeEdgeRegister   AuditEventType = "edge.register"
+	AuditEventTypeEdgeUnregister AuditEventType = "edge.unregister"
+	AuditEventTypeEdgeSyncPolicy AuditEventType = "edge.sync.policies"
+	AuditEventTypeEdgeSyncKeys   AuditEventType = "edge.sync.keys"
+
+	// Identity (user, service, device, group, role)
+	AuditEventTypeUserCreateSSO AuditEventType = "user.create.sso"
+	AuditEventTypeServiceCreate AuditEventType = "service.create"
+	AuditEventTypeServiceRotate AuditEventType = "service.rotate"
+	AuditEventTypeDeviceEnroll  AuditEventType = "device.enroll"
+	AuditEventTypeDeviceRevoke  AuditEventType = "device.revoke"
+	AuditEventTypeGroupCreate   AuditEventType = "group.create"
+	AuditEventTypeGroupUpdate   AuditEventType = "group.update"
+	AuditEventTypeRoleCreate    AuditEventType = "role.create"
+	AuditEventTypeRoleAssign    AuditEventType = "role.assign"
+	AuditEventTypeRoleUnassign  AuditEventType = "role.unassign"
+
+	// Rotation
+	AuditEventTypeRotationPolicySet    AuditEventType = "rotation.policy.set"
+	AuditEventTypeRotationPolicyRemove AuditEventType = "rotation.policy.remove"
 )
 
 // AuditEventResult represents the result of an audited operation.

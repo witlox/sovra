@@ -15,7 +15,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+
 	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/metrics"
 	"github.com/witlox/sovra/pkg/models"
 	"github.com/witlox/sovra/pkg/vault"
 )
@@ -36,11 +39,17 @@ type productionServiceImpl struct {
 	sigVerifier SignatureVerifier
 	mtlsManager *mtlsManager
 	orgID       string
+	metrics     *metrics.FederationMetrics
 
 	// Health monitor
 	healthMu      sync.Mutex
 	healthStop    chan struct{}
 	healthRunning bool
+}
+
+// SetMetrics sets the federation metrics collector.
+func (s *productionServiceImpl) SetMetrics(m *metrics.FederationMetrics) {
+	s.metrics = m
 }
 
 // mtlsManager manages mTLS clients for partner connections.
@@ -233,6 +242,9 @@ func (s *testableService) IsFederationActive(ctx context.Context, partnerOrgID s
 
 // Init initializes federation capability by generating a CSR using Vault PKI.
 func (s *productionServiceImpl) Init(ctx context.Context, req InitRequest) (*InitResponse, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "federation.init")
+	defer span.End()
+
 	// Verify CRK signature (mandatory for federation init)
 	if len(req.CRKSignature) == 0 {
 		return nil, errors.NewValidationError("crk_signature", "CRK signature is required for federation init")
@@ -283,6 +295,10 @@ func (s *productionServiceImpl) Init(ctx context.Context, req InitRequest) (*Ini
 		})
 	}
 
+	if s.metrics != nil {
+		s.metrics.RequestsTotal.WithLabelValues("init", "success").Inc()
+	}
+
 	return &InitResponse{
 		OrgID:       req.OrgID,
 		CSR:         []byte(csrResp.CSR),
@@ -324,6 +340,9 @@ func (s *productionServiceImpl) ImportCertificate(ctx context.Context, partnerOr
 
 // Establish establishes a bilateral federation with a partner organization.
 func (s *productionServiceImpl) Establish(ctx context.Context, req EstablishRequest) (*models.Federation, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "federation.establish")
+	defer span.End()
+
 	// Verify CRK signature (mandatory for federation establishment)
 	if len(req.CRKSignature) == 0 {
 		return nil, errors.NewValidationError("crk_signature", "CRK signature is required for federation establishment")
@@ -397,6 +416,11 @@ func (s *productionServiceImpl) Establish(ctx context.Context, req EstablishRequ
 		})
 	}
 
+	if s.metrics != nil {
+		s.metrics.RequestsTotal.WithLabelValues("establish", "success").Inc()
+		s.metrics.ConnectionsActive.WithLabelValues("active").Inc()
+	}
+
 	return fed, nil
 }
 
@@ -420,6 +444,9 @@ func (s *productionServiceImpl) List(ctx context.Context) ([]*models.Federation,
 
 // Revoke revokes a federation and optionally notifies the partner.
 func (s *productionServiceImpl) Revoke(ctx context.Context, req RevocationRequest) error {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "federation.revoke")
+	defer span.End()
+
 	fed, err := s.repo.GetByPartner(ctx, s.orgID, req.PartnerOrgID)
 	if err != nil {
 		return fmt.Errorf("get federation for revoke: %w", err)
@@ -460,6 +487,11 @@ func (s *productionServiceImpl) Revoke(ctx context.Context, req RevocationReques
 				"revoke_certs":   req.RevokeCerts,
 			},
 		})
+	}
+
+	if s.metrics != nil {
+		s.metrics.RequestsTotal.WithLabelValues("revoke", "success").Inc()
+		s.metrics.ConnectionsActive.WithLabelValues("active").Dec()
 	}
 
 	return nil
@@ -553,6 +585,9 @@ func (s *productionServiceImpl) StopHealthMonitor() {
 
 // RotateCertificate rotates the federation certificate for a partner.
 func (s *productionServiceImpl) RotateCertificate(ctx context.Context, partnerOrgID string, signature []byte) ([]byte, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "federation.rotate_certificate")
+	defer span.End()
+
 	fed, err := s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
 	if err != nil {
 		return nil, fmt.Errorf("get federation: %w", err)
@@ -603,6 +638,10 @@ func (s *productionServiceImpl) RotateCertificate(ctx context.Context, partnerOr
 				"federation_id": fed.ID,
 			},
 		})
+	}
+
+	if s.metrics != nil {
+		s.metrics.RequestsTotal.WithLabelValues("rotate_cert", "success").Inc()
 	}
 
 	return fed.Certificate, nil

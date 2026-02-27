@@ -61,14 +61,14 @@ func TestRotationPolicyLifecycle(t *testing.T) {
 				require.NoError(t, err)
 			}).
 			When("the admin sets a 30-day rotation policy on the high-security workspace", func() {
-				sched.SetPolicy(ws1.ID, &rotation.Policy{
+				sched.SetPolicy(ctx, ws1.ID, &rotation.Policy{
 					WorkspaceID: ws1.ID,
 					MaxAge:      30 * 24 * time.Hour,
 					Enabled:     true,
 				})
 			}).
 			And("a 90-day rotation policy on the public workspace", func() {
-				sched.SetPolicy(ws2.ID, &rotation.Policy{
+				sched.SetPolicy(ctx, ws2.ID, &rotation.Policy{
 					WorkspaceID: ws2.ID,
 					MaxAge:      90 * 24 * time.Hour,
 					Enabled:     true,
@@ -89,7 +89,7 @@ func TestRotationPolicyLifecycle(t *testing.T) {
 				assert.Len(t, policies, 2)
 			}).
 			And("removing a policy should work", func() {
-				sched.RemovePolicy(ws2.ID)
+				sched.RemovePolicy(ctx, ws2.ID)
 				assert.Nil(t, sched.GetPolicy(ws2.ID))
 				policies := sched.ListPolicies()
 				assert.Len(t, policies, 1)
@@ -120,7 +120,7 @@ func TestRotationSchedulerExecution(t *testing.T) {
 				})
 				require.NoError(t, err)
 
-				sched.SetPolicy(ws.ID, &rotation.Policy{
+				sched.SetPolicy(ctx, ws.ID, &rotation.Policy{
 					WorkspaceID: ws.ID,
 					MaxAge:      24 * time.Hour, // Won't trigger since workspace is new
 					Enabled:     true,

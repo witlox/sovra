@@ -286,7 +286,14 @@ func (s *requestService) HandleArchiveNotification(ctx context.Context, payload 
 		return fmt.Errorf("archive workspace: %w", err)
 	}
 
-	s.auditLog(ctx, "", models.AuditEventTypeWorkspaceArchiveRemote, map[string]any{
+	// Retrieve workspace to get the owning org for audit trail
+	ws, _ := s.workspace.Get(ctx, msg.WorkspaceID)
+	auditOrgID := ""
+	if ws != nil {
+		auditOrgID = ws.OwnerOrgID
+	}
+
+	s.auditLog(ctx, auditOrgID, models.AuditEventTypeWorkspaceArchiveRemote, map[string]any{
 		"workspace_id": msg.WorkspaceID,
 	})
 

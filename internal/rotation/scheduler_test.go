@@ -35,7 +35,7 @@ func TestSetAndGetPolicy(t *testing.T) {
 			MaxAge:      24 * time.Hour,
 			Enabled:     true,
 		}
-		sched.SetPolicy("ws-1", policy)
+		sched.SetPolicy(context.Background(), "ws-1", policy)
 
 		got := sched.GetPolicy("ws-1")
 		require.NotNil(t, got)
@@ -50,7 +50,7 @@ func TestSetAndGetPolicy(t *testing.T) {
 			MaxAge:      48 * time.Hour,
 			Enabled:     false,
 		}
-		sched.SetPolicy("ws-1", updated)
+		sched.SetPolicy(context.Background(), "ws-1", updated)
 
 		got := sched.GetPolicy("ws-1")
 		require.NotNil(t, got)
@@ -62,17 +62,17 @@ func TestSetAndGetPolicy(t *testing.T) {
 func TestRemovePolicy(t *testing.T) {
 	sched := rotation.NewScheduler(newTestWorkspaceService(), time.Hour)
 
-	sched.SetPolicy("ws-1", &rotation.Policy{
+	sched.SetPolicy(context.Background(), "ws-1", &rotation.Policy{
 		WorkspaceID: "ws-1",
 		MaxAge:      24 * time.Hour,
 		Enabled:     true,
 	})
 
-	sched.RemovePolicy("ws-1")
+	sched.RemovePolicy(context.Background(), "ws-1")
 	assert.Nil(t, sched.GetPolicy("ws-1"))
 
 	// Removing non-existent is a no-op
-	sched.RemovePolicy("ws-nonexistent")
+	sched.RemovePolicy(context.Background(), "ws-nonexistent")
 }
 
 func TestListPolicies(t *testing.T) {
@@ -84,8 +84,8 @@ func TestListPolicies(t *testing.T) {
 	})
 
 	t.Run("returns all policies", func(t *testing.T) {
-		sched.SetPolicy("ws-1", &rotation.Policy{WorkspaceID: "ws-1", MaxAge: time.Hour, Enabled: true})
-		sched.SetPolicy("ws-2", &rotation.Policy{WorkspaceID: "ws-2", MaxAge: 2 * time.Hour, Enabled: false})
+		sched.SetPolicy(context.Background(), "ws-1", &rotation.Policy{WorkspaceID: "ws-1", MaxAge: time.Hour, Enabled: true})
+		sched.SetPolicy(context.Background(), "ws-2", &rotation.Policy{WorkspaceID: "ws-2", MaxAge: 2 * time.Hour, Enabled: false})
 
 		policies := sched.ListPolicies()
 		assert.Len(t, policies, 2)
@@ -116,7 +116,7 @@ func TestStartAndStop(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sched.SetPolicy(ws.ID, &rotation.Policy{
+	sched.SetPolicy(ctx, ws.ID, &rotation.Policy{
 		WorkspaceID: ws.ID,
 		MaxAge:      24 * time.Hour,
 		Enabled:     true,

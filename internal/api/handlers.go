@@ -627,6 +627,23 @@ func (h *WorkspaceAdmissionHandler) Grant(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Audit log
+	if h.audit != nil {
+		_ = h.audit.Log(r.Context(), &models.AuditEvent{
+			ID:        fmt.Sprintf("audit-%s", admission.ID),
+			Timestamp: time.Now(),
+			OrgID:     req.OrgID,
+			Workspace: wsID,
+			EventType: models.AuditEventTypeAdmissionGrant,
+			Actor:     admission.GrantedBy,
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"identity_id":   req.IdentityID,
+				"identity_type": string(req.IdentityType),
+			},
+		})
+	}
+
 	writeJSON(w, http.StatusCreated, admission)
 }
 
@@ -686,6 +703,21 @@ func (h *WorkspaceAdmissionHandler) Revoke(w http.ResponseWriter, r *http.Reques
 	if err := h.admissions.Revoke(r.Context(), wsID, identityID, revokedBy); err != nil {
 		handleError(w, err)
 		return
+	}
+
+	// Audit log
+	if h.audit != nil {
+		_ = h.audit.Log(r.Context(), &models.AuditEvent{
+			ID:        fmt.Sprintf("audit-revoke-%s-%s", wsID[:8], identityID[:8]),
+			Timestamp: time.Now(),
+			Workspace: wsID,
+			EventType: models.AuditEventTypeAdmissionRevoke,
+			Actor:     revokedBy,
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"identity_id": identityID,
+			},
+		})
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -3703,7 +3735,7 @@ func (h *RotationPolicyHandler) Set(w http.ResponseWriter, r *http.Request) {
 		Enabled:     req.Enabled,
 	}
 
-	h.sched.SetPolicy(id, policy)
+	h.sched.SetPolicy(r.Context(), id, policy)
 	writeJSON(w, http.StatusOK, policy)
 }
 
@@ -3732,7 +3764,7 @@ func (h *RotationPolicyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.sched.RemovePolicy(id)
+	h.sched.RemovePolicy(r.Context(), id)
 	w.WriteHeader(http.StatusNoContent)
 }
 

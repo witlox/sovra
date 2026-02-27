@@ -23,6 +23,7 @@ import (
 	"github.com/witlox/sovra/internal/workspace"
 	"github.com/witlox/sovra/pkg/metrics"
 	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/telemetry"
 	"github.com/witlox/sovra/pkg/vault"
 )
 
@@ -37,6 +38,8 @@ type RouterConfig struct {
 	HealthCheckers        map[string]func() error
 	SSOIssuerURL          string
 	SSOClientID           string
+	ServiceMetrics        *metrics.ServiceMetrics
+	ServiceName           string // for telemetry tracer
 }
 
 // DefaultRouterConfig returns a default router configuration.
@@ -88,6 +91,15 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	r.Use(RecoveryMiddleware(config.Logger))
 	r.Use(LoggingMiddleware(config.Logger))
 	r.Use(middleware.RealIP)
+
+	// Telemetry and metrics middleware
+	if config.ServiceName != "" {
+		r.Use(telemetry.Middleware(config.ServiceName, metrics.SanitizePath))
+	}
+	if config.ServiceMetrics != nil {
+		r.Use(metrics.Middleware(config.ServiceMetrics))
+	}
+
 	r.Use(ContentTypeMiddleware)
 
 	// Add enrollment/bootstrap/sso-config paths to skip list for auth/mTLS
@@ -247,7 +259,7 @@ func registerWorkspaceRoutes(r chi.Router, services *Services) {
 
 		// Workspace admission management
 		if services.AdmissionRepo != nil {
-			admHandler := NewWorkspaceAdmissionHandler(services.AdmissionRepo, nil)
+			admHandler := NewWorkspaceAdmissionHandler(services.AdmissionRepo, services.Audit)
 			r.Post("/{id}/admissions", admHandler.Grant)
 			r.Get("/{id}/admissions", admHandler.List)
 			r.Get("/{id}/admissions/{identityId}", admHandler.GetStatus)

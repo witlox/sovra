@@ -98,8 +98,13 @@ scrape_configs:
 
 ### Control Plane Metrics
 
+The API gateway exposes HTTP-level and domain-level metrics. HTTP middleware
+automatically records request counts, latency, and active connections. Domain
+metric collectors are wired into each service and record operation-level
+counters.
+
 ```
-# API Gateway (subsystem = serviceName, e.g. "api_gateway")
+# API Gateway HTTP (subsystem = serviceName, e.g. "api_gateway")
 sovra_api_gateway_http_requests_total{method,path,status}
 sovra_api_gateway_http_request_duration_seconds{method,path}
 sovra_api_gateway_http_active_requests
@@ -107,13 +112,13 @@ sovra_api_gateway_errors_total{type}
 sovra_api_gateway_auth_attempts_total{method,result}
 
 # Policy Engine
-sovra_policy_evaluations_total{result}
-sovra_policy_evaluation_duration_seconds
+sovra_policy_evaluations_total{result}          # allow/deny per evaluation
+sovra_policy_evaluation_duration_seconds         # evaluation latency histogram
 sovra_policy_cache_hits_total
 sovra_policy_cache_misses_total
 
-# Key Lifecycle
-sovra_keys_operations_total{operation,result}
+# Key Lifecycle (workspace operations)
+sovra_keys_operations_total{operation,result}    # create/encrypt/decrypt/rotate
 sovra_keys_operation_duration_seconds{operation}
 sovra_keys_active_total{type}
 sovra_keys_rotation_age_seconds{workspace_hash}
@@ -126,7 +131,7 @@ sovra_audit_queue_depth
 
 # Federation
 sovra_federation_connections_active{status}
-sovra_federation_requests_total{operation,result}
+sovra_federation_requests_total{operation,result}  # init/establish/revoke/rotate
 sovra_federation_sync_duration_seconds
 sovra_federation_errors_total{type}
 ```
@@ -141,12 +146,12 @@ vault_runtime_num_goroutines
 vault_core_leadership_setup_failed
 vault_core_leadership_lost
 
-# Edge Agent
+# Edge Agent (domain metrics from edge service)
 sovra_edge_heartbeat_age_seconds{node_id}
 sovra_edge_cert_expiry_seconds{node_id}
 sovra_edge_sync_duration_seconds{sync_type}
-sovra_edge_nodes_total{status}
-sovra_edge_operations_total{operation,result}
+sovra_edge_nodes_total{status}                   # register/unregister
+sovra_edge_operations_total{operation,result}     # register/unregister/sync_policies/sync_keys
 ```
 
 ## Grafana Dashboards

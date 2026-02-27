@@ -30,6 +30,7 @@ import (
 	"github.com/witlox/sovra/internal/reconciliation"
 	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
+	"github.com/witlox/sovra/pkg/metrics"
 	"github.com/witlox/sovra/pkg/models"
 	"github.com/witlox/sovra/pkg/postgres"
 	"github.com/witlox/sovra/pkg/telemetry"
@@ -300,9 +301,13 @@ func main() {
 		AdmissionRepo:         admissionRepo,
 	}
 
+	svcMetrics := metrics.NewServiceMetrics("api_gateway", version)
+
 	routerCfg := api.DefaultRouterConfig()
 	routerCfg.Logger = logger
 	routerCfg.AdminIdentityResolver = &adminResolverAdapter{mgr: identityMgr}
+	routerCfg.ServiceMetrics = svcMetrics
+	routerCfg.ServiceName = cfg.Telemetry.ServiceName
 
 	// Register health checkers for critical dependencies
 	routerCfg.HealthCheckers["database"] = func() error {

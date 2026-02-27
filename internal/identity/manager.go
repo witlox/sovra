@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pquerna/otp/totp"
+	"go.opentelemetry.io/otel"
+
 	"github.com/witlox/sovra/internal/identity/idp"
 	"github.com/witlox/sovra/pkg/errors"
 	"github.com/witlox/sovra/pkg/models"
@@ -244,6 +246,9 @@ func truncate(s string, maxLen int) string {
 // opts optionally binds SSO provider/subject to the admin.
 // Returns the admin identity and an enrollment token.
 func (m *Manager) CreateAdmin(ctx context.Context, orgID, callerAdminID, email, name string, role models.AdminRole, crkSignature []byte, opts *CreateAdminOptions) (*models.AdminIdentity, string, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "identity.create_admin")
+	defer span.End()
+
 	if email == "" || name == "" {
 		return nil, "", errors.ErrInvalidInput
 	}
@@ -337,6 +342,9 @@ func (m *Manager) CreateAdmin(ctx context.Context, orgID, callerAdminID, email, 
 
 // BootstrapAdmin creates the first admin for an org (when no admins exist).
 func (m *Manager) BootstrapAdmin(ctx context.Context, orgID, email, name string, role models.AdminRole, crkSignature []byte) (*models.AdminIdentity, string, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "identity.bootstrap_admin")
+	defer span.End()
+
 	if email == "" || name == "" {
 		return nil, "", errors.ErrInvalidInput
 	}
@@ -456,6 +464,9 @@ func (m *Manager) GetEnrollmentSetup(ctx context.Context, adminID, token string)
 
 // EnrollAdmin completes admin enrollment with TOTP verification and certificate issuance.
 func (m *Manager) EnrollAdmin(ctx context.Context, adminID, enrollmentToken, totpCode string) (*models.AdminIdentity, *PKICertResult, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "identity.enroll_admin")
+	defer span.End()
+
 	if !m.tokenGen.Validate(enrollmentToken) {
 		m.auditLog(ctx, "", "admin.enrollment.complete", "denied", map[string]any{
 			"admin_id": adminID,
@@ -773,6 +784,11 @@ func (m *Manager) CreateUserFromSSO(ctx context.Context, orgID string, provider 
 		return nil, fmt.Errorf("create user from SSO: %w", err)
 	}
 
+	m.auditLog(ctx, orgID, string(models.AuditEventTypeUserCreateSSO), "success", map[string]any{
+		"user_id":  user.ID,
+		"provider": string(provider),
+	})
+
 	return user, nil
 }
 
@@ -798,6 +814,11 @@ func (m *Manager) CreateService(ctx context.Context, orgID, name, description st
 		return nil, fmt.Errorf("create service: %w", err)
 	}
 
+	m.auditLog(ctx, orgID, string(models.AuditEventTypeServiceCreate), "success", map[string]any{
+		"service_id": service.ID,
+		"name":       name,
+	})
+
 	return service, nil
 }
 
@@ -822,6 +843,11 @@ func (m *Manager) EnrollDevice(ctx context.Context, orgID, deviceName, deviceTyp
 		return nil, fmt.Errorf("enroll device: %w", err)
 	}
 
+	m.auditLog(ctx, orgID, string(models.AuditEventTypeDeviceEnroll), "success", map[string]any{
+		"device_id":   device.ID,
+		"device_name": deviceName,
+	})
+
 	return device, nil
 }
 
@@ -836,6 +862,11 @@ func (m *Manager) RevokeDevice(ctx context.Context, deviceID string) error {
 	if err := m.devices.Update(ctx, device); err != nil {
 		return fmt.Errorf("update device: %w", err)
 	}
+
+	m.auditLog(ctx, device.OrgID, string(models.AuditEventTypeDeviceRevoke), "success", map[string]any{
+		"device_id": deviceID,
+	})
+
 	return nil
 }
 
@@ -859,6 +890,11 @@ func (m *Manager) CreateGroup(ctx context.Context, orgID, name, description stri
 	if err := m.groups.Create(ctx, group); err != nil {
 		return nil, fmt.Errorf("create group: %w", err)
 	}
+
+	m.auditLog(ctx, orgID, string(models.AuditEventTypeGroupCreate), "success", map[string]any{
+		"group_id": group.ID,
+		"name":     name,
+	})
 
 	return group, nil
 }
@@ -888,6 +924,10 @@ func (m *Manager) UpdateGroup(ctx context.Context, groupID, name, description st
 		return nil, fmt.Errorf("update group: %w", err)
 	}
 
+	m.auditLog(ctx, group.OrgID, string(models.AuditEventTypeGroupUpdate), "success", map[string]any{
+		"group_id": groupID,
+	})
+
 	return group, nil
 }
 
@@ -904,6 +944,12 @@ func (m *Manager) AddToGroup(ctx context.Context, groupID, identityID string, id
 	if err := m.groups.AddMember(ctx, membership); err != nil {
 		return fmt.Errorf("add member to group: %w", err)
 	}
+
+	m.auditLog(ctx, "", string(models.AuditEventTypeGroupMemberAdd), "success", map[string]any{
+		"group_id":    groupID,
+		"identity_id": identityID,
+	})
+
 	return nil
 }
 
@@ -912,6 +958,12 @@ func (m *Manager) RemoveFromGroup(ctx context.Context, groupID, identityID strin
 	if err := m.groups.RemoveMember(ctx, groupID, identityID); err != nil {
 		return fmt.Errorf("remove member from group: %w", err)
 	}
+
+	m.auditLog(ctx, "", string(models.AuditEventTypeGroupMemberRemove), "success", map[string]any{
+		"group_id":    groupID,
+		"identity_id": identityID,
+	})
+
 	return nil
 }
 
@@ -935,6 +987,11 @@ func (m *Manager) CreateRole(ctx context.Context, orgID, name, description strin
 		return nil, fmt.Errorf("create role: %w", err)
 	}
 
+	m.auditLog(ctx, orgID, string(models.AuditEventTypeRoleCreate), "success", map[string]any{
+		"role_id": role.ID,
+		"name":    name,
+	})
+
 	return role, nil
 }
 
@@ -952,6 +1009,12 @@ func (m *Manager) AssignRole(ctx context.Context, roleID, identityID string, ide
 	if err := m.roles.Assign(ctx, assignment); err != nil {
 		return fmt.Errorf("assign role: %w", err)
 	}
+
+	m.auditLog(ctx, "", string(models.AuditEventTypeRoleAssign), "success", map[string]any{
+		"role_id":     roleID,
+		"identity_id": identityID,
+	})
+
 	return nil
 }
 
@@ -960,6 +1023,12 @@ func (m *Manager) UnassignRole(ctx context.Context, roleID, identityID string) e
 	if err := m.roles.Unassign(ctx, roleID, identityID); err != nil {
 		return fmt.Errorf("unassign role: %w", err)
 	}
+
+	m.auditLog(ctx, "", string(models.AuditEventTypeRoleUnassign), "success", map[string]any{
+		"role_id":     roleID,
+		"identity_id": identityID,
+	})
+
 	return nil
 }
 
@@ -1215,6 +1284,10 @@ func (m *Manager) RotateServiceCredentials(ctx context.Context, id string) (*mod
 	if err := m.services.Update(ctx, svc); err != nil {
 		return nil, fmt.Errorf("update service credentials: %w", err)
 	}
+
+	m.auditLog(ctx, svc.OrgID, string(models.AuditEventTypeServiceRotate), "success", map[string]any{
+		"service_id": id,
+	})
 
 	return svc, nil
 }

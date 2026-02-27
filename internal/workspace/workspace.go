@@ -14,9 +14,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+
 	"github.com/witlox/sovra/internal/auth/jwt"
 	"github.com/witlox/sovra/pkg/errors"
+	"github.com/witlox/sovra/pkg/metrics"
 	"github.com/witlox/sovra/pkg/models"
+	"github.com/witlox/sovra/pkg/telemetry"
 	"github.com/witlox/sovra/pkg/vault"
 )
 
@@ -59,6 +63,7 @@ type productionService struct {
 	invitations InvitationRepository
 	federation  FederationRelay
 	admission   *AdmissionChecker
+	metrics     *metrics.KeyLifecycleMetrics
 }
 
 // FederationRelay allows the workspace service to relay messages to federated partners.
@@ -75,6 +80,11 @@ func (s *productionService) SetFederation(fed FederationRelay) {
 // When nil, checkAccess falls through to org-level only (backward compatible).
 func (s *productionService) SetAdmissionChecker(ac *AdmissionChecker) {
 	s.admission = ac
+}
+
+// SetMetrics sets the key lifecycle metrics collector.
+func (s *productionService) SetMetrics(m *metrics.KeyLifecycleMetrics) {
+	s.metrics = m
 }
 
 // checkAccess performs three-stage authorization:
@@ -130,6 +140,9 @@ func (s *productionService) requireCRK(ctx context.Context, ws *models.Workspace
 }
 
 func (s *productionService) Create(ctx context.Context, req CreateRequest) (*models.Workspace, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "workspace.create")
+	defer span.End()
+
 	if len(req.Participants) == 0 {
 		return nil, errors.NewValidationError("participants", "at least one participant required")
 	}
@@ -207,6 +220,12 @@ func (s *productionService) Create(ctx context.Context, req CreateRequest) (*mod
 		}
 	}
 
+	if s.metrics != nil {
+		s.metrics.OperationsTotal.WithLabelValues("create", "success").Inc()
+	}
+
+	span.SetAttributes(telemetry.NewSafeAttributes().Operation("create").Result("success").Build()...)
+
 	return ws, nil
 }
 
@@ -266,7 +285,7 @@ func (s *productionService) Update(ctx context.Context, id string, req UpdateReq
 			Timestamp: time.Now(),
 			OrgID:     ws.OwnerOrgID,
 			Workspace: ws.ID,
-			EventType: "workspace.update",
+			EventType: models.AuditEventTypeWorkspaceUpdate,
 			Actor:     ws.OwnerOrgID,
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
@@ -408,6 +427,9 @@ func (s *productionService) RemoveParticipant(ctx context.Context, workspaceID, 
 }
 
 func (s *productionService) Archive(ctx context.Context, workspaceID string, signature []byte) error {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "workspace.archive")
+	defer span.End()
+
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get workspace: %w", err)
@@ -424,6 +446,20 @@ func (s *productionService) Archive(ctx context.Context, workspaceID string, sig
 
 	if err := s.repo.Update(ctx, ws); err != nil {
 		return fmt.Errorf("failed to update workspace: %w", err)
+	}
+
+	// Audit log
+	if s.audit != nil {
+		callerOrg, _ := isParticipant(ctx, ws)
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     ws.OwnerOrgID,
+			Workspace: ws.ID,
+			EventType: models.AuditEventTypeWorkspaceArchive,
+			Actor:     callerOrg,
+			Result:    models.AuditEventResultSuccess,
+		})
 	}
 
 	// For bilateral workspaces, relay archive notification to partner
@@ -449,6 +485,9 @@ func (s *productionService) Archive(ctx context.Context, workspaceID string, sig
 }
 
 func (s *productionService) Delete(ctx context.Context, workspaceID string, signatures map[string][]byte) error {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "workspace.delete")
+	defer span.End()
+
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get workspace: %w", err)
@@ -480,6 +519,28 @@ func (s *productionService) Delete(ctx context.Context, workspaceID string, sign
 	if err := s.repo.Delete(ctx, workspaceID); err != nil {
 		return fmt.Errorf("failed to delete workspace: %w", err)
 	}
+
+	// Audit log
+	if s.audit != nil {
+		claims, _ := jwt.ClaimsFromContext(ctx)
+		actor := ""
+		if claims != nil {
+			actor = claims.Organization
+		}
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     ws.OwnerOrgID,
+			Workspace: workspaceID,
+			EventType: models.AuditEventTypeWorkspaceDelete,
+			Actor:     actor,
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"crk_protected": ws.CRKProtected,
+			},
+		})
+	}
+
 	return nil
 }
 
@@ -518,6 +579,9 @@ func isParticipant(ctx context.Context, ws *models.Workspace) (string, error) {
 }
 
 func (s *productionService) Encrypt(ctx context.Context, workspaceID string, plaintext []byte) ([]byte, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "workspace.encrypt")
+	defer span.End()
+
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace: %w", err)
@@ -577,7 +641,7 @@ func (s *productionService) Encrypt(ctx context.Context, workspaceID string, pla
 			OrgID:     ws.OwnerOrgID,
 			Workspace: ws.ID,
 			EventType: models.AuditEventTypeEncrypt,
-			Actor:     orgID,
+			Actor:     callerOrg,
 			Result:    models.AuditEventResultSuccess,
 			DataHash:  base64.StdEncoding.EncodeToString(dataHash[:]),
 			Metadata: map[string]any{
@@ -587,10 +651,19 @@ func (s *productionService) Encrypt(ctx context.Context, workspaceID string, pla
 		_ = s.audit.Log(ctx, auditEvent)
 	}
 
+	if s.metrics != nil {
+		s.metrics.OperationsTotal.WithLabelValues("encrypt", "success").Inc()
+	}
+
+	span.SetAttributes(telemetry.NewSafeAttributes().Operation("encrypt").Result("success").Build()...)
+
 	return ciphertext, nil
 }
 
 func (s *productionService) Decrypt(ctx context.Context, workspaceID string, ciphertext []byte) ([]byte, error) {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "workspace.decrypt")
+	defer span.End()
+
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace: %w", err)
@@ -646,7 +719,7 @@ func (s *productionService) Decrypt(ctx context.Context, workspaceID string, cip
 			OrgID:     ws.OwnerOrgID,
 			Workspace: ws.ID,
 			EventType: models.AuditEventTypeDecrypt,
-			Actor:     orgID,
+			Actor:     callerOrg,
 			Result:    models.AuditEventResultSuccess,
 			DataHash:  base64.StdEncoding.EncodeToString(dataHash[:]),
 			Metadata: map[string]any{
@@ -656,11 +729,20 @@ func (s *productionService) Decrypt(ctx context.Context, workspaceID string, cip
 		_ = s.audit.Log(ctx, auditEvent)
 	}
 
+	if s.metrics != nil {
+		s.metrics.OperationsTotal.WithLabelValues("decrypt", "success").Inc()
+	}
+
+	span.SetAttributes(telemetry.NewSafeAttributes().Operation("decrypt").Result("success").Build()...)
+
 	return plaintext, nil
 }
 
 // RotateDEK generates a new DEK and re-wraps it for all participants.
 func (s *productionService) RotateDEK(ctx context.Context, workspaceID string, signature []byte) error {
+	ctx, span := otel.Tracer("sovra").Start(ctx, "workspace.rotate_dek")
+	defer span.End()
+
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get workspace: %w", err)
@@ -719,6 +801,10 @@ func (s *productionService) RotateDEK(ctx context.Context, workspaceID string, s
 			},
 		}
 		_ = s.audit.Log(ctx, auditEvent)
+	}
+
+	if s.metrics != nil {
+		s.metrics.OperationsTotal.WithLabelValues("rotate", "success").Inc()
 	}
 
 	return nil
@@ -803,6 +889,22 @@ func (s *productionService) ExportWorkspace(ctx context.Context, workspaceID str
 		Checksum:   base64.StdEncoding.EncodeToString(checksum[:]),
 	}
 
+	// Audit log
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     ws.OwnerOrgID,
+			Workspace: ws.ID,
+			EventType: models.AuditEventTypeWorkspaceExport,
+			Actor:     callerOrg,
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"checksum": bundle.Checksum,
+			},
+		})
+	}
+
 	return bundle, nil
 }
 
@@ -844,6 +946,20 @@ func (s *productionService) ImportWorkspace(ctx context.Context, bundle *Workspa
 		return nil, fmt.Errorf("create workspace: %w", err)
 	}
 
+	// Audit log
+	if s.audit != nil {
+		callerOrg, _ := isParticipant(ctx, ws)
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     ws.OwnerOrgID,
+			Workspace: ws.ID,
+			EventType: models.AuditEventTypeWorkspaceImport,
+			Actor:     callerOrg,
+			Result:    models.AuditEventResultSuccess,
+		})
+	}
+
 	return ws, nil
 }
 
@@ -854,7 +970,8 @@ func (s *productionService) ExtendExpiration(ctx context.Context, workspaceID st
 		return fmt.Errorf("get workspace: %w", err)
 	}
 
-	if _, err := isParticipant(ctx, ws); err != nil {
+	callerOrg, err := isParticipant(ctx, ws)
+	if err != nil {
 		return err
 	}
 
@@ -869,6 +986,23 @@ func (s *productionService) ExtendExpiration(ctx context.Context, workspaceID st
 	if err := s.repo.Update(ctx, ws); err != nil {
 		return fmt.Errorf("update workspace expiration: %w", err)
 	}
+
+	// Audit log
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     ws.OwnerOrgID,
+			Workspace: ws.ID,
+			EventType: models.AuditEventTypeWorkspaceExtend,
+			Actor:     callerOrg,
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"new_expiry": newExpiry.Format(time.RFC3339),
+			},
+		})
+	}
+
 	return nil
 }
 
@@ -905,6 +1039,23 @@ func (s *productionService) InviteParticipant(ctx context.Context, workspaceID, 
 	if err := s.invitations.Create(ctx, invitation); err != nil {
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
+
+	// Audit log
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     ws.OwnerOrgID,
+			Workspace: workspaceID,
+			EventType: models.AuditEventTypeWorkspaceInvite,
+			Actor:     callerOrg,
+			Result:    models.AuditEventResultSuccess,
+			Metadata: map[string]any{
+				"invited_org": orgID,
+			},
+		})
+	}
+
 	return invitation, nil
 }
 
@@ -962,6 +1113,20 @@ func (s *productionService) AcceptInvitation(ctx context.Context, workspaceID, o
 	if err := s.invitations.Update(ctx, invitation); err != nil {
 		return fmt.Errorf("update invitation: %w", err)
 	}
+
+	// Audit log
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     ws.OwnerOrgID,
+			Workspace: workspaceID,
+			EventType: models.AuditEventTypeWorkspaceAcceptInv,
+			Actor:     orgID,
+			Result:    models.AuditEventResultSuccess,
+		})
+	}
+
 	return nil
 }
 
@@ -978,6 +1143,25 @@ func (s *productionService) DeclineInvitation(ctx context.Context, workspaceID, 
 	if err := s.invitations.Update(ctx, invitation); err != nil {
 		return fmt.Errorf("update invitation: %w", err)
 	}
+
+	// Audit log
+	if s.audit != nil {
+		ws, wsErr := s.repo.Get(ctx, workspaceID)
+		auditOrgID := ""
+		if wsErr == nil {
+			auditOrgID = ws.OwnerOrgID
+		}
+		_ = s.audit.Log(ctx, &models.AuditEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			OrgID:     auditOrgID,
+			Workspace: workspaceID,
+			EventType: models.AuditEventTypeWorkspaceDeclineInv,
+			Actor:     orgID,
+			Result:    models.AuditEventResultSuccess,
+		})
+	}
+
 	return nil
 }
 
