@@ -33,10 +33,17 @@ jobs:
       - name: Run govulncheck
         id: vulncheck
         run: |
-          if govulncheck ./... 2>&1; then
+          if govulncheck -json ./... > /tmp/vulncheck.json 2>&1; then
             echo "vulnerable=false" >> "$GITHUB_OUTPUT"
           else
             echo "vulnerable=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Detect stdlib vulns (Fixed in stdlib versions newer than current)
+          if grep -q '"stdlib"' /tmp/vulncheck.json 2>/dev/null; then
+            echo "has_stdlib_vulns=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_stdlib_vulns=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Update vulnerable dependencies
@@ -44,6 +51,33 @@ jobs:
         run: |
           go get -u ./...
           go mod tidy
+
+      - name: Bump Go toolchain for stdlib fixes
+        if: steps.vulncheck.outputs.has_stdlib_vulns == 'true'
+        run: |
+          # Get the latest patch version for our Go minor release
+          CURRENT=$(grep '^go ' go.mod | awk '{print $2}')
+          MINOR=$(echo "$CURRENT" | grep -oE '^[0-9]+\.[0-9]+')
+
+          # Query available Go versions and find the latest patch
+          LATEST=$(curl -sL 'https://go.dev/dl/?mode=json' \
+            | grep -oE "go${MINOR}\.[0-9]+" \
+            | sort -t. -k3 -n \
+            | tail -1 \
+            | sed 's/^go//')
+
+          if [ -z "$LATEST" ]; then
+            echo "Could not determine latest Go ${MINOR}.x version, skipping toolchain bump"
+            exit 0
+          fi
+
+          if [ "$CURRENT" != "$LATEST" ]; then
+            echo "Bumping Go directive: $CURRENT -> $LATEST"
+            sed -i "s/^go ${CURRENT}$/go ${LATEST}/" go.mod
+            go mod tidy
+          else
+            echo "Already on latest Go ${MINOR}.x ($CURRENT)"
+          fi
 
       - name: Check for changes
         if: steps.vulncheck.outputs.vulnerable == 'true'
@@ -60,7 +94,22 @@ jobs:
         run: |
           go build ./...
           go test -short ./...
-          govulncheck ./...
+
+          # Re-run govulncheck; allow exit code 3 (vulns found) only if
+          # remaining vulns are exclusively in stdlib with no available fix
+          # for the current Go minor series.
+          if govulncheck ./... 2>&1; then
+            echo "All vulnerabilities resolved."
+          else
+            # Check if only stdlib vulns remain (no fix available in our minor series)
+            REMAINING=$(govulncheck -json ./... 2>&1 || true)
+            NON_STDLIB=$(echo "$REMAINING" | grep -c '"module"' || true)
+            if [ "$NON_STDLIB" -gt 0 ]; then
+              echo "::error::Third-party dependency vulnerabilities remain after update"
+              exit 1
+            fi
+            echo "::warning::Only stdlib vulnerabilities remain — requires a new Go minor release to fix"
+          fi
 
       - name: Create PR
         if: steps.vulncheck.outputs.vulnerable == 'true' && steps.changes.outputs.changed == 'true'
@@ -87,7 +136,8 @@ jobs:
             --body "$(cat <<'EOF'
           ## Summary
           - Vulnerabilities detected by `govulncheck`
-          - Dependencies updated and verified (build + test + govulncheck pass)
+          - Dependencies updated and verified (build + test pass)
+          - Go toolchain bumped to latest patch if stdlib vulns detected
 
           Automated PR created by the Vulnerability Fix workflow.
           EOF
