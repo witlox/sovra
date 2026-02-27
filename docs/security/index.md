@@ -13,6 +13,7 @@ Sovra is designed with security as a first principle. This guide covers authenti
 
 ## Topics
 
+- **[Threat Model](threat-model)** - STRIDE analysis and trust boundaries
 - **[Authentication](authentication)** - mTLS, JWT, OIDC integration
 - **[Authorization](authorization)** - OPA-based policy enforcement
 - **[Best Practices](best-practices)** - Security hardening and recommendations

@@ -101,6 +101,7 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	}
 
 	r.Use(ContentTypeMiddleware)
+	r.Use(SecurityHeadersMiddleware)
 
 	// Add enrollment/bootstrap/sso-config paths to skip list for auth/mTLS
 	config.MiddlewareConfig.SkipPaths = append(config.MiddlewareConfig.SkipPaths,
@@ -119,9 +120,13 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	if config.Authenticator != nil {
 		r.Use(AuthMiddleware(config.Authenticator, config.MiddlewareConfig))
 	}
+	r.Use(CSRFMiddleware(config.MiddlewareConfig))
 	if config.RateLimiter != nil {
 		r.Use(RateLimitMiddleware(config.RateLimiter, config.MiddlewareConfig))
 	}
+	// Stricter rate limit for sensitive endpoints (10 req/min vs 100 req/min global)
+	sensitiveRateLimiter := NewInMemoryRateLimiter(10, 60)
+	r.Use(SensitiveEndpointRateLimitMiddleware(sensitiveRateLimiter))
 
 	// Register routes
 	registerHealthRoutes(r, config.HealthCheckers)

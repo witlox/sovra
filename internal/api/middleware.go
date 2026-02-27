@@ -303,6 +303,56 @@ func ContentTypeMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// SecurityHeadersMiddleware sets security headers on all responses.
+func SecurityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// CSRFMiddleware protects state-changing requests from CSRF attacks.
+// Requires a custom header (X-Requested-With) on all non-safe methods.
+// Requests authenticated via mTLS client certificates are exempt since
+// browsers cannot present client certs without user interaction.
+func CSRFMiddleware(config *MiddlewareConfig) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip for safe methods
+			if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Skip for paths that don't need CSRF (health, enrollment)
+			for _, path := range config.SkipPaths {
+				if strings.HasPrefix(r.URL.Path, path) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			// Skip if mTLS authenticated (browser CSRF not applicable)
+			if r.Context().Value(ContextKeyCert) != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Require custom header to prevent CSRF from browsers.
+			// API clients must send X-Requested-With: sovra
+			if r.Header.Get("X-Requested-With") == "" {
+				writeJSONError(w, http.StatusForbidden, "CSRF_PROTECTION", "X-Requested-With header required for non-mTLS requests")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // writeJSONError writes a JSON error response.
 func writeJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -403,6 +453,52 @@ func (r *InMemoryRateLimiter) GetRemaining(ctx context.Context, key string) (int
 	return r.limit - b.count, nil
 }
 
+// SensitiveEndpointRateLimitMiddleware applies stricter rate limits on sensitive endpoints.
+// These endpoints are more expensive or security-critical and need tighter controls.
+func SensitiveEndpointRateLimitMiddleware(limiter RateLimiter) func(http.Handler) http.Handler {
+	sensitivePrefixes := []string{
+		"/api/v1/crk/",
+		"/api/v1/enrollment/",
+		"/api/v1/bootstrap/",
+		"/api/v1/emergency-access/",
+		"/api/v1/account-recovery/",
+		"/api/v1/backups/",
+		"/api/v1/identities/admins",
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			isSensitive := false
+			for _, prefix := range sensitivePrefixes {
+				if strings.HasPrefix(r.URL.Path, prefix) {
+					isSensitive = true
+					break
+				}
+			}
+
+			if isSensitive && r.Method != http.MethodGet {
+				key := "sensitive:" + r.RemoteAddr
+				if userID, ok := r.Context().Value(ContextKeyUserID).(string); ok && userID != "" {
+					key = "sensitive:" + userID
+				}
+
+				allowed, err := limiter.Allow(r.Context(), key)
+				if err != nil {
+					writeJSONError(w, http.StatusInternalServerError, "RATE_LIMIT_ERROR", "rate limit check failed")
+					return
+				}
+				if !allowed {
+					w.Header().Set("Retry-After", "60")
+					writeJSONError(w, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded for sensitive operation")
+					return
+				}
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // DefaultMTLSVerifier is a stub mTLS verifier that denies all requests.
 // Only use this for development with SOVRA_DEV_MODE=true.
 type DefaultMTLSVerifier struct {
@@ -411,9 +507,13 @@ type DefaultMTLSVerifier struct {
 
 // NewDefaultMTLSVerifier creates a new default mTLS verifier.
 // It checks SOVRA_DEV_MODE to determine behavior.
+// Panics if dev mode is requested while SOVRA_ENV=production.
 func NewDefaultMTLSVerifier() *DefaultMTLSVerifier {
 	devMode := os.Getenv("SOVRA_DEV_MODE") == "true"
 	if devMode {
+		if os.Getenv("SOVRA_ENV") == "production" {
+			panic("FATAL: SOVRA_DEV_MODE=true is not allowed when SOVRA_ENV=production")
+		}
 		slog.WarnContext(context.Background(), "SECURITY WARNING: Using development mTLS verifier that allows all requests")
 	}
 	return &DefaultMTLSVerifier{devMode: devMode}
@@ -451,9 +551,13 @@ type DefaultAuthenticator struct {
 
 // NewDefaultAuthenticator creates a new default authenticator.
 // It checks SOVRA_DEV_MODE to determine behavior.
+// Panics if dev mode is requested while SOVRA_ENV=production.
 func NewDefaultAuthenticator() *DefaultAuthenticator {
 	devMode := os.Getenv("SOVRA_DEV_MODE") == "true"
 	if devMode {
+		if os.Getenv("SOVRA_ENV") == "production" {
+			panic("FATAL: SOVRA_DEV_MODE=true is not allowed when SOVRA_ENV=production")
+		}
 		slog.WarnContext(context.Background(), "SECURITY WARNING: Using development authenticator that allows all requests")
 	}
 	return &DefaultAuthenticator{devMode: devMode}

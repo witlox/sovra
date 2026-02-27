@@ -773,7 +773,12 @@ func (m *mtlsManager) request(ctx context.Context, partnerOrgID, method, path st
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("partner returned status %d: %s", resp.StatusCode, string(respBody))
+		// Truncate partner response to avoid leaking internal state in error messages
+		sanitized := string(respBody)
+		if len(sanitized) > 256 {
+			sanitized = sanitized[:256] + "...(truncated)"
+		}
+		return nil, fmt.Errorf("partner returned status %d: %s", resp.StatusCode, sanitized)
 	}
 
 	return respBody, nil

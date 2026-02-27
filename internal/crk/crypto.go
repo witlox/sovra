@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/subtle"
 	"fmt"
 	"io"
 
@@ -86,8 +87,8 @@ func DecryptShare(key, encrypted []byte) ([]byte, error) {
 }
 
 // ZeroBytes zeroes a byte slice to prevent key material from lingering in memory.
+// Uses constant-time operations to avoid timing side-channels.
 func ZeroBytes(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
+	zeros := make([]byte, len(b))
+	subtle.ConstantTimeCopy(1, b, zeros)
 }

@@ -544,6 +544,11 @@ func Migrations() []Migration {
 			Description: "Add partner_public_key to federations for air-gap DEK wrapping",
 			SQL:         `ALTER TABLE federations ADD COLUMN IF NOT EXISTS partner_public_key BYTEA`,
 		},
+		{
+			Version:     39,
+			Description: "Harden audit_events table: disable autovacuum to preserve immutability",
+			SQL:         `ALTER TABLE audit_events SET (autovacuum_enabled = false)`,
+		},
 	}
 }
 

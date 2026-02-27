@@ -40,7 +40,7 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, 5432, cfg.Database.Port)
 	assert.Equal(t, "sovra", cfg.Database.Database)
 	assert.Equal(t, "sovra", cfg.Database.Username)
-	assert.Equal(t, "prefer", cfg.Database.SSLMode)
+	assert.Equal(t, "require", cfg.Database.SSLMode)
 	assert.Equal(t, 25, cfg.Database.MaxOpenConns)
 	assert.Equal(t, 5, cfg.Database.MaxIdleConns)
 	assert.Equal(t, 5*time.Minute, cfg.Database.ConnMaxLifetime)

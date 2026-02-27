@@ -136,6 +136,12 @@ type CreateAdminOptions struct {
 	SSOSubject  string
 }
 
+// MFASecretEncryptor encrypts/decrypts MFA secrets for at-rest protection.
+type MFASecretEncryptor interface {
+	Encrypt(ctx context.Context, orgID, plaintext string) (string, error)
+	Decrypt(ctx context.Context, orgID, ciphertext string) (string, error)
+}
+
 // PolicyEvaluator evaluates OPA policies for access control.
 type PolicyEvaluator interface {
 	Evaluate(ctx context.Context, input models.PolicyInput) (*PolicyEvaluationResult, error)
@@ -149,20 +155,21 @@ type PolicyEvaluationResult struct {
 
 // Manager provides identity management operations.
 type Manager struct {
-	admins        AdminRepository
-	users         UserRepository
-	services      ServiceRepository
-	devices       DeviceRepository
-	groups        GroupRepository
-	roles         RoleRepository
-	joinRequests  GroupJoinRequestRepository
-	crkProvider   CRKProvider
-	tokenGen      TokenGenerator
-	pkiIssuer     PKIIssuer
-	auditor       Auditor
-	certTTL       time.Duration
-	idpChecker    idp.SubjectChecker
-	policyService PolicyEvaluator
+	admins             AdminRepository
+	users              UserRepository
+	services           ServiceRepository
+	devices            DeviceRepository
+	groups             GroupRepository
+	roles              RoleRepository
+	joinRequests       GroupJoinRequestRepository
+	crkProvider        CRKProvider
+	tokenGen           TokenGenerator
+	pkiIssuer          PKIIssuer
+	auditor            Auditor
+	certTTL            time.Duration
+	idpChecker         idp.SubjectChecker
+	policyService      PolicyEvaluator
+	mfaSecretEncryptor MFASecretEncryptor
 }
 
 // NewManager creates a new identity manager.
@@ -219,6 +226,33 @@ func (m *Manager) SetIDPChecker(checker idp.SubjectChecker) { m.idpChecker = che
 
 // SetPolicyEvaluator sets the policy evaluator for OPA-filtered listing.
 func (m *Manager) SetPolicyEvaluator(pe PolicyEvaluator) { m.policyService = pe }
+
+// SetMFASecretEncryptor sets the encryptor used to protect MFA secrets at rest.
+func (m *Manager) SetMFASecretEncryptor(enc MFASecretEncryptor) { m.mfaSecretEncryptor = enc }
+
+// encryptMFASecret encrypts an MFA secret if an encryptor is configured.
+func (m *Manager) encryptMFASecret(ctx context.Context, orgID, secret string) (string, error) {
+	if m.mfaSecretEncryptor == nil {
+		return secret, nil
+	}
+	enc, err := m.mfaSecretEncryptor.Encrypt(ctx, orgID, secret)
+	if err != nil {
+		return "", fmt.Errorf("encrypt MFA secret: %w", err)
+	}
+	return enc, nil
+}
+
+// decryptMFASecret decrypts an MFA secret if an encryptor is configured.
+func (m *Manager) decryptMFASecret(ctx context.Context, orgID, secret string) (string, error) {
+	if m.mfaSecretEncryptor == nil {
+		return secret, nil
+	}
+	dec, err := m.mfaSecretEncryptor.Decrypt(ctx, orgID, secret)
+	if err != nil {
+		return "", fmt.Errorf("decrypt MFA secret: %w", err)
+	}
+	return dec, nil
+}
 
 func (m *Manager) getCertTTL() time.Duration {
 	if m.certTTL > 0 {
@@ -448,8 +482,12 @@ func (m *Manager) GetEnrollmentSetup(ctx context.Context, adminID, token string)
 		return "", fmt.Errorf("generate TOTP key: %w", err)
 	}
 
-	// Store the secret for validation during enrollment
-	admin.MFASecret = key.Secret()
+	// Store the secret for validation during enrollment (encrypted at rest)
+	encSecret, err := m.encryptMFASecret(ctx, admin.OrgID, key.Secret())
+	if err != nil {
+		return "", fmt.Errorf("encrypt MFA secret: %w", err)
+	}
+	admin.MFASecret = encSecret
 	admin.UpdatedAt = time.Now()
 	if err := m.admins.Update(ctx, admin); err != nil {
 		return "", fmt.Errorf("update admin MFA secret: %w", err)
@@ -489,7 +527,11 @@ func (m *Manager) EnrollAdmin(ctx context.Context, adminID, enrollmentToken, tot
 		return nil, nil, fmt.Errorf("enrollment setup not completed: call GetEnrollmentSetup first: %w", errors.ErrInvalidInput)
 	}
 
-	valid := totp.Validate(totpCode, admin.MFASecret)
+	mfaPlain, err := m.decryptMFASecret(ctx, admin.OrgID, admin.MFASecret)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decrypt MFA secret: %w", err)
+	}
+	valid := totp.Validate(totpCode, mfaPlain)
 	if !valid {
 		m.auditLog(ctx, admin.OrgID, "admin.enrollment.complete", "denied", map[string]any{
 			"admin_id": adminID,
@@ -627,7 +669,11 @@ func (m *Manager) RenewAdminCertificate(ctx context.Context, adminID, totpCode s
 		return nil, fmt.Errorf("MFA not enabled: %w", errors.ErrForbidden)
 	}
 
-	valid := totp.Validate(totpCode, admin.MFASecret)
+	mfaPlain, err := m.decryptMFASecret(ctx, admin.OrgID, admin.MFASecret)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt MFA secret: %w", err)
+	}
+	valid := totp.Validate(totpCode, mfaPlain)
 	if !valid {
 		m.auditLog(ctx, admin.OrgID, "admin.certificate.renew", "denied", map[string]any{
 			"admin_id": adminID,
@@ -715,8 +761,12 @@ func (m *Manager) EnableMFA(ctx context.Context, adminID string) (string, error)
 		return "", fmt.Errorf("generate TOTP key: %w", err)
 	}
 
-	// Store the base32-encoded secret
-	admin.MFASecret = key.Secret()
+	// Store the base32-encoded secret (encrypted at rest)
+	encSecret, err := m.encryptMFASecret(ctx, admin.OrgID, key.Secret())
+	if err != nil {
+		return "", fmt.Errorf("encrypt MFA secret: %w", err)
+	}
+	admin.MFASecret = encSecret
 	admin.MFAEnabled = true
 	admin.UpdatedAt = time.Now()
 
@@ -739,8 +789,12 @@ func (m *Manager) VerifyMFA(ctx context.Context, identityID, totpCode string) er
 		return fmt.Errorf("MFA not enabled for this identity")
 	}
 
-	// Validate the TOTP code
-	valid := totp.Validate(totpCode, admin.MFASecret)
+	// Validate the TOTP code (decrypt secret if encrypted at rest)
+	mfaPlain, err := m.decryptMFASecret(ctx, admin.OrgID, admin.MFASecret)
+	if err != nil {
+		return fmt.Errorf("decrypt MFA secret: %w", err)
+	}
+	valid := totp.Validate(totpCode, mfaPlain)
 	if !valid {
 		return fmt.Errorf("invalid TOTP code")
 	}

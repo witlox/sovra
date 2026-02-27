@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -104,7 +105,7 @@ type AdminConfig struct {
 	ReconciliationEnabled  bool          `mapstructure:"reconciliation_enabled"`
 	IDPIssuerURL           string        `mapstructure:"idp_issuer_url"`
 	IDPClientID            string        `mapstructure:"idp_client_id"`
-	IDPOIDCSecret          string        `mapstructure:"idp_client_secret"` // nolint:gosec // G117: OIDC client secret
+	IDPOIDCSecret          string        `mapstructure:"idp_client_secret"` // nolint:gosec // G117: loaded from SOVRA_ADMIN_IDP_CLIENT_SECRET env var only
 	IDPGroupEndpoint       string        `mapstructure:"idp_group_endpoint"`
 	GroupSyncInterval      time.Duration `mapstructure:"group_sync_interval"`
 	GroupSyncEnabled       bool          `mapstructure:"group_sync_enabled"`
@@ -156,6 +157,16 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// OIDC client secret must come from environment variable, not config file.
+	// Clear any file-sourced value and re-read from env only.
+	if cfg.Admin.IDPOIDCSecret != "" {
+		envVal := os.Getenv("SOVRA_ADMIN_IDP_CLIENT_SECRET")
+		if envVal == "" {
+			return nil, fmt.Errorf("admin.idp_client_secret must be set via SOVRA_ADMIN_IDP_CLIENT_SECRET environment variable, not config file")
+		}
+		cfg.Admin.IDPOIDCSecret = envVal
+	}
+
 	return &cfg, nil
 }
 
@@ -179,7 +190,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.port", 5432)
 	v.SetDefault("database.database", "sovra")
 	v.SetDefault("database.username", "sovra")
-	v.SetDefault("database.ssl_mode", "prefer")
+	v.SetDefault("database.ssl_mode", "require")
 	v.SetDefault("database.max_open_conns", 25)
 	v.SetDefault("database.max_idle_conns", 5)
 	v.SetDefault("database.conn_max_lifetime", 5*time.Minute)

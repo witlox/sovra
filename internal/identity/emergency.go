@@ -486,6 +486,10 @@ func (m *AccountRecoveryManager) FailRecovery(ctx context.Context, recoveryID, r
 
 // SimpleTokenGenerator generates simple hex tokens for emergency access.
 // Tokens are hashed before storage for security.
+//
+// WARNING: This is an in-memory store. Tokens are lost on process restart.
+// For production deployments that require token persistence across restarts,
+// implement TokenGenerator backed by a database with TTL-indexed rows.
 type SimpleTokenGenerator struct {
 	mu     sync.RWMutex
 	tokens map[string]time.Time // hashed token -> expiry

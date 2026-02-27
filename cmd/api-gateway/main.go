@@ -340,7 +340,7 @@ func main() {
 		if cfg.Server.TLSEnabled {
 			// Configure TLS
 			tlsConfig := &tls.Config{
-				MinVersion: tls.VersionTLS12,
+				MinVersion: tls.VersionTLS13,
 			}
 
 			// Configure mTLS if enabled

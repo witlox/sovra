@@ -32,7 +32,7 @@ func DefaultConfig() *Config {
 		User:            "sovra",
 		Password:        "",
 		Database:        "sovra",
-		SSLMode:         "disable",
+		SSLMode:         "require",
 		MaxOpenConns:    25,
 		MaxIdleConns:    5,
 		ConnMaxLifetime: 5 * time.Minute,
@@ -43,6 +43,13 @@ func DefaultConfig() *Config {
 func (c *Config) ConnectionString() string {
 	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 		c.User, c.Password, c.Host, c.Port, c.Database, c.SSLMode)
+}
+
+// RedactedConnectionString returns the connection string with password masked.
+// Use this for logging to avoid leaking credentials.
+func (c *Config) RedactedConnectionString() string {
+	return fmt.Sprintf("postgres://%s:***@%s:%d/%s?sslmode=%s",
+		c.User, c.Host, c.Port, c.Database, c.SSLMode)
 }
 
 // DB wraps a database connection pool with utilities.
