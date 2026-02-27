@@ -491,9 +491,9 @@ func (r *FederationRepository) Create(ctx context.Context, fed *models.Federatio
 	}
 
 	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO federations (id, org_id, partner_org_id, partner_url, partner_cert, status, created_at, established_at, last_health_check)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		id, orgID, partnerOrgID, fed.PartnerURL, fed.PartnerCert, fed.Status, fed.CreatedAt, establishedAt, lastHealthCheck,
+		`INSERT INTO federations (id, org_id, partner_org_id, partner_url, partner_cert, partner_public_key, status, created_at, established_at, last_health_check)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		id, orgID, partnerOrgID, fed.PartnerURL, fed.PartnerCert, fed.PartnerPublicKey, fed.Status, fed.CreatedAt, establishedAt, lastHealthCheck,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create federation: %w", err)
@@ -511,10 +511,10 @@ func (r *FederationRepository) Get(ctx context.Context, id string) (*models.Fede
 	fed := &models.Federation{}
 	var establishedAt, lastHealthCheck sql.NullTime
 	err = r.db.QueryRowContext(ctx,
-		`SELECT id, org_id, partner_org_id, partner_url, partner_cert, status, created_at, established_at, last_health_check
+		`SELECT id, org_id, partner_org_id, partner_url, partner_cert, partner_public_key, status, created_at, established_at, last_health_check
 		 FROM federations WHERE id = $1`,
 		uid,
-	).Scan(&fed.ID, &fed.OrgID, &fed.PartnerOrgID, &fed.PartnerURL, &fed.PartnerCert, &fed.Status, &fed.CreatedAt, &establishedAt, &lastHealthCheck)
+	).Scan(&fed.ID, &fed.OrgID, &fed.PartnerOrgID, &fed.PartnerURL, &fed.PartnerCert, &fed.PartnerPublicKey, &fed.Status, &fed.CreatedAt, &establishedAt, &lastHealthCheck)
 	if stderrors.Is(err, sql.ErrNoRows) {
 		return nil, errors.ErrNotFound
 	}
@@ -605,9 +605,9 @@ func (r *FederationRepository) Update(ctx context.Context, fed *models.Federatio
 	}
 
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE federations SET partner_url = $2, partner_cert = $3, status = $4, established_at = $5, last_health_check = $6
+		`UPDATE federations SET partner_url = $2, partner_cert = $3, partner_public_key = $4, status = $5, established_at = $6, last_health_check = $7
 		 WHERE id = $1`,
-		id, fed.PartnerURL, fed.PartnerCert, fed.Status, establishedAt, lastHealthCheck,
+		id, fed.PartnerURL, fed.PartnerCert, fed.PartnerPublicKey, fed.Status, establishedAt, lastHealthCheck,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update federation: %w", err)

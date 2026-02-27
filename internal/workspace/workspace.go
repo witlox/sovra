@@ -44,7 +44,7 @@ func NewWorkspaceService(
 	vaultClient *vault.Client,
 	audit AuditService,
 	invitations InvitationRepository,
-) Service {
+) ConfigurableService {
 	return &productionService{
 		repo:        repo,
 		vault:       vaultClient,
@@ -56,14 +56,16 @@ func NewWorkspaceService(
 
 // productionService implements the production-ready workspace service.
 type productionService struct {
-	repo        Repository
-	vault       *vault.Client
-	transit     *vault.TransitClient
-	audit       AuditService
-	invitations InvitationRepository
-	federation  FederationRelay
-	admission   *AdmissionChecker
-	metrics     *metrics.KeyLifecycleMetrics
+	repo             Repository
+	vault            *vault.Client
+	transit          *vault.TransitClient
+	audit            AuditService
+	invitations      InvitationRepository
+	federation       FederationRelay
+	admission        *AdmissionChecker
+	metrics          *metrics.KeyLifecycleMetrics
+	federationLookup FederationLookup
+	privateKeys      PrivateKeyStore
 }
 
 // FederationRelay allows the workspace service to relay messages to federated partners.
@@ -85,6 +87,16 @@ func (s *productionService) SetAdmissionChecker(ac *AdmissionChecker) {
 // SetMetrics sets the key lifecycle metrics collector.
 func (s *productionService) SetMetrics(m *metrics.KeyLifecycleMetrics) {
 	s.metrics = m
+}
+
+// SetFederationLookup sets the federation lookup for air-gap DEK wrapping.
+func (s *productionService) SetFederationLookup(fl FederationLookup) {
+	s.federationLookup = fl
+}
+
+// SetPrivateKeyStore sets the private key store for air-gap DEK unwrapping.
+func (s *productionService) SetPrivateKeyStore(pks PrivateKeyStore) {
+	s.privateKeys = pks
 }
 
 // checkAccess performs three-stage authorization:
@@ -883,10 +895,34 @@ func (s *productionService) ExportWorkspace(ctx context.Context, workspaceID str
 	checksum := sha256.Sum256([]byte(wsData))
 
 	bundle := &WorkspaceBundle{
-		Workspace:  ws,
-		ExportedAt: time.Now(),
-		ExportedBy: callerOrg,
-		Checksum:   base64.StdEncoding.EncodeToString(checksum[:]),
+		Workspace:     ws,
+		RecipientOrgs: ws.ParticipantOrgs,
+		ExportedAt:    time.Now(),
+		ExportedBy:    callerOrg,
+		Checksum:      base64.StdEncoding.EncodeToString(checksum[:]),
+	}
+
+	// Encrypt the DEK for each participant org using their RSA public key
+	if s.federationLookup != nil && len(ws.DEKWrapped) > 0 {
+		callerWrapped, ok := ws.DEKWrapped[callerOrg]
+		if ok {
+			dek, unwrapErr := s.unwrapDEKForOrg(ctx, callerWrapped, callerOrg)
+			if unwrapErr == nil {
+				exportDEK := make(map[string][]byte)
+				for _, orgID := range ws.ParticipantOrgs {
+					pubKey, lookupErr := s.federationLookup.GetPartnerPublicKey(ctx, callerOrg, orgID)
+					if lookupErr != nil {
+						continue // Skip orgs whose public key we don't have
+					}
+					encrypted, encErr := encryptDEKForOrg(dek, pubKey)
+					if encErr != nil {
+						return nil, fmt.Errorf("encrypt DEK for org %s: %w", orgID, encErr)
+					}
+					exportDEK[orgID] = encrypted
+				}
+				bundle.ExportDEK = exportDEK
+			}
+		}
 	}
 
 	// Audit log
@@ -900,7 +936,8 @@ func (s *productionService) ExportWorkspace(ctx context.Context, workspaceID str
 			Actor:     callerOrg,
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
-				"checksum": bundle.Checksum,
+				"checksum":       bundle.Checksum,
+				"has_export_dek": len(bundle.ExportDEK) > 0,
 			},
 		})
 	}
@@ -936,6 +973,38 @@ func (s *productionService) ImportWorkspace(ctx context.Context, bundle *Workspa
 	expected := base64.StdEncoding.EncodeToString(checksum[:])
 	if expected != bundle.Checksum {
 		return nil, errors.NewValidationError("checksum", "bundle integrity check failed")
+	}
+
+	// Re-wrap the DEK for the importing org if ExportDEK is present
+	if len(bundle.ExportDEK) > 0 && s.privateKeys != nil {
+		// Determine importing org: try JWT claims first, then RecipientOrgs
+		callerOrg, _ := isParticipant(ctx, ws)
+		if callerOrg == "" {
+			// Caller may not be in ParticipantOrgs yet; try JWT org claim directly
+			if claims, ok := jwt.ClaimsFromContext(ctx); ok {
+				callerOrg = claims.Organization
+			}
+		}
+		if callerOrg != "" {
+			if encryptedDEK, ok := bundle.ExportDEK[callerOrg]; ok {
+				privKey, privErr := s.privateKeys.GetPrivateKey(ctx, callerOrg)
+				if privErr != nil {
+					return nil, fmt.Errorf("get private key: %w", privErr)
+				}
+				dek, decErr := decryptDEKWithPrivateKey(encryptedDEK, privKey)
+				if decErr != nil {
+					return nil, fmt.Errorf("decrypt export DEK: %w", decErr)
+				}
+				wrapped, wrapErr := s.wrapDEKForOrg(ctx, dek, callerOrg)
+				if wrapErr != nil {
+					return nil, fmt.Errorf("wrap DEK for local org: %w", wrapErr)
+				}
+				ws.DEKWrapped = map[string][]byte{callerOrg: wrapped}
+				if !containsOrg(ws.ParticipantOrgs, callerOrg) {
+					ws.ParticipantOrgs = append(ws.ParticipantOrgs, callerOrg)
+				}
+			}
+		}
 	}
 
 	ws.ID = uuid.New().String()

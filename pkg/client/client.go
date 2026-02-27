@@ -1267,6 +1267,7 @@ func (c *Client) FederationHealth(ctx context.Context) (*FederationHealthRespons
 type ImportFederationCertificateRequest struct {
 	PartnerOrgID string `json:"partner_org_id"`
 	Certificate  []byte `json:"certificate"`
+	PublicKey    []byte `json:"public_key,omitempty"` // RSA public key for air-gap DEK wrapping
 	Signature    []byte `json:"signature,omitempty"`
 }
 
@@ -1703,11 +1704,13 @@ func (c *Client) TidyCertificates(ctx context.Context, safetyBuffer string) erro
 
 // WorkspaceBundleResponse represents an exported workspace bundle.
 type WorkspaceBundleResponse struct {
-	Workspace  *models.Workspace `json:"workspace"`
-	Policies   []byte            `json:"policies,omitempty"`
-	ExportedAt string            `json:"exported_at"`
-	ExportedBy string            `json:"exported_by"`
-	Checksum   string            `json:"checksum"`
+	Workspace     *models.Workspace `json:"workspace"`
+	Policies      []byte            `json:"policies,omitempty"`
+	ExportDEK     map[string][]byte `json:"export_dek,omitempty"`     // orgID → RSA-OAEP encrypted DEK
+	RecipientOrgs []string          `json:"recipient_orgs,omitempty"` // intended recipient org IDs
+	ExportedAt    string            `json:"exported_at"`
+	ExportedBy    string            `json:"exported_by"`
+	Checksum      string            `json:"checksum"`
 }
 
 // ExportWorkspace exports a workspace as a bundle.

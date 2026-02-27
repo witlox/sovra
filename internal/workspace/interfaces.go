@@ -72,11 +72,13 @@ type CreateRequest struct {
 
 // WorkspaceBundle represents an exported workspace for air-gap transfer.
 type WorkspaceBundle struct {
-	Workspace  *models.Workspace `json:"workspace"`
-	Policies   []byte            `json:"policies,omitempty"`
-	ExportedAt time.Time         `json:"exported_at"`
-	ExportedBy string            `json:"exported_by"`
-	Checksum   string            `json:"checksum"`
+	Workspace     *models.Workspace `json:"workspace"`
+	Policies      []byte            `json:"policies,omitempty"`
+	ExportDEK     map[string][]byte `json:"export_dek,omitempty"`     // orgID → RSA-OAEP encrypted DEK
+	RecipientOrgs []string          `json:"recipient_orgs,omitempty"` // intended recipient org IDs
+	ExportedAt    time.Time         `json:"exported_at"`
+	ExportedBy    string            `json:"exported_by"`
+	Checksum      string            `json:"checksum"`
 }
 
 // WorkspaceInvitation represents a pending workspace invitation.
@@ -242,4 +244,23 @@ type Service interface {
 	AcceptInvitation(ctx context.Context, workspaceID, orgID string, signature []byte) error
 	// DeclineInvitation declines a workspace invitation.
 	DeclineInvitation(ctx context.Context, workspaceID, orgID string) error
+}
+
+// FederationLookup resolves partner public keys from federation records.
+type FederationLookup interface {
+	GetPartnerPublicKey(ctx context.Context, localOrgID, partnerOrgID string) ([]byte, error)
+}
+
+// PrivateKeyStore retrieves the org's RSA private key for DEK decryption.
+type PrivateKeyStore interface {
+	GetPrivateKey(ctx context.Context, orgID string) ([]byte, error)
+}
+
+// ConfigurableService extends Service with optional setters for production wiring.
+type ConfigurableService interface {
+	Service
+	SetFederation(fed FederationRelay)
+	SetFederationLookup(fl FederationLookup)
+	SetPrivateKeyStore(pks PrivateKeyStore)
+	SetAdmissionChecker(ac *AdmissionChecker)
 }

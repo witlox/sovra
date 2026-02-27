@@ -152,11 +152,18 @@ Workspace Components:
 
 ### Key Exchange
 
+**Connected mode:**
 1. Initiator creates workspace, generates DEK
-2. Requests public keys from participants
+2. Requests public keys from participants via mTLS
 3. Wraps DEK for each participant
 4. Sends wrapped keys
 5. Participants unwrap and store
+
+**Air-gap mode (cross-org):**
+1. Partner RSA public keys exchanged out-of-band during federation setup
+2. On export: DEK unwrapped from caller's KEK, re-encrypted per-participant using RSA-OAEP (SHA-256)
+3. Bundle transferred via USB with `ExportDEK` map (orgID → encrypted DEK)
+4. On import: recipient decrypts their entry with RSA private key, re-wraps with local KEK
 
 ### Data Operations
 

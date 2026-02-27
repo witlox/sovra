@@ -1923,6 +1923,7 @@ var federationImportCertCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		partnerOrg, _ := cmd.Flags().GetString("partner-org")
 		certFile, _ := cmd.Flags().GetString("cert-file")
+		pubKeyFile, _ := cmd.Flags().GetString("public-key-file")
 
 		if partnerOrg == "" || certFile == "" {
 			return fmt.Errorf("--partner-org and --cert-file are required")
@@ -1933,17 +1934,29 @@ var federationImportCertCmd = &cobra.Command{
 			return fmt.Errorf("read certificate file: %w", err)
 		}
 
+		var pubKeyData []byte
+		if pubKeyFile != "" {
+			pubKeyData, err = os.ReadFile(pubKeyFile)
+			if err != nil {
+				return fmt.Errorf("read public key file: %w", err)
+			}
+		}
+
 		c := getClient(cmd)
 		ctx := context.Background()
 
 		if err := c.ImportFederationCertificate(ctx, client.ImportFederationCertificateRequest{
 			PartnerOrgID: partnerOrg,
 			Certificate:  certData,
+			PublicKey:    pubKeyData,
 		}); err != nil {
 			return fmt.Errorf("import certificate: %w", err)
 		}
 
 		fmt.Printf("Certificate imported for partner: %s\n", partnerOrg)
+		if len(pubKeyData) > 0 {
+			fmt.Println("Partner public key stored for air-gap DEK wrapping")
+		}
 		return nil
 	},
 }
@@ -1954,6 +1967,7 @@ func init() {
 
 	federationImportCertCmd.Flags().String("partner-org", "", "Partner organization ID")
 	federationImportCertCmd.Flags().String("cert-file", "", "Certificate file path")
+	federationImportCertCmd.Flags().String("public-key-file", "", "Partner RSA public key file for air-gap DEK wrapping")
 
 	federationCmd.AddCommand(federationListCmd)
 	federationCmd.AddCommand(federationStatusCmd)

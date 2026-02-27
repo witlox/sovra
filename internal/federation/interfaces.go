@@ -97,11 +97,12 @@ type InitResponse struct {
 
 // EstablishRequest represents a federation establishment request.
 type EstablishRequest struct {
-	PartnerOrgID string
-	PartnerURL   string
-	PartnerCert  []byte
-	PartnerCSR   []byte
-	CRKSignature []byte
+	PartnerOrgID     string
+	PartnerURL       string
+	PartnerCert      []byte
+	PartnerCSR       []byte
+	PartnerPublicKey []byte // RSA public key for air-gap DEK wrapping
+	CRKSignature     []byte
 }
 
 // EstablishResponse represents a federation establishment response.
@@ -131,7 +132,8 @@ type Service interface {
 	// Init initializes federation capability for an organization by generating CSR.
 	Init(ctx context.Context, req InitRequest) (*InitResponse, error)
 	// ImportCertificate imports and validates a partner's federation certificate.
-	ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, signature []byte) error
+	// publicKey is optional; when provided it stores the partner's RSA public key for DEK wrapping.
+	ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, publicKey []byte, signature []byte) error
 	// Establish establishes a bilateral federation with a partner organization.
 	Establish(ctx context.Context, req EstablishRequest) (*models.Federation, error)
 	// Status returns the current status of a federation with a partner.

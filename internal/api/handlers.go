@@ -782,11 +782,12 @@ func (h *FederationHandler) Init(w http.ResponseWriter, r *http.Request) {
 
 // EstablishFederationRequest represents federation establishment request.
 type EstablishFederationRequest struct {
-	PartnerOrgID string `json:"partner_org_id"`
-	PartnerURL   string `json:"partner_url"`
-	PartnerCert  []byte `json:"partner_cert"`
-	PartnerCSR   []byte `json:"partner_csr"`
-	CRKSignature []byte `json:"crk_signature"`
+	PartnerOrgID     string `json:"partner_org_id"`
+	PartnerURL       string `json:"partner_url"`
+	PartnerCert      []byte `json:"partner_cert"`
+	PartnerCSR       []byte `json:"partner_csr"`
+	PartnerPublicKey []byte `json:"partner_public_key,omitempty"` // RSA public key for air-gap DEK wrapping
+	CRKSignature     []byte `json:"crk_signature"`
 }
 
 // Establish handles POST /api/v1/federation/establish.
@@ -803,11 +804,12 @@ func (h *FederationHandler) Establish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fed, err := h.service.Establish(r.Context(), federation.EstablishRequest{
-		PartnerOrgID: req.PartnerOrgID,
-		PartnerURL:   req.PartnerURL,
-		PartnerCert:  req.PartnerCert,
-		PartnerCSR:   req.PartnerCSR,
-		CRKSignature: req.CRKSignature,
+		PartnerOrgID:     req.PartnerOrgID,
+		PartnerURL:       req.PartnerURL,
+		PartnerCert:      req.PartnerCert,
+		PartnerCSR:       req.PartnerCSR,
+		PartnerPublicKey: req.PartnerPublicKey,
+		CRKSignature:     req.CRKSignature,
 	})
 	if err != nil {
 		handleError(w, err)
@@ -920,6 +922,7 @@ func (h *FederationHandler) HealthCheck(w http.ResponseWriter, r *http.Request) 
 type ImportCertificateRequest struct {
 	PartnerOrgID string `json:"partner_org_id"`
 	Certificate  []byte `json:"certificate"`
+	PublicKey    []byte `json:"public_key,omitempty"` // RSA public key for air-gap DEK wrapping
 	Signature    []byte `json:"signature"`
 }
 
@@ -936,7 +939,7 @@ func (h *FederationHandler) ImportCertificate(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if err := h.service.ImportCertificate(r.Context(), req.PartnerOrgID, req.Certificate, req.Signature); err != nil {
+	if err := h.service.ImportCertificate(r.Context(), req.PartnerOrgID, req.Certificate, req.PublicKey, req.Signature); err != nil {
 		handleError(w, err)
 		return
 	}

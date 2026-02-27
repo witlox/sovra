@@ -332,20 +332,23 @@ sovra audit export \
 
 ## Federation (Air-Gap ↔ Air-Gap)
 
-Two air-gapped organizations can federate via manual certificate exchange.
+Two air-gapped organizations can federate via manual certificate and public key exchange.
+
+Each organization must export both their **federation certificate** and their **RSA public key** (PEM-encoded) for out-of-band transfer via USB courier. The public key is used to encrypt workspace DEKs during cross-org workspace sharing.
 
 ```bash
 # Org A: Initialize federation
 sovra --cert admin.crt --key admin.key \
   federation init
 
-# Export federation certificate (out-of-band to Org B via courier)
+# Export federation certificate AND RSA public key (out-of-band to Org B via courier)
 
-# Org B: Import Org A's certificate
+# Org B: Import Org A's certificate and public key
 sovra --cert admin.crt --key admin.key \
   federation import-cert \
   --partner-org org-a \
-  --cert-file org-a-federation-cert.pem
+  --cert-file org-a-federation-cert.pem \
+  --public-key-file org-a-pubkey.pem
 
 # Org B: Establish federation
 sovra --cert admin.crt --key admin.key \
@@ -353,16 +356,21 @@ sovra --cert admin.crt --key admin.key \
   --partner-org org-a \
   --partner-url https://org-a-control-plane:8080
 
-# Transfer Org B's certificate back to Org A
+# Transfer Org B's certificate AND public key back to Org A
 
-# Org A: Import Org B's certificate
+# Org A: Import Org B's certificate and public key
 sovra --cert admin.crt --key admin.key \
   federation import-cert \
   --partner-org org-b \
-  --cert-file org-b-federation-cert.pem
+  --cert-file org-b-federation-cert.pem \
+  --public-key-file org-b-pubkey.pem
 ```
 
 ## Workspace Sharing (Air-Gap)
+
+When exporting a workspace in air-gap mode, Sovra automatically re-encrypts the workspace's DEK for each participant organization using RSA-OAEP (SHA-256). The exported bundle contains an `ExportDEK` map keyed by org ID. On import, the receiving organization decrypts their DEK entry with their RSA private key and re-wraps it with their local KEK.
+
+**Prerequisites:** Partner public keys must be exchanged during federation setup (see above).
 
 ```bash
 # Org A: Create workspace with group binding
@@ -376,11 +384,13 @@ sovra --cert admin.crt --key admin.key \
 sovra --cert admin.crt --key admin.key \
   workspace invite ws-123 --org-id org-b
 
-# Export workspace bundle (transfer via courier)
+# Export workspace bundle (DEK is RSA-encrypted per participant)
 sovra --cert admin.crt --key admin.key \
   workspace export ws-123 --output workspace-bundle.json
 
-# Org B: Import workspace
+# Transfer workspace-bundle.json to Org B via USB courier
+
+# Org B: Import workspace (DEK is decrypted and re-wrapped with local KEK)
 sovra --cert admin.crt --key admin.key \
   workspace import --input workspace-bundle.json
 ```

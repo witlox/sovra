@@ -347,13 +347,15 @@ sovra federation health
 ```bash
 sovra federation import-cert \
   --partner-org org-b \
-  --cert-file partner-cert.pem
+  --cert-file partner-cert.pem \
+  --public-key-file partner-pubkey.pem
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--partner-org` | Partner organization ID |
 | `--cert-file` | Certificate file path |
+| `--public-key-file` | Partner's RSA public key file (PEM). Required for air-gap DEK re-wrapping |
 
 ### federation renew-cert
 

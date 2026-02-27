@@ -292,29 +292,41 @@ sovra audit export \
 
 ## Air-Gap Support
 
-For SECRET classification:
+For SECRET classification workloads in physically isolated networks.
+
+### Public Key Exchange
+
+Before cross-org workspace sharing, each organization must exchange their RSA public key alongside federation certificates. This is done during federation setup via `federation import-cert --public-key-file`.
 
 ### Creating Air-Gap Workspace
 
 ```bash
-# On connected machine
 sovra workspace create \
   --name classified-intel \
   --participants mil-1,intel-2 \
   --classification SECRET \
-  --mode air-gap \
-  --output workspace-package/
+  --mode air-gap
 ```
 
-### Transfer to Air-Gap
+### Export and Transfer
+
+When exporting, the DEK is unwrapped from the caller's KEK, then re-encrypted with each participant's RSA public key using RSA-OAEP (SHA-256). The exported bundle contains an `ExportDEK` map with one entry per participant org.
 
 ```bash
-# Copy to USB
-cp -r workspace-package/ /media/usb/
+# Export workspace bundle (DEK encrypted per-participant)
+sovra workspace export ws-123 --output workspace-bundle.json
 
-# On air-gap machine
+# Transfer via USB courier
+cp workspace-bundle.json /media/usb-secret/
+```
+
+### Import on Receiving Side
+
+On import, the receiving org decrypts their `ExportDEK` entry using their RSA private key (stored in Vault KV), then re-wraps the DEK with their local KEK. The importing org is automatically added to `ParticipantOrgs`.
+
+```bash
 sovra workspace import \
-  --input /media/usb/workspace-package/
+  --input /media/usb-secret/workspace-bundle.json
 ```
 
 ### Synchronization
@@ -435,10 +447,11 @@ sovra audit query \
 
 ## Security Considerations
 
-1. **DEK Security**: DEK never leaves Vault unencrypted
-2. **Transport**: All key exchange via mTLS
-3. **Storage**: Wrapped keys stored encrypted
-4. **Audit**: All operations logged immutably
+1. **DEK Security**: DEK never leaves Vault unencrypted in connected mode. In air-gap mode, the DEK is transiently unwrapped only to re-encrypt with RSA-OAEP for each recipient
+2. **Transport**: All key exchange via mTLS (connected) or encrypted USB bundles (air-gap)
+3. **Storage**: Wrapped keys stored encrypted. Air-gap bundles use per-org RSA-OAEP encryption
+4. **Audit**: All export and import operations logged immutably
 5. **Revocation**: Instant across all participants
+6. **Air-Gap DEK Re-Wrapping**: RSA-OAEP with SHA-256 ensures each org can only decrypt their own DEK entry in the export bundle
 
 ---

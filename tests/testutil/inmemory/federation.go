@@ -232,12 +232,15 @@ func (s *FederationService) HealthCheck(ctx context.Context) ([]federation.Healt
 	}, nil
 }
 
-func (s *FederationService) ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, signature []byte) error {
+func (s *FederationService) ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, publicKey []byte, signature []byte) error {
 	fed, err := s.Status(ctx, partnerOrgID)
 	if err != nil {
 		return err
 	}
 	fed.PartnerCert = cert
+	if len(publicKey) > 0 {
+		fed.PartnerPublicKey = publicKey
+	}
 	return s.repo.Update(ctx, fed)
 }
 

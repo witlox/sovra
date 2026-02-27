@@ -202,7 +202,7 @@ func TestProductionFederationEstablishment(t *testing.T) {
 						assert.NotEmpty(t, initResp3.Certificate)
 					}).
 					When("ETH imports Geneva's certificate", func() {
-						err := fedSvc.ImportCertificate(ctx, orgGeneva.ID, initResp3.Certificate, []byte("signature"))
+						err := fedSvc.ImportCertificate(ctx, orgGeneva.ID, initResp3.Certificate, nil, []byte("signature"))
 						require.NoError(t, err)
 					}).
 					Then("certificate is validated and stored", func() {

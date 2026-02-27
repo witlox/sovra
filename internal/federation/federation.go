@@ -111,7 +111,7 @@ func (s *testableService) Init(ctx context.Context, req InitRequest) (*InitRespo
 	}, nil
 }
 
-func (s *testableService) ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, signature []byte) error {
+func (s *testableService) ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, publicKey []byte, signature []byte) error {
 	if _, err := s.certMgr.ValidateCertificate(cert); err != nil {
 		return fmt.Errorf("validate certificate: %w", err)
 	}
@@ -308,7 +308,8 @@ func (s *productionServiceImpl) Init(ctx context.Context, req InitRequest) (*Ini
 }
 
 // ImportCertificate imports and validates a partner's federation certificate.
-func (s *productionServiceImpl) ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, signature []byte) error {
+// When publicKey is non-nil, the partner's RSA public key is stored for air-gap DEK wrapping.
+func (s *productionServiceImpl) ImportCertificate(ctx context.Context, partnerOrgID string, cert []byte, publicKey []byte, signature []byte) error {
 	parsedCert, err := parseCertificatePEM(cert)
 	if err != nil {
 		return errors.NewFederationError(partnerOrgID, "parse_certificate", err)
@@ -316,6 +317,15 @@ func (s *productionServiceImpl) ImportCertificate(ctx context.Context, partnerOr
 
 	if time.Now().After(parsedCert.NotAfter) {
 		return errors.ErrCertificateExpired
+	}
+
+	// Store partner public key in an existing federation record if one exists
+	if len(publicKey) > 0 {
+		fed, fedErr := s.repo.GetByPartner(ctx, s.orgID, partnerOrgID)
+		if fedErr == nil {
+			fed.PartnerPublicKey = publicKey
+			_ = s.repo.Update(ctx, fed)
+		}
 	}
 
 	if s.audit != nil {
@@ -327,10 +337,11 @@ func (s *productionServiceImpl) ImportCertificate(ctx context.Context, partnerOr
 			Actor:     "system",
 			Result:    models.AuditEventResultSuccess,
 			Metadata: map[string]any{
-				"operation":    "import_certificate",
-				"partner_org":  partnerOrgID,
-				"cert_subject": parsedCert.Subject.String(),
-				"expires":      parsedCert.NotAfter,
+				"operation":      "import_certificate",
+				"partner_org":    partnerOrgID,
+				"cert_subject":   parsedCert.Subject.String(),
+				"expires":        parsedCert.NotAfter,
+				"has_public_key": len(publicKey) > 0,
 			},
 		})
 	}
@@ -380,14 +391,15 @@ func (s *productionServiceImpl) Establish(ctx context.Context, req EstablishRequ
 	}
 
 	fed := &models.Federation{
-		ID:            uuid.New().String(),
-		OrgID:         s.orgID,
-		PartnerOrgID:  req.PartnerOrgID,
-		PartnerURL:    req.PartnerURL,
-		PartnerCert:   req.PartnerCert,
-		Status:        models.FederationStatusActive,
-		CreatedAt:     time.Now(),
-		EstablishedAt: time.Now(),
+		ID:               uuid.New().String(),
+		OrgID:            s.orgID,
+		PartnerOrgID:     req.PartnerOrgID,
+		PartnerURL:       req.PartnerURL,
+		PartnerCert:      req.PartnerCert,
+		PartnerPublicKey: req.PartnerPublicKey,
+		Status:           models.FederationStatusActive,
+		CreatedAt:        time.Now(),
+		EstablishedAt:    time.Now(),
 	}
 
 	if signedCert != nil {

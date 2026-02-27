@@ -126,18 +126,19 @@ const (
 
 // Federation represents a bilateral trust relationship between two organizations.
 type Federation struct {
-	ID              string           `json:"id"`
-	OrgID           string           `json:"org_id"`
-	PartnerOrgID    string           `json:"partner_org_id"`
-	PartnerURL      string           `json:"partner_url"`
-	PartnerCert     []byte           `json:"partner_cert"`
-	Certificate     []byte           `json:"certificate,omitempty"`
-	Status          FederationStatus `json:"status"`
-	CreatedAt       time.Time        `json:"created_at"`
-	UpdatedAt       time.Time        `json:"updated_at,omitempty"`
-	EstablishedAt   time.Time        `json:"established_at"`
-	LastHealthCheck time.Time        `json:"last_health_check"`
-	Metadata        map[string]any   `json:"metadata,omitempty"`
+	ID               string           `json:"id"`
+	OrgID            string           `json:"org_id"`
+	PartnerOrgID     string           `json:"partner_org_id"`
+	PartnerURL       string           `json:"partner_url"`
+	PartnerCert      []byte           `json:"partner_cert"`
+	PartnerPublicKey []byte           `json:"partner_public_key,omitempty"` // RSA public key for DEK wrapping
+	Certificate      []byte           `json:"certificate,omitempty"`
+	Status           FederationStatus `json:"status"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at,omitempty"`
+	EstablishedAt    time.Time        `json:"established_at"`
+	LastHealthCheck  time.Time        `json:"last_health_check"`
+	Metadata         map[string]any   `json:"metadata,omitempty"`
 }
 
 // EdgeNodeStatus represents the status of an edge node.
@@ -306,11 +307,13 @@ type PolicyVersion struct {
 
 // WorkspaceBundle represents an exported workspace for air-gap transfer.
 type WorkspaceBundle struct {
-	Workspace  *Workspace `json:"workspace"`
-	Policies   []byte     `json:"policies,omitempty"`
-	ExportedAt time.Time  `json:"exported_at"`
-	ExportedBy string     `json:"exported_by"`
-	Checksum   string     `json:"checksum"`
+	Workspace     *Workspace        `json:"workspace"`
+	Policies      []byte            `json:"policies,omitempty"`
+	ExportDEK     map[string][]byte `json:"export_dek,omitempty"`     // orgID → RSA-OAEP encrypted DEK
+	RecipientOrgs []string          `json:"recipient_orgs,omitempty"` // intended recipient org IDs
+	ExportedAt    time.Time         `json:"exported_at"`
+	ExportedBy    string            `json:"exported_by"`
+	Checksum      string            `json:"checksum"`
 }
 
 // WorkspaceInvitation represents a pending workspace invitation.

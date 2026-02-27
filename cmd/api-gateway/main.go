@@ -112,6 +112,11 @@ func main() {
 
 	auditSvc := audit.NewAuditService(auditRepo)
 	wsSvc := workspace.NewWorkspaceService(wsRepo, vaultClient, auditSvc, invitationRepo)
+
+	// Wire air-gap cross-org DEK wrapping support
+	wsSvc.SetFederationLookup(&workspace.FederationLookupAdapter{Repo: fedRepo})
+	wsSvc.SetPrivateKeyStore(&workspace.VaultPrivateKeyStore{KV: vaultClient.KV("secret")})
+
 	// Federation CRK verifier adapter
 	transitClient := vaultClient.Transit(transitMountPath)
 	fedCRKVerifier := &federationCRKVerifier{transit: transitClient}

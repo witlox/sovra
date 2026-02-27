@@ -539,6 +539,11 @@ func Migrations() []Migration {
 			CREATE INDEX IF NOT EXISTS idx_workspace_admissions_identity ON workspace_admissions(identity_id);
 			CREATE INDEX IF NOT EXISTS idx_workspace_admissions_active ON workspace_admissions(workspace_id, identity_id) WHERE status = 'active'`,
 		},
+		{
+			Version:     38,
+			Description: "Add partner_public_key to federations for air-gap DEK wrapping",
+			SQL:         `ALTER TABLE federations ADD COLUMN IF NOT EXISTS partner_public_key BYTEA`,
+		},
 	}
 }
 
