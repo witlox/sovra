@@ -85,7 +85,7 @@ func (m *managerImpl) Generate(orgID string, totalShares, threshold int) (*model
 		for i, shareData := range shamirShares {
 			index := 1
 			if len(shareData) > 0 {
-				index = int(shareData[0])
+				index = int(shareData[len(shareData)-1]) // x-coordinate is last byte in Vault Shamir
 			}
 			share := &models.CRKShare{
 				ID:        uuid.New().String(),
@@ -152,10 +152,10 @@ func (m *managerImpl) GetShares(crkID string) ([]models.CRKShare, error) {
 
 	shares := make([]models.CRKShare, len(shamirShares))
 	for i, data := range shamirShares {
-		// Extract the embedded index from the Shamir share (first byte)
+		// Extract the x-coordinate from the Shamir share (last byte)
 		index := 1 // default
 		if len(data) > 0 {
-			index = int(data[0])
+			index = int(data[len(data)-1])
 		}
 		shares[i] = models.CRKShare{
 			ID:        uuid.New().String(),
@@ -282,8 +282,8 @@ func (m *managerImpl) ValidateShare(share models.CRKShare, publicKey []byte) err
 		return errors.ErrShareInvalid
 	}
 
-	// Verify the share's embedded index matches the declared index
-	if int(share.Data[0]) != share.Index {
+	// Verify the share's embedded x-coordinate matches the declared index
+	if int(share.Data[len(share.Data)-1]) != share.Index {
 		return errors.ErrShareInvalid
 	}
 
@@ -351,9 +351,13 @@ func (m *managerImpl) RegenerateShares(privateKey ed25519.PrivateKey, totalShare
 
 	shares := make([]models.CRKShare, totalShares)
 	for i := 0; i < totalShares; i++ {
+		index := i + 1
+		if len(shamirShares[i]) > 0 {
+			index = int(shamirShares[i][len(shamirShares[i])-1]) // x-coordinate is last byte
+		}
 		shares[i] = models.CRKShare{
 			ID:        uuid.New().String(),
-			Index:     i + 1,
+			Index:     index,
 			Data:      shamirShares[i],
 			CreatedAt: time.Now(),
 		}
