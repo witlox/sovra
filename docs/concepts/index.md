@@ -157,6 +157,7 @@ A **workspace** is a shared cryptographic domain for multi-organization data sha
 **Components:**
 - Data Encryption Key (DEK)
 - Participant list
+- Tiered admission control
 - Access policies (OPA)
 - Audit trail
 
@@ -169,12 +170,20 @@ Workspace: cancer-research
 └── Purpose: "Oncology research collaboration"
 ```
 
+**Admission tiers:**
+
+| Tier | Requirement |
+|------|-------------|
+| CONFIDENTIAL | Group membership (auto-admit) |
+| SECRET | Group membership + explicit admission |
+| CRK-protected | Explicit admission only |
+
 **Operations:**
 ```bash
-# Any participant can encrypt
+# Any admitted participant can encrypt
 sovra workspace encrypt --workspace cancer-research ...
 
-# Any participant can decrypt (subject to policies)
+# Any admitted participant can decrypt (subject to policies)
 sovra workspace decrypt --workspace cancer-research ...
 ```
 

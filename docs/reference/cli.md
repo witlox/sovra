@@ -214,6 +214,47 @@ sovra workspace request-access ws-123 --justification "Need access for data anal
 |------|-------------|
 | `--justification` | Justification for the access request |
 
+### workspace admission grant
+
+Grant explicit admission to a workspace. Required for SECRET and CRK-protected workspaces.
+
+```bash
+sovra workspace admission grant ws-123 \
+  --identity-id user-456 \
+  --identity-type user \
+  --org-id org-a
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--identity-id` | Identity ID to grant admission to (required) | |
+| `--identity-type` | Identity type | `user` |
+| `--org-id` | Organization ID | |
+
+### workspace admission list
+
+List all admissions for a workspace.
+
+```bash
+sovra workspace admission list ws-123
+```
+
+### workspace admission get
+
+Get admission status for a specific identity.
+
+```bash
+sovra workspace admission get ws-123 user-456
+```
+
+### workspace admission revoke
+
+Revoke an identity's admission to a workspace.
+
+```bash
+sovra workspace admission revoke ws-123 user-456
+```
+
 ### workspace archive
 
 ```bash

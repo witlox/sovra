@@ -518,6 +518,27 @@ func Migrations() []Migration {
 			ALTER TABLE backups ADD COLUMN IF NOT EXISTS data BYTEA;
 			ALTER TABLE backups ADD COLUMN IF NOT EXISTS restored_at TIMESTAMP`,
 		},
+		{
+			Version:     37,
+			Description: "Create workspace_admissions table",
+			SQL: `CREATE TABLE IF NOT EXISTS workspace_admissions (
+				id VARCHAR(255) PRIMARY KEY,
+				workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+				org_id VARCHAR(255) NOT NULL,
+				identity_id VARCHAR(255) NOT NULL,
+				identity_type VARCHAR(50) NOT NULL,
+				status VARCHAR(50) NOT NULL DEFAULT 'active',
+				granted_by VARCHAR(255) NOT NULL,
+				granted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+				revoked_at TIMESTAMP,
+				revoked_by VARCHAR(255),
+				CONSTRAINT chk_admission_status CHECK (status IN ('active', 'revoked')),
+				CONSTRAINT uq_workspace_admission UNIQUE(workspace_id, identity_id)
+			);
+			CREATE INDEX IF NOT EXISTS idx_workspace_admissions_ws ON workspace_admissions(workspace_id);
+			CREATE INDEX IF NOT EXISTS idx_workspace_admissions_identity ON workspace_admissions(identity_id);
+			CREATE INDEX IF NOT EXISTS idx_workspace_admissions_active ON workspace_admissions(workspace_id, identity_id) WHERE status = 'active'`,
+		},
 	}
 }
 

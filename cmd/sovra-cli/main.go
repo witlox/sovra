@@ -1617,6 +1617,133 @@ func init() {
 }
 
 // ============================================================================
+// Workspace Admission Commands
+// ============================================================================
+
+var admissionCmd = &cobra.Command{
+	Use:   "admission",
+	Short: "Workspace admission management",
+	Long:  `Manage tiered admission grants for workspace access control.`,
+}
+
+var admissionGrantCmd = &cobra.Command{
+	Use:   "grant [workspace-id]",
+	Short: "Grant admission to a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		identityID, _ := cmd.Flags().GetString("identity-id")
+		identityType, _ := cmd.Flags().GetString("identity-type")
+		orgID, _ := cmd.Flags().GetString("org-id")
+
+		if identityID == "" {
+			return fmt.Errorf("--identity-id is required")
+		}
+
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		adm, err := c.GrantAdmission(ctx, args[0], client.GrantAdmissionRequest{
+			IdentityID:   identityID,
+			IdentityType: models.IdentityType(identityType),
+			OrgID:        orgID,
+		})
+		if err != nil {
+			return fmt.Errorf("grant admission: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(adm, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("Admission granted: %s → workspace %s (status: %s)\n", adm.IdentityID, adm.WorkspaceID, adm.Status)
+		}
+		return nil
+	},
+}
+
+var admissionListCmd = &cobra.Command{
+	Use:   "list [workspace-id]",
+	Short: "List admissions for a workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		admissions, err := c.ListAdmissions(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("list admissions: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(admissions, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			for _, a := range admissions {
+				fmt.Printf("%s  %s  %s  %s\n", a.ID, a.IdentityID, a.Status, a.GrantedAt.Format(time.RFC3339))
+			}
+		}
+		return nil
+	},
+}
+
+var admissionGetCmd = &cobra.Command{
+	Use:   "get [workspace-id] [identity-id]",
+	Short: "Get admission status",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		adm, err := c.GetAdmission(ctx, args[0], args[1])
+		if err != nil {
+			return fmt.Errorf("get admission: %w", err)
+		}
+
+		jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+		if jsonOutput {
+			data, _ := json.MarshalIndent(adm, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("ID: %s\nIdentity: %s\nStatus: %s\nGranted by: %s\nGranted at: %s\n",
+				adm.ID, adm.IdentityID, adm.Status, adm.GrantedBy, adm.GrantedAt.Format(time.RFC3339))
+		}
+		return nil
+	},
+}
+
+var admissionRevokeCmd = &cobra.Command{
+	Use:   "revoke [workspace-id] [identity-id]",
+	Short: "Revoke admission from a workspace",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := getClient(cmd)
+		ctx := context.Background()
+
+		if err := c.RevokeAdmission(ctx, args[0], args[1]); err != nil {
+			return fmt.Errorf("revoke admission: %w", err)
+		}
+
+		fmt.Printf("Admission revoked: %s from workspace %s\n", args[1], args[0])
+		return nil
+	},
+}
+
+func init() {
+	admissionGrantCmd.Flags().String("identity-id", "", "Identity ID to grant admission to")
+	admissionGrantCmd.Flags().String("identity-type", "user", "Identity type (user, service, device, admin)")
+	admissionGrantCmd.Flags().String("org-id", "", "Organization ID")
+
+	admissionCmd.AddCommand(admissionGrantCmd)
+	admissionCmd.AddCommand(admissionListCmd)
+	admissionCmd.AddCommand(admissionGetCmd)
+	admissionCmd.AddCommand(admissionRevokeCmd)
+
+	workspaceCmd.AddCommand(admissionCmd)
+}
+
+// ============================================================================
 // Federation Commands
 // ============================================================================
 

@@ -107,10 +107,20 @@ App → Policy Check → Workspace Vault → Decrypt → Audit (both orgs)
 
 1. Network: mTLS everywhere
 2. Auth: CRK signatures, certificates
-3. Authz: OPA + Vault policies
+3. Authz: Tiered admission + OPA + Vault policies
 4. Encryption: TLS 1.3, AES-256
 5. Audit: Immutable logs
 6. Monitoring: Anomaly detection
+
+### Tiered Admission Control
+
+Encrypt/decrypt operations enforce user-level admission checks on top of organization-level participation:
+
+- **CONFIDENTIAL**: Auto-admit via SSO group membership
+- **SECRET**: Group membership AND explicit admission grant
+- **CRK-protected**: Explicit admission grant required
+
+Go-based tier enforcement is the security floor. Optional OPA workspace policies can further restrict access but never loosen tier rules.
 
 ### Zero-Knowledge
 

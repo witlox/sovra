@@ -2,6 +2,8 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/witlox/sovra/internal/rotation"
 	"github.com/witlox/sovra/internal/workspace"
 	"github.com/witlox/sovra/pkg/metrics"
+	"github.com/witlox/sovra/pkg/models"
 	"github.com/witlox/sovra/pkg/vault"
 )
 
@@ -50,23 +53,26 @@ func DefaultRouterConfig() *RouterConfig {
 
 // Services holds all service dependencies for the API.
 type Services struct {
-	Workspace             workspace.Service
-	Federation            federation.Service
-	Policy                policy.Service
-	Audit                 audit.Service
-	Edge                  edge.Service
-	CRKManager            crk.Manager
-	CRKCeremony           crk.CeremonyManager
-	CRKGenerationCeremony crk.GenerationCeremonyManager
-	Identity              *identity.Manager
-	PKI                   *vault.PKIClient
-	EmergencyAccess       *identity.EmergencyAccessManager
-	AccountRecovery       *identity.AccountRecoveryManager
-	Compliance            *compliance.ReportGenerator
-	RotationScheduler     *rotation.Scheduler
-	GroupBindingRepo      workspace.GroupBindingRepository
-	Backup                backup.Service
-	Messaging             messaging.Service
+	Workspace                workspace.Service
+	WorkspaceRequest         workspace.WorkspaceRequestService
+	Federation               federation.Service
+	Policy                   policy.Service
+	Audit                    audit.Service
+	Edge                     edge.Service
+	CRKManager               crk.Manager
+	CRKCeremony              crk.CeremonyManager
+	CRKGenerationCeremony    crk.GenerationCeremonyManager
+	Identity                 *identity.Manager
+	PKI                      *vault.PKIClient
+	EmergencyAccess          *identity.EmergencyAccessManager
+	AccountRecovery          *identity.AccountRecoveryManager
+	Compliance               *compliance.ReportGenerator
+	RotationScheduler        *rotation.Scheduler
+	GroupBindingRepo         workspace.GroupBindingRepository
+	GroupFederationCouplings workspace.GroupFederationCouplingRepository
+	AdmissionRepo            workspace.AdmissionRepository
+	Backup                   backup.Service
+	Messaging                messaging.Service
 }
 
 // NewRouter creates a new chi router with all middleware and routes.
@@ -124,6 +130,9 @@ func NewRouter(config *RouterConfig, services *Services) chi.Router {
 	registerBackupRoutes(r, services)
 	registerMessageRoutes(r, services)
 	registerActivityRoutes(r, services)
+	registerWorkspaceRequestRoutes(r, services)
+	registerFederationRequestRoutes(r, services)
+	registerGroupFederationCouplingRoutes(r, services)
 
 	return r
 }
@@ -235,6 +244,15 @@ func registerWorkspaceRoutes(r chi.Router, services *Services) {
 			accessHandler := NewWorkspaceAccessRequestHandler(services.Identity, services.GroupBindingRepo)
 			r.Post("/{id}/request-access", accessHandler.RequestAccess)
 		}
+
+		// Workspace admission management
+		if services.AdmissionRepo != nil {
+			admHandler := NewWorkspaceAdmissionHandler(services.AdmissionRepo, nil)
+			r.Post("/{id}/admissions", admHandler.Grant)
+			r.Get("/{id}/admissions", admHandler.List)
+			r.Get("/{id}/admissions/{identityId}", admHandler.GetStatus)
+			r.Delete("/{id}/admissions/{identityId}", admHandler.Revoke)
+		}
 	})
 }
 
@@ -243,7 +261,11 @@ func registerFederationRoutes(r chi.Router, services *Services) {
 	if services == nil || services.Federation == nil {
 		return
 	}
-	handler := NewFederationHandler(services.Federation)
+	var opts []func(*FederationHandler)
+	if services.Policy != nil {
+		opts = append(opts, WithFederationPolicyService(services.Policy))
+	}
+	handler := NewFederationHandler(services.Federation, opts...)
 	r.Route("/api/v1/federation", func(r chi.Router) {
 		r.Post("/init", handler.Init)
 		r.Post("/establish", handler.Establish)
@@ -339,6 +361,10 @@ func registerCRKRoutes(r chi.Router, services *Services) {
 func registerIdentityRoutes(r chi.Router, services *Services) {
 	if services == nil || services.Identity == nil {
 		return
+	}
+	// Wire policy evaluator for OPA-filtered group listing
+	if services.Policy != nil {
+		services.Identity.SetPolicyEvaluator(&policyServiceAdapter{svc: services.Policy})
 	}
 	handler := NewIdentityHandler(services.Identity)
 	r.Route("/api/v1/identities", func(r chi.Router) {
@@ -528,4 +554,64 @@ func registerActivityRoutes(r chi.Router, services *Services) {
 		r.Get("/", handler.List)
 		r.Post("/export", handler.Export)
 	})
+}
+
+// registerWorkspaceRequestRoutes registers workspace request endpoints.
+func registerWorkspaceRequestRoutes(r chi.Router, services *Services) {
+	if services == nil || services.WorkspaceRequest == nil {
+		return
+	}
+	handler := NewWorkspaceRequestHandler(services.WorkspaceRequest)
+	r.Route("/api/v1/workspace-requests", func(r chi.Router) {
+		r.Post("/", handler.Create)
+		r.Get("/", handler.ListMyRequests)
+		r.Get("/pending", handler.ListPendingRequests)
+		r.Get("/{requestId}", handler.GetRequest)
+		r.Post("/{requestId}/approve", handler.ApproveRequest)
+		r.Post("/{requestId}/deny", handler.DenyRequest)
+	})
+
+	// Register workspace relay handler for incoming federation messages
+	relayHandler := NewWorkspaceRelayHandler(services.WorkspaceRequest)
+	r.Post("/api/v1/workspace-relay", relayHandler.Handle)
+}
+
+// registerFederationRequestRoutes registers federation request endpoints.
+func registerFederationRequestRoutes(r chi.Router, services *Services) {
+	if services == nil || services.WorkspaceRequest == nil {
+		return
+	}
+	handler := NewFederationRequestHandler(services.WorkspaceRequest)
+	r.Route("/api/v1/federation-requests", func(r chi.Router) {
+		r.Post("/", handler.Create)
+		r.Get("/pending", handler.ListPending)
+		r.Get("/{requestId}", handler.Get)
+		r.Post("/{requestId}/approve", handler.Approve)
+		r.Post("/{requestId}/deny", handler.Deny)
+	})
+}
+
+// registerGroupFederationCouplingRoutes registers group-federation coupling endpoints.
+func registerGroupFederationCouplingRoutes(r chi.Router, services *Services) {
+	if services == nil || services.GroupFederationCouplings == nil {
+		return
+	}
+	handler := NewGroupFederationCouplingHandler(services.GroupFederationCouplings)
+	r.Get("/api/v1/group-federation-couplings", handler.List)
+}
+
+// policyServiceAdapter adapts policy.Service to identity.PolicyEvaluator.
+type policyServiceAdapter struct {
+	svc policy.Service
+}
+
+func (a *policyServiceAdapter) Evaluate(ctx context.Context, input models.PolicyInput) (*identity.PolicyEvaluationResult, error) {
+	result, err := a.svc.Evaluate(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("evaluate policy: %w", err)
+	}
+	return &identity.PolicyEvaluationResult{
+		Allowed:    result.Allowed,
+		DenyReason: result.DenyReason,
+	}, nil
 }

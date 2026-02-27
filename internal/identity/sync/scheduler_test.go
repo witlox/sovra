@@ -176,3 +176,93 @@ func TestSyncGroupsAuditsChanges(t *testing.T) {
 	// One removal + one addition = 2 audit events
 	assert.Len(t, auditor.events, 2)
 }
+
+// mockAdmissionCacheInvalidator records InvalidateForIdentity calls.
+type mockAdmissionCacheInvalidator struct {
+	invalidated []string
+}
+
+func (m *mockAdmissionCacheInvalidator) InvalidateForIdentity(identityID string) {
+	m.invalidated = append(m.invalidated, identityID)
+}
+
+func TestSyncGroupsInvalidatesCacheOnRemove(t *testing.T) {
+	repo := &mockGroupRepo{
+		groups: []*models.IdentityGroup{
+			{ID: "g1", OrgID: "org1", IDPGroupID: "idp-g1"},
+		},
+		members: map[string][]*models.GroupMembership{
+			"g1": {
+				{GroupID: "g1", IdentityID: "user-a"},
+				{GroupID: "g1", IdentityID: "user-b"},
+			},
+		},
+	}
+	checker := &mockGroupChecker{
+		members: map[string][]string{
+			"idp-g1": {"user-a"}, // user-b removed from IdP
+		},
+	}
+	auditor := &mockAuditor{}
+	invalidator := &mockAdmissionCacheInvalidator{}
+
+	s := NewScheduler(repo, checker, auditor, time.Hour)
+	s.SetAdmissionCacheInvalidator(invalidator)
+	s.syncGroups(context.Background())
+
+	assert.Len(t, invalidator.invalidated, 1)
+	assert.Equal(t, "user-b", invalidator.invalidated[0])
+}
+
+func TestSyncGroupsInvalidatesCacheOnAdd(t *testing.T) {
+	repo := &mockGroupRepo{
+		groups: []*models.IdentityGroup{
+			{ID: "g1", OrgID: "org1", IDPGroupID: "idp-g1"},
+		},
+		members: map[string][]*models.GroupMembership{
+			"g1": {
+				{GroupID: "g1", IdentityID: "user-a"},
+			},
+		},
+	}
+	checker := &mockGroupChecker{
+		members: map[string][]string{
+			"idp-g1": {"user-a", "user-b"}, // user-b added in IdP
+		},
+	}
+	auditor := &mockAuditor{}
+	invalidator := &mockAdmissionCacheInvalidator{}
+
+	s := NewScheduler(repo, checker, auditor, time.Hour)
+	s.SetAdmissionCacheInvalidator(invalidator)
+	s.syncGroups(context.Background())
+
+	assert.Len(t, invalidator.invalidated, 1)
+	assert.Equal(t, "user-b", invalidator.invalidated[0])
+}
+
+func TestSyncGroupsNoInvalidationWithoutInvalidator(t *testing.T) {
+	repo := &mockGroupRepo{
+		groups: []*models.IdentityGroup{
+			{ID: "g1", OrgID: "org1", IDPGroupID: "idp-g1"},
+		},
+		members: map[string][]*models.GroupMembership{
+			"g1": {
+				{GroupID: "g1", IdentityID: "user-a"},
+			},
+		},
+	}
+	checker := &mockGroupChecker{
+		members: map[string][]string{
+			"idp-g1": {"user-b"}, // user-a removed, user-b added
+		},
+	}
+	auditor := &mockAuditor{}
+
+	// No invalidator set — should not panic
+	s := NewScheduler(repo, checker, auditor, time.Hour)
+	s.syncGroups(context.Background())
+
+	assert.Len(t, repo.removed, 1)
+	assert.Len(t, repo.added, 1)
+}

@@ -12,16 +12,22 @@ import (
 	"github.com/witlox/sovra/pkg/models"
 )
 
+// AdmissionCacheInvalidator invalidates cached admission decisions on membership changes.
+type AdmissionCacheInvalidator interface {
+	InvalidateForIdentity(identityID string)
+}
+
 // Scheduler periodically syncs group membership from an external IdP.
 // Groups with a non-empty IDPGroupID are synced; members not in IdP are removed,
 // new members in IdP are added.
 type Scheduler struct {
-	groups   identity.GroupRepository
-	checker  idp.GroupMemberChecker
-	auditor  identity.Auditor
-	stopCh   chan struct{}
-	interval time.Duration
-	logger   *slog.Logger
+	groups               identity.GroupRepository
+	checker              idp.GroupMemberChecker
+	auditor              identity.Auditor
+	admissionInvalidator AdmissionCacheInvalidator
+	stopCh               chan struct{}
+	interval             time.Duration
+	logger               *slog.Logger
 }
 
 // NewScheduler creates a new group sync scheduler.
@@ -39,6 +45,11 @@ func NewScheduler(
 		interval: interval,
 		logger:   slog.Default(),
 	}
+}
+
+// SetAdmissionCacheInvalidator sets the cache invalidator for admission decisions.
+func (s *Scheduler) SetAdmissionCacheInvalidator(inv AdmissionCacheInvalidator) {
+	s.admissionInvalidator = inv
 }
 
 // Start begins the sync loop.
@@ -117,6 +128,9 @@ func (s *Scheduler) syncGroup(ctx context.Context, group *models.IdentityGroup) 
 				s.logger.ErrorContext(ctx, "group sync: remove member", "group_id", group.ID, "identity_id", m.IdentityID, "error", err)
 				continue
 			}
+			if s.admissionInvalidator != nil {
+				s.admissionInvalidator.InvalidateForIdentity(m.IdentityID)
+			}
 			s.logger.InfoContext(ctx, "group sync: removed member",
 				"group_id", group.ID, "identity_id", m.IdentityID)
 			s.auditLog(ctx, group.OrgID, string(models.AuditEventTypeGroupMemberRemove), map[string]any{
@@ -139,6 +153,9 @@ func (s *Scheduler) syncGroup(ctx context.Context, group *models.IdentityGroup) 
 			if err := s.groups.AddMember(ctx, membership); err != nil {
 				s.logger.ErrorContext(ctx, "group sync: add member", "group_id", group.ID, "identity_id", subject, "error", err)
 				continue
+			}
+			if s.admissionInvalidator != nil {
+				s.admissionInvalidator.InvalidateForIdentity(subject)
 			}
 			s.logger.InfoContext(ctx, "group sync: added member",
 				"group_id", group.ID, "identity_id", subject)

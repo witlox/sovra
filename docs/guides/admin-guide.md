@@ -343,6 +343,40 @@ sovra --cert admin.crt --key admin.key workspace extend <workspace-id> \
   --expires-at 2027-01-01T00:00:00Z
 ```
 
+### Workspace Admission Management
+
+Sovra enforces tiered admission control on encrypt/decrypt operations based on
+workspace classification:
+
+- **CONFIDENTIAL** workspaces: Group membership is sufficient (auto-admit)
+- **SECRET** workspaces: Group membership AND explicit admission required
+- **CRK-protected** workspaces: Explicit admission required regardless of classification
+
+For SECRET and CRK-protected workspaces, grant explicit admissions:
+
+```bash
+# Grant admission to a user
+sovra --cert admin.crt --key admin.key workspace admission grant <workspace-id> \
+  --identity-id <user-id> \
+  --identity-type user \
+  --org-id <org-id>
+
+# List admissions for a workspace
+sovra --cert admin.crt --key admin.key workspace admission list <workspace-id>
+
+# Check admission status for a specific identity
+sovra --cert admin.crt --key admin.key workspace admission get <workspace-id> <identity-id>
+
+# Revoke admission
+sovra --cert admin.crt --key admin.key workspace admission revoke <workspace-id> <identity-id>
+```
+
+Admission decisions are cached for 30 seconds. When a user is removed from an
+SSO group, the cache is automatically invalidated on the next IdP sync cycle.
+
+For CONFIDENTIAL workspaces, no explicit admission management is needed — group
+membership controls access automatically.
+
 ### Requesting Workspace Access
 
 Users who are not yet group members can request access to a workspace. This
@@ -1163,9 +1197,20 @@ sovra --cert admin.crt --key admin.key federation renew-cert <partner-org-id>
 
 **Workspace access denied:**
 
-Verify the user is a member of the workspace's bound group:
+Check the workspace classification and verify the user meets the admission
+requirements for that tier:
 
 ```bash
-sovra --cert admin.crt --key admin.key identity group join-requests <group-id>
+# Check workspace classification and CRK-protection status
 sovra --cert admin.crt --key admin.key workspace get <workspace-id>
+
+# Verify group membership
+sovra --cert admin.crt --key admin.key identity group join-requests <group-id>
+
+# For SECRET/CRK-protected workspaces, check admission status
+sovra --cert admin.crt --key admin.key workspace admission get <workspace-id> <identity-id>
+
+# Grant admission if needed
+sovra --cert admin.crt --key admin.key workspace admission grant <workspace-id> \
+  --identity-id <identity-id> --identity-type user --org-id <org-id>
 ```

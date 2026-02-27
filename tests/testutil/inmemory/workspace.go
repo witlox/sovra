@@ -313,7 +313,7 @@ func (s *WorkspaceService) RotateDEK(ctx context.Context, workspaceID string, si
 	return nil
 }
 
-func (s *WorkspaceService) ExportWorkspace(ctx context.Context, workspaceID string) (*workspace.WorkspaceBundle, error) {
+func (s *WorkspaceService) ExportWorkspace(ctx context.Context, workspaceID string, _ []byte) (*workspace.WorkspaceBundle, error) {
 	ws, err := s.repo.Get(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -326,7 +326,7 @@ func (s *WorkspaceService) ExportWorkspace(ctx context.Context, workspaceID stri
 	}, nil
 }
 
-func (s *WorkspaceService) ImportWorkspace(ctx context.Context, bundle *workspace.WorkspaceBundle) (*models.Workspace, error) {
+func (s *WorkspaceService) ImportWorkspace(ctx context.Context, bundle *workspace.WorkspaceBundle, _ []byte) (*models.Workspace, error) {
 	if bundle.Workspace.ID == "" {
 		bundle.Workspace.ID = uuid.New().String()
 	}

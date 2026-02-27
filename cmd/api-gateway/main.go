@@ -107,6 +107,7 @@ func main() {
 
 	invitationRepo := postgres.NewWorkspaceInvitationRepository(db)
 	groupBindingRepo := postgres.NewWorkspaceGroupBindingRepository(db)
+	admissionRepo := postgres.NewWorkspaceAdmissionRepository(db)
 
 	auditSvc := audit.NewAuditService(auditRepo)
 	wsSvc := workspace.NewWorkspaceService(wsRepo, vaultClient, auditSvc, invitationRepo)
@@ -296,6 +297,7 @@ func main() {
 		Messaging:             msgSvc,
 		Backup:                backupSvc,
 		GroupBindingRepo:      groupBindingRepo,
+		AdmissionRepo:         admissionRepo,
 	}
 
 	routerCfg := api.DefaultRouterConfig()

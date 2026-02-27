@@ -82,8 +82,9 @@ const (
 type WorkspaceStatus string
 
 const (
-	WorkspaceStatusActive   WorkspaceStatus = "active"
-	WorkspaceStatusArchived WorkspaceStatus = "archived"
+	WorkspaceStatusActive         WorkspaceStatus = "active"
+	WorkspaceStatusArchived       WorkspaceStatus = "archived"
+	WorkspaceStatusPendingPairing WorkspaceStatus = "pending_pairing"
 )
 
 // WorkspaceParticipant represents an organization's membership in a workspace.
@@ -106,6 +107,8 @@ type Workspace struct {
 	DEKWrapped      map[string][]byte      `json:"dek_wrapped"`
 	Status          WorkspaceStatus        `json:"status"`
 	CRKProtected    bool                   `json:"crk_protected"`
+	FederationID    string                 `json:"federation_id,omitempty"` // Links workspace to its federation
+	Bilateral       bool                   `json:"bilateral,omitempty"`     // Both participant orgs are co-owners
 	CreatedAt       time.Time              `json:"created_at"`
 	UpdatedAt       time.Time              `json:"updated_at"`
 	ExpiresAt       time.Time              `json:"expires_at,omitempty"`
@@ -200,6 +203,20 @@ const (
 	AuditEventTypeMessageDeliver AuditEventType = "message.deliver"
 	AuditEventTypeMessageRead    AuditEventType = "message.read"
 	AuditEventTypeMessageDelete  AuditEventType = "message.delete"
+
+	AuditEventTypeWorkspaceRequest         AuditEventType = "workspace.request"
+	AuditEventTypeWorkspaceRequestApprove  AuditEventType = "workspace.request.approve"
+	AuditEventTypeWorkspaceRequestDeny     AuditEventType = "workspace.request.deny"
+	AuditEventTypeFederationRequest        AuditEventType = "federation.request"
+	AuditEventTypeFederationRequestApprove AuditEventType = "federation.request.approve"
+	AuditEventTypeFederationRequestDeny    AuditEventType = "federation.request.deny"
+	AuditEventTypeWorkspacePair            AuditEventType = "workspace.pair"
+	AuditEventTypeWorkspaceArchiveRemote   AuditEventType = "workspace.archive.remote"
+
+	AuditEventTypeAdmissionGrant  AuditEventType = "workspace.admission.grant"
+	AuditEventTypeAdmissionRevoke AuditEventType = "workspace.admission.revoke"
+	AuditEventTypeAdmissionDenied AuditEventType = "workspace.admission.denied"
+	AuditEventTypeAutoAdmit       AuditEventType = "workspace.auto_admit"
 )
 
 // AuditEventResult represents the result of an audited operation.
@@ -361,4 +378,91 @@ type DirectMessage struct {
 	ReadAt         *time.Time          `json:"read_at,omitempty"`
 	ExpiresAt      *time.Time          `json:"expires_at,omitempty"`
 	ErrorDetail    string              `json:"error_detail,omitempty"`
+}
+
+// =============================================================================
+// Workspace Request Models
+// =============================================================================
+
+// WorkspaceRequestStatus represents the status of a workspace request.
+type WorkspaceRequestStatus string
+
+const (
+	WorkspaceRequestStatusPending  WorkspaceRequestStatus = "pending"
+	WorkspaceRequestStatusApproved WorkspaceRequestStatus = "approved"
+	WorkspaceRequestStatusDenied   WorkspaceRequestStatus = "denied"
+)
+
+// WorkspaceRequest represents a user-initiated request to create a workspace.
+type WorkspaceRequest struct {
+	ID                  string                 `json:"id"`
+	RequesterID         string                 `json:"requester_id"`
+	OrgID               string                 `json:"org_id"`
+	GroupID             string                 `json:"group_id"`
+	FederationID        string                 `json:"federation_id,omitempty"`
+	TargetOrgID         string                 `json:"target_org_id,omitempty"`
+	Locked              bool                   `json:"locked"`
+	FederationRequested bool                   `json:"federation_requested"`
+	Justification       string                 `json:"justification,omitempty"`
+	Status              WorkspaceRequestStatus `json:"status"`
+	ReviewedBy          string                 `json:"reviewed_by,omitempty"`
+	WorkspaceID         string                 `json:"workspace_id,omitempty"` // Set on approval
+	CreatedAt           time.Time              `json:"created_at"`
+	ReviewedAt          time.Time              `json:"reviewed_at,omitempty"`
+}
+
+// FederationRequestStatus represents the status of a federation request.
+type FederationRequestStatus string
+
+const (
+	FederationRequestStatusPending  FederationRequestStatus = "pending"
+	FederationRequestStatusApproved FederationRequestStatus = "approved"
+	FederationRequestStatusDenied   FederationRequestStatus = "denied"
+)
+
+// FederationRequest represents a user-initiated request to establish a federation.
+type FederationRequest struct {
+	ID            string                  `json:"id"`
+	RequesterID   string                  `json:"requester_id"`
+	OrgID         string                  `json:"org_id"`
+	TargetOrgID   string                  `json:"target_org_id"`
+	TargetURL     string                  `json:"target_url,omitempty"`
+	Justification string                  `json:"justification,omitempty"`
+	Status        FederationRequestStatus `json:"status"`
+	FederationID  string                  `json:"federation_id,omitempty"` // Set on approval
+	ReviewedBy    string                  `json:"reviewed_by,omitempty"`
+	CreatedAt     time.Time               `json:"created_at"`
+	ReviewedAt    time.Time               `json:"reviewed_at,omitempty"`
+}
+
+// WorkspaceAdmissionStatus represents the status of a workspace admission.
+type WorkspaceAdmissionStatus string
+
+const (
+	WorkspaceAdmissionStatusActive  WorkspaceAdmissionStatus = "active"
+	WorkspaceAdmissionStatusRevoked WorkspaceAdmissionStatus = "revoked"
+)
+
+// WorkspaceAdmission represents an explicit admission grant for a user to a workspace.
+type WorkspaceAdmission struct {
+	ID           string                   `json:"id"`
+	WorkspaceID  string                   `json:"workspace_id"`
+	OrgID        string                   `json:"org_id"`
+	IdentityID   string                   `json:"identity_id"`
+	IdentityType IdentityType             `json:"identity_type"`
+	Status       WorkspaceAdmissionStatus `json:"status"`
+	GrantedBy    string                   `json:"granted_by"`
+	GrantedAt    time.Time                `json:"granted_at"`
+	RevokedAt    *time.Time               `json:"revoked_at,omitempty"`
+	RevokedBy    string                   `json:"revoked_by,omitempty"`
+}
+
+// GroupFederationCoupling is a durable link between an identity group and a federation.
+// Survives workspace archival.
+type GroupFederationCoupling struct {
+	ID           string    `json:"id"`
+	GroupID      string    `json:"group_id"`
+	FederationID string    `json:"federation_id"`
+	OrgID        string    `json:"org_id"`
+	CreatedAt    time.Time `json:"created_at"`
 }

@@ -208,6 +208,113 @@ The authorization input has this structure:
 }
 ```
 
+## Workspace Admission Tiers
+
+In addition to OPA policies, Sovra enforces **tiered admission control** on encrypt/decrypt operations. The tier is determined by the workspace's classification and CRK-protection status:
+
+| Tier | Classification | Requirements |
+|------|---------------|-------------|
+| **CONFIDENTIAL (auto)** | CONFIDENTIAL | SSO group membership is sufficient |
+| **SECRET (explicit)** | SECRET | Group membership AND explicit admission grant |
+| **CRK (explicit)** | Any (CRK-protected) | Explicit admission grant only |
+
+### How It Works
+
+Authorization for encrypt/decrypt is a three-stage check:
+
+1. **Organization-level**: The caller's organization must be a workspace participant
+2. **User-level tier check**: Based on classification (see table above)
+3. **OPA policy overlay**: Optional workspace-specific OPA policies can further restrict access but never loosen tier rules
+
+The Go-based tier logic is the **security floor** — it cannot be bypassed by OPA policies. OPA can only add further restrictions (time-based, role-based, etc.).
+
+### Managing Admissions
+
+Admissions are managed via the API or CLI:
+
+```bash
+# Grant admission (required for SECRET and CRK-protected workspaces)
+sovra workspace admission grant ws-123 \
+  --identity-id user-456 \
+  --identity-type user \
+  --org-id org-a
+
+# List admissions
+sovra workspace admission list ws-123
+
+# Revoke admission
+sovra workspace admission revoke ws-123 user-456
+```
+
+### Admission Caching
+
+Admission decisions are cached for 30 seconds (configurable) to reduce latency on the encrypt/decrypt hot path. The cache is automatically invalidated when:
+
+- An admission is revoked
+- A group member is added or removed via IdP sync
+
+### OPA Policy Integration
+
+When a workspace has an OPA policy, the admission checker passes enriched input to the policy engine after the tier check passes:
+
+```json
+{
+  "actor": "user-456",
+  "operation": "admit",
+  "workspace": "ws-123",
+  "metadata": {
+    "classification": "SECRET",
+    "crk_protected": false,
+    "admission_tier": "secret_explicit",
+    "org_id": "org-a",
+    "group_membership": true
+  }
+}
+```
+
+This uses the `sovra/workspace/{id}/allow` decision path. Example Rego policy that adds time-based restriction on top of tier enforcement:
+
+```rego
+package sovra.workspace.ws_123
+
+import rego.v1
+
+# Only allow admission during business hours
+allow if {
+    current_hour := time.clock(time.now_ns())[0]
+    current_hour >= 9
+    current_hour < 18
+}
+```
+
+### Example Policies
+
+Example Rego policies for admission control are available in `examples/policies/`:
+
+| File | Description |
+|------|-------------|
+| `admission-business-hours.rego` | Restrict workspace access to business hours |
+| `admission-org-allowlist.rego` | Limit access to specific partner organizations |
+| `admission-secret-dual-check.rego` | Combined hours + org + weekday check for SECRET workspaces |
+| `admission-crk-audit-only.rego` | Template for CRK-protected workspace restrictions |
+
+Upload an example policy:
+
+```bash
+sovra policy create \
+  --name admission-business-hours \
+  --workspace ws-123 \
+  --rego-file examples/policies/admission-business-hours.rego
+```
+
+### Revocation Behavior
+
+- **CONFIDENTIAL**: Removing a user from the SSO group blocks access on the next sync cycle
+- **SECRET**: Removing a user from the SSO group blocks access even if the admission record exists (both checks must pass). The admission record persists for re-addition
+- **CRK-protected**: Only explicit revocation via `workspace admission revoke` removes access
+
+---
+
 ## Federation Authorization
 
 For federated access, additional checks apply:

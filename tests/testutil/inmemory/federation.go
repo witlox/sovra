@@ -256,3 +256,15 @@ func (s *FederationService) RotateCertificate(ctx context.Context, partnerOrgID 
 	rand.Read(cert)
 	return cert, nil
 }
+
+func (s *FederationService) RelayMessage(ctx context.Context, partnerOrgID string, payload []byte) ([]byte, error) {
+	return []byte(`{"status":"ok"}`), nil
+}
+
+func (s *FederationService) IsFederationActive(ctx context.Context, partnerOrgID string) (bool, error) {
+	fed, err := s.Status(ctx, partnerOrgID)
+	if err != nil {
+		return false, err
+	}
+	return fed.Status == models.FederationStatusActive, nil
+}

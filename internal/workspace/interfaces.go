@@ -116,12 +116,98 @@ type GroupMembershipChecker interface {
 	IsMember(ctx context.Context, groupID, identityID string) (bool, error)
 }
 
+// AdmissionRepository handles workspace admission persistence.
+type AdmissionRepository interface {
+	Create(ctx context.Context, admission *models.WorkspaceAdmission) error
+	Get(ctx context.Context, workspaceID, identityID string) (*models.WorkspaceAdmission, error)
+	IsAdmitted(ctx context.Context, workspaceID, identityID string) (bool, error)
+	ListByWorkspace(ctx context.Context, workspaceID string) ([]*models.WorkspaceAdmission, error)
+	ListByIdentity(ctx context.Context, identityID string) ([]*models.WorkspaceAdmission, error)
+	Revoke(ctx context.Context, workspaceID, identityID, revokedBy string) error
+	RevokeAllForIdentity(ctx context.Context, identityID, revokedBy string) error
+}
+
+// PolicyEvaluator evaluates OPA workspace policies for admission decisions.
+type PolicyEvaluator interface {
+	Evaluate(ctx context.Context, input models.PolicyInput) (*PolicyEvaluationResult, error)
+}
+
+// PolicyEvaluationResult holds the result of a policy evaluation.
+type PolicyEvaluationResult struct {
+	Allowed    bool
+	DenyReason string
+}
+
+// CreateBilateralRequest holds fields for bilateral workspace creation.
+type CreateBilateralRequest struct {
+	Name           string
+	Participants   []string
+	Classification models.Classification
+	Mode           models.WorkspaceMode
+	Purpose        string
+	ExpiresAt      time.Time
+	CRKSignature   []byte
+	FederationID   string
+	Bilateral      bool
+}
+
 // UpdateRequest represents a workspace update request.
 type UpdateRequest struct {
 	Purpose        string
 	Classification models.Classification
 	Mode           models.WorkspaceMode
 	CRKSignature   []byte
+}
+
+// WorkspaceRequestRepository handles workspace request persistence.
+type WorkspaceRequestRepository interface {
+	Create(ctx context.Context, req *models.WorkspaceRequest) error
+	Get(ctx context.Context, id string) (*models.WorkspaceRequest, error)
+	ListPending(ctx context.Context, orgID string) ([]*models.WorkspaceRequest, error)
+	ListByRequester(ctx context.Context, requesterID string) ([]*models.WorkspaceRequest, error)
+	Update(ctx context.Context, req *models.WorkspaceRequest) error
+}
+
+// FederationRequestRepository handles federation request persistence.
+type FederationRequestRepository interface {
+	Create(ctx context.Context, req *models.FederationRequest) error
+	Get(ctx context.Context, id string) (*models.FederationRequest, error)
+	ListPending(ctx context.Context, orgID string) ([]*models.FederationRequest, error)
+	Update(ctx context.Context, req *models.FederationRequest) error
+}
+
+// GroupFederationCouplingRepository handles group-federation coupling persistence.
+type GroupFederationCouplingRepository interface {
+	Create(ctx context.Context, coupling *models.GroupFederationCoupling) error
+	Get(ctx context.Context, id string) (*models.GroupFederationCoupling, error)
+	GetByGroupAndFederation(ctx context.Context, groupID, federationID string) (*models.GroupFederationCoupling, error)
+	ListByGroup(ctx context.Context, groupID string) ([]*models.GroupFederationCoupling, error)
+	ListByFederation(ctx context.Context, federationID string) ([]*models.GroupFederationCoupling, error)
+	Delete(ctx context.Context, id string) error
+}
+
+// WorkspaceRequestService handles user-initiated workspace request flows.
+type WorkspaceRequestService interface {
+	CreateRequest(ctx context.Context, input CreateWorkspaceRequestInput) (*models.WorkspaceRequest, error)
+	ListPendingRequests(ctx context.Context, orgID string) ([]*models.WorkspaceRequest, error)
+	ListMyRequests(ctx context.Context, requesterID string) ([]*models.WorkspaceRequest, error)
+	GetRequest(ctx context.Context, id string) (*models.WorkspaceRequest, error)
+	ApproveRequest(ctx context.Context, requestID, adminID string, crkSig []byte) (*models.Workspace, error)
+	DenyRequest(ctx context.Context, requestID, adminID, reason string) error
+	HandlePairingRequest(ctx context.Context, payload []byte) error
+	HandleArchiveNotification(ctx context.Context, payload []byte) error
+}
+
+// CreateWorkspaceRequestInput is the input for creating a workspace request.
+type CreateWorkspaceRequestInput struct {
+	RequesterID         string
+	OrgID               string
+	GroupID             string
+	FederationID        string
+	TargetOrgID         string
+	Locked              bool
+	FederationRequested bool
+	Justification       string
 }
 
 // Service handles workspace business logic.

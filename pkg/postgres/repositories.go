@@ -4077,3 +4077,143 @@ func scanDirectMessages(rows *sql.Rows) ([]*models.DirectMessage, error) {
 	}
 	return msgs, nil
 }
+
+// =============================================================================
+// Workspace Admission Repository
+// =============================================================================
+
+// WorkspaceAdmissionRepository implements workspace.AdmissionRepository using PostgreSQL.
+type WorkspaceAdmissionRepository struct {
+	db *DB
+}
+
+// NewWorkspaceAdmissionRepository creates a new WorkspaceAdmissionRepository.
+func NewWorkspaceAdmissionRepository(db *DB) *WorkspaceAdmissionRepository {
+	return &WorkspaceAdmissionRepository{db: db}
+}
+
+func (r *WorkspaceAdmissionRepository) Create(ctx context.Context, admission *models.WorkspaceAdmission) error {
+	if admission.ID == "" {
+		admission.ID = uuid.New().String()
+	}
+	if admission.GrantedAt.IsZero() {
+		admission.GrantedAt = time.Now()
+	}
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO workspace_admissions (id, workspace_id, org_id, identity_id, identity_type, status, granted_by, granted_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		admission.ID, admission.WorkspaceID, admission.OrgID, admission.IdentityID,
+		admission.IdentityType, admission.Status, admission.GrantedBy, admission.GrantedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create workspace admission: %w", err)
+	}
+	return nil
+}
+
+func (r *WorkspaceAdmissionRepository) Get(ctx context.Context, workspaceID, identityID string) (*models.WorkspaceAdmission, error) {
+	a := &models.WorkspaceAdmission{}
+	var revokedAt sql.NullTime
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, workspace_id, org_id, identity_id, identity_type, status, granted_by, granted_at, revoked_at, revoked_by
+		 FROM workspace_admissions WHERE workspace_id = $1 AND identity_id = $2`,
+		workspaceID, identityID,
+	).Scan(&a.ID, &a.WorkspaceID, &a.OrgID, &a.IdentityID, &a.IdentityType,
+		&a.Status, &a.GrantedBy, &a.GrantedAt, &revokedAt, &a.RevokedBy)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return nil, errors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get workspace admission: %w", err)
+	}
+	if revokedAt.Valid {
+		a.RevokedAt = &revokedAt.Time
+	}
+	return a, nil
+}
+
+func (r *WorkspaceAdmissionRepository) IsAdmitted(ctx context.Context, workspaceID, identityID string) (bool, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM workspace_admissions WHERE workspace_id = $1 AND identity_id = $2 AND status = 'active'`,
+		workspaceID, identityID,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check workspace admission: %w", err)
+	}
+	return count > 0, nil
+}
+
+func (r *WorkspaceAdmissionRepository) ListByWorkspace(ctx context.Context, workspaceID string) ([]*models.WorkspaceAdmission, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, workspace_id, org_id, identity_id, identity_type, status, granted_by, granted_at, revoked_at, revoked_by
+		 FROM workspace_admissions WHERE workspace_id = $1 ORDER BY granted_at DESC`,
+		workspaceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list workspace admissions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanAdmissions(rows)
+}
+
+func (r *WorkspaceAdmissionRepository) ListByIdentity(ctx context.Context, identityID string) ([]*models.WorkspaceAdmission, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, workspace_id, org_id, identity_id, identity_type, status, granted_by, granted_at, revoked_at, revoked_by
+		 FROM workspace_admissions WHERE identity_id = $1 ORDER BY granted_at DESC`,
+		identityID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list admissions by identity: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanAdmissions(rows)
+}
+
+func (r *WorkspaceAdmissionRepository) Revoke(ctx context.Context, workspaceID, identityID, revokedBy string) error {
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE workspace_admissions SET status = 'revoked', revoked_at = $1, revoked_by = $2
+		 WHERE workspace_id = $3 AND identity_id = $4 AND status = 'active'`,
+		time.Now(), revokedBy, workspaceID, identityID,
+	)
+	if err != nil {
+		return fmt.Errorf("revoke workspace admission: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return errors.ErrNotFound
+	}
+	return nil
+}
+
+func (r *WorkspaceAdmissionRepository) RevokeAllForIdentity(ctx context.Context, identityID, revokedBy string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE workspace_admissions SET status = 'revoked', revoked_at = $1, revoked_by = $2
+		 WHERE identity_id = $3 AND status = 'active'`,
+		time.Now(), revokedBy, identityID,
+	)
+	if err != nil {
+		return fmt.Errorf("revoke all admissions for identity: %w", err)
+	}
+	return nil
+}
+
+func (r *WorkspaceAdmissionRepository) scanAdmissions(rows *sql.Rows) ([]*models.WorkspaceAdmission, error) {
+	var admissions []*models.WorkspaceAdmission
+	for rows.Next() {
+		a := &models.WorkspaceAdmission{}
+		var revokedAt sql.NullTime
+		if err := rows.Scan(&a.ID, &a.WorkspaceID, &a.OrgID, &a.IdentityID, &a.IdentityType,
+			&a.Status, &a.GrantedBy, &a.GrantedAt, &revokedAt, &a.RevokedBy); err != nil {
+			return nil, fmt.Errorf("scan workspace admission: %w", err)
+		}
+		if revokedAt.Valid {
+			a.RevokedAt = &revokedAt.Time
+		}
+		admissions = append(admissions, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate workspace admissions: %w", err)
+	}
+	return admissions, nil
+}

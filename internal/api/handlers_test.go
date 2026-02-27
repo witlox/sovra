@@ -3335,6 +3335,193 @@ func TestWorkspaceHandlerImport(t *testing.T) {
 }
 
 // =============================================================================
+// Workspace Admission Handler Tests
+// =============================================================================
+
+func TestWorkspaceAdmissionHandlerGrant(t *testing.T) {
+	repo := inmemory.NewAdmissionRepository()
+	handler := api.NewWorkspaceAdmissionHandler(repo, nil)
+
+	t.Run("grants admission with valid request", func(t *testing.T) {
+		reqBody := map[string]any{
+			"identity_id":   "user-alice",
+			"identity_type": "user",
+			"org_id":        "org-a",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/admissions", handler.Grant)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000/admissions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp models.WorkspaceAdmission
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "user-alice", resp.IdentityID)
+		assert.Equal(t, models.WorkspaceAdmissionStatusActive, resp.Status)
+	})
+
+	t.Run("returns 400 for missing identity_id", func(t *testing.T) {
+		reqBody := map[string]any{
+			"org_id": "org-a",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/admissions", handler.Grant)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000/admissions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/admissions", handler.Grant)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000/admissions", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid workspace UUID", func(t *testing.T) {
+		reqBody := map[string]any{
+			"identity_id": "user-alice",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		r := chi.NewRouter()
+		r.Post("/api/v1/workspaces/{id}/admissions", handler.Grant)
+
+		req := httptest.NewRequest("POST", "/api/v1/workspaces/not-a-uuid/admissions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestWorkspaceAdmissionHandlerList(t *testing.T) {
+	repo := inmemory.NewAdmissionRepository()
+	handler := api.NewWorkspaceAdmissionHandler(repo, nil)
+	ctx := context.Background()
+
+	wsID := "550e8400-e29b-41d4-a716-446655440000"
+	_ = repo.Create(ctx, &models.WorkspaceAdmission{
+		ID: "adm-1", WorkspaceID: wsID, IdentityID: "user-1",
+		Status: models.WorkspaceAdmissionStatusActive,
+	})
+	_ = repo.Create(ctx, &models.WorkspaceAdmission{
+		ID: "adm-2", WorkspaceID: wsID, IdentityID: "user-2",
+		Status: models.WorkspaceAdmissionStatusActive,
+	})
+
+	t.Run("lists admissions for workspace", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/workspaces/{id}/admissions", handler.List)
+
+		req := httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/admissions", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.InDelta(t, float64(2), resp["count"], 0)
+	})
+}
+
+func TestWorkspaceAdmissionHandlerGetStatus(t *testing.T) {
+	repo := inmemory.NewAdmissionRepository()
+	handler := api.NewWorkspaceAdmissionHandler(repo, nil)
+	ctx := context.Background()
+
+	wsID := "550e8400-e29b-41d4-a716-446655440000"
+	_ = repo.Create(ctx, &models.WorkspaceAdmission{
+		ID: "adm-1", WorkspaceID: wsID, IdentityID: "user-alice",
+		OrgID: "org-a", Status: models.WorkspaceAdmissionStatusActive,
+	})
+
+	t.Run("returns admission status", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/workspaces/{id}/admissions/{identityId}", handler.GetStatus)
+
+		req := httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/admissions/user-alice", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp models.WorkspaceAdmission
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "user-alice", resp.IdentityID)
+		assert.Equal(t, models.WorkspaceAdmissionStatusActive, resp.Status)
+	})
+
+	t.Run("returns 404 for unknown identity", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Get("/api/v1/workspaces/{id}/admissions/{identityId}", handler.GetStatus)
+
+		req := httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/admissions/nonexistent", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+func TestWorkspaceAdmissionHandlerRevoke(t *testing.T) {
+	repo := inmemory.NewAdmissionRepository()
+	handler := api.NewWorkspaceAdmissionHandler(repo, nil)
+	ctx := context.Background()
+
+	wsID := "550e8400-e29b-41d4-a716-446655440000"
+	_ = repo.Create(ctx, &models.WorkspaceAdmission{
+		ID: "adm-1", WorkspaceID: wsID, IdentityID: "user-alice",
+		Status: models.WorkspaceAdmissionStatusActive,
+	})
+
+	t.Run("revokes admission", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Delete("/api/v1/workspaces/{id}/admissions/{identityId}", handler.Revoke)
+
+		req := httptest.NewRequest("DELETE", "/api/v1/workspaces/"+wsID+"/admissions/user-alice", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+
+		// Verify admission is revoked
+		adm, _ := repo.Get(ctx, wsID, "user-alice")
+		assert.Equal(t, models.WorkspaceAdmissionStatusRevoked, adm.Status)
+	})
+
+	t.Run("returns 404 for unknown identity", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Delete("/api/v1/workspaces/{id}/admissions/{identityId}", handler.Revoke)
+
+		req := httptest.NewRequest("DELETE", "/api/v1/workspaces/"+wsID+"/admissions/nonexistent", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+// =============================================================================
 // Service Credential Rotation Handler Tests
 // =============================================================================
 

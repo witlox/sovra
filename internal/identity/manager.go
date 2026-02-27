@@ -134,21 +134,33 @@ type CreateAdminOptions struct {
 	SSOSubject  string
 }
 
+// PolicyEvaluator evaluates OPA policies for access control.
+type PolicyEvaluator interface {
+	Evaluate(ctx context.Context, input models.PolicyInput) (*PolicyEvaluationResult, error)
+}
+
+// PolicyEvaluationResult holds the result of a policy evaluation.
+type PolicyEvaluationResult struct {
+	Allowed    bool   `json:"allowed"`
+	DenyReason string `json:"deny_reason,omitempty"`
+}
+
 // Manager provides identity management operations.
 type Manager struct {
-	admins       AdminRepository
-	users        UserRepository
-	services     ServiceRepository
-	devices      DeviceRepository
-	groups       GroupRepository
-	roles        RoleRepository
-	joinRequests GroupJoinRequestRepository
-	crkProvider  CRKProvider
-	tokenGen     TokenGenerator
-	pkiIssuer    PKIIssuer
-	auditor      Auditor
-	certTTL      time.Duration
-	idpChecker   idp.SubjectChecker
+	admins        AdminRepository
+	users         UserRepository
+	services      ServiceRepository
+	devices       DeviceRepository
+	groups        GroupRepository
+	roles         RoleRepository
+	joinRequests  GroupJoinRequestRepository
+	crkProvider   CRKProvider
+	tokenGen      TokenGenerator
+	pkiIssuer     PKIIssuer
+	auditor       Auditor
+	certTTL       time.Duration
+	idpChecker    idp.SubjectChecker
+	policyService PolicyEvaluator
 }
 
 // NewManager creates a new identity manager.
@@ -202,6 +214,9 @@ func (m *Manager) SetCertTTL(ttl time.Duration) { m.certTTL = ttl }
 
 // SetIDPChecker sets the IdP subject checker for SSO liveness verification.
 func (m *Manager) SetIDPChecker(checker idp.SubjectChecker) { m.idpChecker = checker }
+
+// SetPolicyEvaluator sets the policy evaluator for OPA-filtered listing.
+func (m *Manager) SetPolicyEvaluator(pe PolicyEvaluator) { m.policyService = pe }
 
 func (m *Manager) getCertTTL() time.Duration {
 	if m.certTTL > 0 {
@@ -1113,6 +1128,41 @@ func (m *Manager) ListGroups(ctx context.Context, orgID string) ([]*models.Ident
 		return nil, fmt.Errorf("list groups: %w", err)
 	}
 	return groups, nil
+}
+
+// ListGroupsFiltered returns identity groups for an organization, filtered through OPA policy.
+// Falls back to unfiltered when no policy service is configured.
+func (m *Manager) ListGroupsFiltered(ctx context.Context, orgID string) ([]*models.IdentityGroup, error) {
+	groups, err := m.groups.List(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list groups: %w", err)
+	}
+	if m.policyService == nil {
+		return groups, nil
+	}
+
+	var filtered []*models.IdentityGroup
+	for _, g := range groups {
+		input := models.PolicyInput{
+			Operation: "list",
+			Time:      time.Now(),
+			Metadata: map[string]any{
+				"resource_type": "group",
+				"group_id":      g.ID,
+				"org_id":        orgID,
+			},
+		}
+		result, err := m.policyService.Evaluate(ctx, input)
+		if err != nil {
+			// On evaluation error, include the group (fail open for listing)
+			filtered = append(filtered, g)
+			continue
+		}
+		if result.Allowed {
+			filtered = append(filtered, g)
+		}
+	}
+	return filtered, nil
 }
 
 // GetGroupMembers returns all members of a group.

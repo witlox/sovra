@@ -5,6 +5,8 @@
 *.so
 *.dylib
 sovra
+api-gateway
+sovra-cli
 sovra-api-gateway
 
 # Test binary, built with `go test -c`

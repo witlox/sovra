@@ -2123,3 +2123,52 @@ func (c *Client) GetSSOConfig(ctx context.Context) (*SSOConfigResponse, error) {
 	}
 	return &result, nil
 }
+
+// ============================================================================
+// Workspace Admission API
+// ============================================================================
+
+// GrantAdmissionRequest represents a request to grant workspace admission.
+type GrantAdmissionRequest struct {
+	IdentityID   string              `json:"identity_id"`
+	IdentityType models.IdentityType `json:"identity_type"`
+	OrgID        string              `json:"org_id"`
+}
+
+// AdmissionsListResponse represents the response for listing admissions.
+type AdmissionsListResponse struct {
+	Admissions []*models.WorkspaceAdmission `json:"admissions"`
+	Count      int                          `json:"count"`
+}
+
+// GrantAdmission grants workspace admission to an identity.
+func (c *Client) GrantAdmission(ctx context.Context, workspaceID string, req GrantAdmissionRequest) (*models.WorkspaceAdmission, error) {
+	var result models.WorkspaceAdmission
+	if err := c.request(ctx, http.MethodPost, "/api/v1/workspaces/"+workspaceID+"/admissions", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ListAdmissions lists admissions for a workspace.
+func (c *Client) ListAdmissions(ctx context.Context, workspaceID string) ([]*models.WorkspaceAdmission, error) {
+	var result AdmissionsListResponse
+	if err := c.request(ctx, http.MethodGet, "/api/v1/workspaces/"+workspaceID+"/admissions", nil, &result); err != nil {
+		return nil, err
+	}
+	return result.Admissions, nil
+}
+
+// GetAdmission retrieves the admission status for an identity in a workspace.
+func (c *Client) GetAdmission(ctx context.Context, workspaceID, identityID string) (*models.WorkspaceAdmission, error) {
+	var result models.WorkspaceAdmission
+	if err := c.request(ctx, http.MethodGet, "/api/v1/workspaces/"+workspaceID+"/admissions/"+identityID, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RevokeAdmission revokes workspace admission for an identity.
+func (c *Client) RevokeAdmission(ctx context.Context, workspaceID, identityID string) error {
+	return c.request(ctx, http.MethodDelete, "/api/v1/workspaces/"+workspaceID+"/admissions/"+identityID, nil, nil)
+}

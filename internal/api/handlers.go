@@ -572,17 +572,149 @@ func (h *WorkspaceHandler) Archive(w http.ResponseWriter, r *http.Request) {
 }
 
 // =============================================================================
+// Workspace Admission Handler
+// =============================================================================
+
+// WorkspaceAdmissionHandler handles workspace admission API requests.
+type WorkspaceAdmissionHandler struct {
+	admissions workspace.AdmissionRepository
+	audit      workspace.AuditService
+}
+
+// NewWorkspaceAdmissionHandler creates a new workspace admission handler.
+func NewWorkspaceAdmissionHandler(admissions workspace.AdmissionRepository, audit workspace.AuditService) *WorkspaceAdmissionHandler {
+	return &WorkspaceAdmissionHandler{admissions: admissions, audit: audit}
+}
+
+// GrantAdmissionRequest represents a request to grant admission.
+type GrantAdmissionRequest struct {
+	IdentityID   string              `json:"identity_id"`
+	IdentityType models.IdentityType `json:"identity_type"`
+	OrgID        string              `json:"org_id"`
+}
+
+// Grant handles POST /api/v1/workspaces/{id}/admissions.
+func (h *WorkspaceAdmissionHandler) Grant(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := requireIDParam(w, r, "id", "workspace id")
+	if !ok {
+		return
+	}
+
+	var req GrantAdmissionRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if req.IdentityID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "identity_id is required")
+		return
+	}
+
+	admission := &models.WorkspaceAdmission{
+		ID:           fmt.Sprintf("adm-%s-%s", wsID[:8], req.IdentityID[:8]),
+		WorkspaceID:  wsID,
+		OrgID:        req.OrgID,
+		IdentityID:   req.IdentityID,
+		IdentityType: req.IdentityType,
+		Status:       models.WorkspaceAdmissionStatusActive,
+		GrantedBy:    getOrgID(r),
+		GrantedAt:    time.Now(),
+	}
+
+	if err := h.admissions.Create(r.Context(), admission); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, admission)
+}
+
+// List handles GET /api/v1/workspaces/{id}/admissions.
+func (h *WorkspaceAdmissionHandler) List(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := requireIDParam(w, r, "id", "workspace id")
+	if !ok {
+		return
+	}
+
+	admissions, err := h.admissions.ListByWorkspace(r.Context(), wsID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"admissions": admissions,
+		"count":      len(admissions),
+	})
+}
+
+// GetStatus handles GET /api/v1/workspaces/{id}/admissions/{identityId}.
+func (h *WorkspaceAdmissionHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := requireIDParam(w, r, "id", "workspace id")
+	if !ok {
+		return
+	}
+	identityID := chi.URLParam(r, "identityId")
+	if identityID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "identity id is required")
+		return
+	}
+
+	admission, err := h.admissions.Get(r.Context(), wsID, identityID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, admission)
+}
+
+// Revoke handles DELETE /api/v1/workspaces/{id}/admissions/{identityId}.
+func (h *WorkspaceAdmissionHandler) Revoke(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := requireIDParam(w, r, "id", "workspace id")
+	if !ok {
+		return
+	}
+	identityID := chi.URLParam(r, "identityId")
+	if identityID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "identity id is required")
+		return
+	}
+
+	revokedBy := getOrgID(r)
+	if err := h.admissions.Revoke(r.Context(), wsID, identityID, revokedBy); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
 // Federation Handler
 // =============================================================================
 
 // FederationHandler handles federation API requests.
 type FederationHandler struct {
-	service federation.Service
+	service       federation.Service
+	policyService policy.Service
 }
 
 // NewFederationHandler creates a new federation handler.
-func NewFederationHandler(service federation.Service) *FederationHandler {
-	return &FederationHandler{service: service}
+func NewFederationHandler(service federation.Service, opts ...func(*FederationHandler)) *FederationHandler {
+	h := &FederationHandler{service: service}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+// WithFederationPolicyService sets the policy service for OPA-filtered listing.
+func WithFederationPolicyService(ps policy.Service) func(*FederationHandler) {
+	return func(h *FederationHandler) {
+		h.policyService = ps
+	}
 }
 
 // InitFederationRequest represents federation initialization request.
@@ -659,6 +791,27 @@ func (h *FederationHandler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		handleError(w, err)
 		return
+	}
+
+	// Apply OPA filter if policy service is configured
+	if h.policyService != nil {
+		var filtered []*models.Federation
+		for _, fed := range federations {
+			input := models.PolicyInput{
+				Operation: "list",
+				Time:      time.Now(),
+				Metadata: map[string]any{
+					"resource_type": "federation",
+					"federation_id": fed.ID,
+					"org_id":        fed.OrgID,
+				},
+			}
+			result, evalErr := h.policyService.Evaluate(r.Context(), input)
+			if evalErr != nil || result.Allowed {
+				filtered = append(filtered, fed)
+			}
+		}
+		federations = filtered
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -2571,7 +2724,7 @@ func (h *IdentityHandler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 func (h *IdentityHandler) ListGroups(w http.ResponseWriter, r *http.Request) {
 	orgID := getOrgID(r)
 
-	groups, err := h.manager.ListGroups(r.Context(), orgID)
+	groups, err := h.manager.ListGroupsFiltered(r.Context(), orgID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -3986,4 +4139,388 @@ func getCallerID(r *http.Request) string {
 		return userID
 	}
 	return ""
+}
+
+// =============================================================================
+// Workspace Request Handler
+// =============================================================================
+
+// WorkspaceRequestHandler handles workspace request API endpoints.
+type WorkspaceRequestHandler struct {
+	service workspace.WorkspaceRequestService
+}
+
+// NewWorkspaceRequestHandler creates a new workspace request handler.
+func NewWorkspaceRequestHandler(service workspace.WorkspaceRequestService) *WorkspaceRequestHandler {
+	return &WorkspaceRequestHandler{service: service}
+}
+
+// CreateWorkspaceRequestBody represents a workspace creation request body.
+type CreateWorkspaceRequestBody struct {
+	GroupID             string `json:"group_id"`
+	FederationID        string `json:"federation_id,omitempty"`
+	TargetOrgID         string `json:"target_org_id,omitempty"`
+	Locked              bool   `json:"locked,omitempty"`
+	FederationRequested bool   `json:"federation_requested,omitempty"`
+	Justification       string `json:"justification,omitempty"`
+}
+
+// Create handles POST /api/v1/workspace-requests.
+func (h *WorkspaceRequestHandler) Create(w http.ResponseWriter, r *http.Request) {
+	var body CreateWorkspaceRequestBody
+	if err := readJSON(r, &body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if body.GroupID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "group_id is required")
+		return
+	}
+
+	callerID := getCallerID(r)
+	orgID := getOrgID(r)
+
+	req, err := h.service.CreateRequest(r.Context(), workspace.CreateWorkspaceRequestInput{
+		RequesterID:         callerID,
+		OrgID:               orgID,
+		GroupID:             body.GroupID,
+		FederationID:        body.FederationID,
+		TargetOrgID:         body.TargetOrgID,
+		Locked:              body.Locked,
+		FederationRequested: body.FederationRequested,
+		Justification:       body.Justification,
+	})
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, req)
+}
+
+// ListMyRequests handles GET /api/v1/workspace-requests.
+func (h *WorkspaceRequestHandler) ListMyRequests(w http.ResponseWriter, r *http.Request) {
+	callerID := getCallerID(r)
+	requests, err := h.service.ListMyRequests(r.Context(), callerID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"requests": requests,
+		"count":    len(requests),
+	})
+}
+
+// ListPendingRequests handles GET /api/v1/workspace-requests/pending.
+func (h *WorkspaceRequestHandler) ListPendingRequests(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+	requests, err := h.service.ListPendingRequests(r.Context(), orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"requests": requests,
+		"count":    len(requests),
+	})
+}
+
+// GetRequest handles GET /api/v1/workspace-requests/{requestId}.
+func (h *WorkspaceRequestHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
+	requestID, ok := requireIDParam(w, r, "requestId", "request id")
+	if !ok {
+		return
+	}
+
+	req, err := h.service.GetRequest(r.Context(), requestID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, req)
+}
+
+// ApproveWorkspaceRequestBody represents an approval request body.
+type ApproveWorkspaceRequestBody struct {
+	CRKSignature []byte `json:"crk_signature,omitempty"`
+}
+
+// ApproveRequest handles POST /api/v1/workspace-requests/{requestId}/approve.
+func (h *WorkspaceRequestHandler) ApproveRequest(w http.ResponseWriter, r *http.Request) {
+	requestID, ok := requireIDParam(w, r, "requestId", "request id")
+	if !ok {
+		return
+	}
+
+	var body ApproveWorkspaceRequestBody
+	if err := readJSON(r, &body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	adminID, _ := r.Context().Value(ContextKeyAdminID).(string)
+
+	ws, err := h.service.ApproveRequest(r.Context(), requestID, adminID, body.CRKSignature)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ws)
+}
+
+// DenyWorkspaceRequestBody represents a denial request body.
+type DenyWorkspaceRequestBody struct {
+	Reason string `json:"reason"`
+}
+
+// DenyRequest handles POST /api/v1/workspace-requests/{requestId}/deny.
+func (h *WorkspaceRequestHandler) DenyRequest(w http.ResponseWriter, r *http.Request) {
+	requestID, ok := requireIDParam(w, r, "requestId", "request id")
+	if !ok {
+		return
+	}
+
+	var body DenyWorkspaceRequestBody
+	if err := readJSON(r, &body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	adminID, _ := r.Context().Value(ContextKeyAdminID).(string)
+
+	if err := h.service.DenyRequest(r.Context(), requestID, adminID, body.Reason); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Federation Request Handler
+// =============================================================================
+
+// FederationRequestHandler handles federation request API endpoints.
+type FederationRequestHandler struct {
+	service workspace.WorkspaceRequestService
+}
+
+// NewFederationRequestHandler creates a new federation request handler.
+func NewFederationRequestHandler(service workspace.WorkspaceRequestService) *FederationRequestHandler {
+	return &FederationRequestHandler{service: service}
+}
+
+// CreateFederationRequestBody represents a federation request body.
+type CreateFederationRequestBody struct {
+	TargetOrgID   string `json:"target_org_id"`
+	TargetURL     string `json:"target_url,omitempty"`
+	Justification string `json:"justification,omitempty"`
+}
+
+// Create handles POST /api/v1/federation-requests.
+func (h *FederationRequestHandler) Create(w http.ResponseWriter, r *http.Request) {
+	var body CreateFederationRequestBody
+	if err := readJSON(r, &body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	if body.TargetOrgID == "" {
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "target_org_id is required")
+		return
+	}
+
+	callerID := getCallerID(r)
+	orgID := getOrgID(r)
+
+	req, err := h.service.CreateRequest(r.Context(), workspace.CreateWorkspaceRequestInput{
+		RequesterID:         callerID,
+		OrgID:               orgID,
+		TargetOrgID:         body.TargetOrgID,
+		FederationRequested: true,
+		Justification:       body.Justification,
+	})
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, req)
+}
+
+// ListPending handles GET /api/v1/federation-requests/pending.
+func (h *FederationRequestHandler) ListPending(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+	requests, err := h.service.ListPendingRequests(r.Context(), orgID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"requests": requests,
+		"count":    len(requests),
+	})
+}
+
+// Get handles GET /api/v1/federation-requests/{requestId}.
+func (h *FederationRequestHandler) Get(w http.ResponseWriter, r *http.Request) {
+	requestID, ok := requireIDParam(w, r, "requestId", "request id")
+	if !ok {
+		return
+	}
+
+	req, err := h.service.GetRequest(r.Context(), requestID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, req)
+}
+
+// Approve handles POST /api/v1/federation-requests/{requestId}/approve.
+func (h *FederationRequestHandler) Approve(w http.ResponseWriter, r *http.Request) {
+	requestID, ok := requireIDParam(w, r, "requestId", "request id")
+	if !ok {
+		return
+	}
+
+	adminID, _ := r.Context().Value(ContextKeyAdminID).(string)
+
+	ws, err := h.service.ApproveRequest(r.Context(), requestID, adminID, nil)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ws)
+}
+
+// Deny handles POST /api/v1/federation-requests/{requestId}/deny.
+func (h *FederationRequestHandler) Deny(w http.ResponseWriter, r *http.Request) {
+	requestID, ok := requireIDParam(w, r, "requestId", "request id")
+	if !ok {
+		return
+	}
+
+	var body DenyWorkspaceRequestBody
+	if err := readJSON(r, &body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+
+	adminID, _ := r.Context().Value(ContextKeyAdminID).(string)
+
+	if err := h.service.DenyRequest(r.Context(), requestID, adminID, body.Reason); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Workspace Relay Handler
+// =============================================================================
+
+// WorkspaceRelayHandler handles incoming federation relay messages for workspaces.
+type WorkspaceRelayHandler struct {
+	service workspace.WorkspaceRequestService
+}
+
+// NewWorkspaceRelayHandler creates a new workspace relay handler.
+func NewWorkspaceRelayHandler(service workspace.WorkspaceRequestService) *WorkspaceRelayHandler {
+	return &WorkspaceRelayHandler{service: service}
+}
+
+// Handle processes incoming relay messages dispatching by type.
+func (h *WorkspaceRelayHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_BODY", "failed to read request body")
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+
+	var msg struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &msg); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "INVALID_JSON", "invalid message format")
+		return
+	}
+
+	switch msg.Type {
+	case "workspace_pairing_request":
+		if err := h.service.HandlePairingRequest(r.Context(), body); err != nil {
+			handleError(w, err)
+			return
+		}
+	case "workspace_archive":
+		if err := h.service.HandleArchiveNotification(r.Context(), body); err != nil {
+			handleError(w, err)
+			return
+		}
+	case "workspace_pairing_accept":
+		// Future: handle pairing acceptance
+		w.WriteHeader(http.StatusNoContent)
+		return
+	default:
+		writeJSONError(w, http.StatusBadRequest, "UNKNOWN_TYPE", fmt.Sprintf("unknown message type: %s", msg.Type))
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// =============================================================================
+// Group-Federation Coupling Handler
+// =============================================================================
+
+// GroupFederationCouplingHandler handles group-federation coupling endpoints.
+type GroupFederationCouplingHandler struct {
+	couplings workspace.GroupFederationCouplingRepository
+}
+
+// NewGroupFederationCouplingHandler creates a new coupling handler.
+func NewGroupFederationCouplingHandler(couplings workspace.GroupFederationCouplingRepository) *GroupFederationCouplingHandler {
+	return &GroupFederationCouplingHandler{couplings: couplings}
+}
+
+// List handles GET /api/v1/group-federation-couplings.
+func (h *GroupFederationCouplingHandler) List(w http.ResponseWriter, r *http.Request) {
+	groupID := r.URL.Query().Get("group_id")
+	federationID := r.URL.Query().Get("federation_id")
+
+	var (
+		couplings []*models.GroupFederationCoupling
+		err       error
+	)
+
+	switch {
+	case groupID != "":
+		couplings, err = h.couplings.ListByGroup(r.Context(), groupID)
+	case federationID != "":
+		couplings, err = h.couplings.ListByFederation(r.Context(), federationID)
+	default:
+		writeJSONError(w, http.StatusBadRequest, "VALIDATION_ERROR", "group_id or federation_id query parameter is required")
+		return
+	}
+
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"couplings": couplings,
+		"count":     len(couplings),
+	})
 }

@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -56,6 +57,57 @@ type productionService struct {
 	transit     *vault.TransitClient
 	audit       AuditService
 	invitations InvitationRepository
+	federation  FederationRelay
+	admission   *AdmissionChecker
+}
+
+// FederationRelay allows the workspace service to relay messages to federated partners.
+type FederationRelay interface {
+	RelayMessage(ctx context.Context, partnerOrgID string, payload []byte) ([]byte, error)
+}
+
+// SetFederation sets the federation relay for bilateral workspace operations.
+func (s *productionService) SetFederation(fed FederationRelay) {
+	s.federation = fed
+}
+
+// SetAdmissionChecker sets the admission checker for tiered access control.
+// When nil, checkAccess falls through to org-level only (backward compatible).
+func (s *productionService) SetAdmissionChecker(ac *AdmissionChecker) {
+	s.admission = ac
+}
+
+// checkAccess performs three-stage authorization:
+// 1. Org-level isParticipant (existing)
+// 2. User-level tier check via AdmissionChecker (if configured)
+// 3. Optional OPA workspace policy (handled inside AdmissionChecker)
+// Falls through to org-only when admission is nil (backward compat).
+func (s *productionService) checkAccess(ctx context.Context, ws *models.Workspace) (string, error) {
+	callerOrg, err := isParticipant(ctx, ws)
+	if err != nil {
+		return "", err
+	}
+
+	if s.admission == nil {
+		return callerOrg, nil
+	}
+
+	claims, ok := jwt.ClaimsFromContext(ctx)
+	if !ok {
+		return "", errors.NewAuthorizationError("no claims in context")
+	}
+
+	callerIdentityID := claims.Subject
+	if callerIdentityID == "" {
+		// No subject in claims → fall through to org-level only
+		return callerOrg, nil
+	}
+
+	if err := s.admission.CheckAdmission(ctx, ws, callerOrg, callerIdentityID); err != nil {
+		return "", err
+	}
+
+	return callerOrg, nil
 }
 
 // requireCRK enforces CRK signature on CRK-protected workspaces.
@@ -298,6 +350,11 @@ func (s *productionService) RemoveParticipant(ctx context.Context, workspaceID, 
 		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
+	// Bilateral workspaces do not support participant removal
+	if ws.Bilateral {
+		return errors.NewValidationError("workspace", "bilateral workspaces do not support participant removal; archive instead")
+	}
+
 	// Cannot remove the owner
 	if orgID == ws.OwnerOrgID {
 		return errors.NewValidationError("orgID", "cannot remove workspace owner")
@@ -368,6 +425,26 @@ func (s *productionService) Archive(ctx context.Context, workspaceID string, sig
 	if err := s.repo.Update(ctx, ws); err != nil {
 		return fmt.Errorf("failed to update workspace: %w", err)
 	}
+
+	// For bilateral workspaces, relay archive notification to partner
+	if ws.Bilateral && ws.FederationID != "" && s.federation != nil {
+		callerOrg, _ := isParticipant(ctx, ws)
+		var partnerOrg string
+		for _, org := range ws.ParticipantOrgs {
+			if org != callerOrg {
+				partnerOrg = org
+				break
+			}
+		}
+		if partnerOrg != "" {
+			payload, _ := json.Marshal(map[string]string{
+				"type":         "workspace_archive",
+				"workspace_id": workspaceID,
+			})
+			_, _ = s.federation.RelayMessage(ctx, partnerOrg, payload)
+		}
+	}
+
 	return nil
 }
 
@@ -377,16 +454,14 @@ func (s *productionService) Delete(ctx context.Context, workspaceID string, sign
 		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
-	// For CRK-protected workspaces, require at least the owner's signature
+	// Only CRK-protected workspaces require signatures for deletion
 	if ws.CRKProtected {
 		ownerSig, ok := signatures[ws.OwnerOrgID]
 		if !ok || len(ownerSig) == 0 {
 			return errors.NewValidationError("crk_signature", "this workspace requires CRK signature")
 		}
-	}
 
-	// Verify signatures from all participants who provided them
-	if len(signatures) > 0 {
+		// Verify signatures from all participants
 		for _, orgID := range ws.ParticipantOrgs {
 			sig, ok := signatures[orgID]
 			if !ok {
@@ -453,8 +528,8 @@ func (s *productionService) Encrypt(ctx context.Context, workspaceID string, pla
 		return nil, err
 	}
 
-	// Verify caller is a workspace participant
-	callerOrg, err := isParticipant(ctx, ws)
+	// Verify caller has access (org-level + tiered admission if configured)
+	callerOrg, err := s.checkAccess(ctx, ws)
 	if err != nil {
 		return nil, err
 	}
@@ -526,8 +601,8 @@ func (s *productionService) Decrypt(ctx context.Context, workspaceID string, cip
 		return nil, err
 	}
 
-	// Verify caller is a workspace participant
-	callerOrg, err := isParticipant(ctx, ws)
+	// Verify caller has access (org-level + tiered admission if configured)
+	callerOrg, err := s.checkAccess(ctx, ws)
 	if err != nil {
 		return nil, err
 	}
@@ -597,14 +672,9 @@ func (s *productionService) RotateDEK(ctx context.Context, workspaceID string, s
 		return err
 	}
 
-	// Verify CRK signature for this operation
-	message := []byte(fmt.Sprintf("rotate-dek:%s:%d", workspaceID, time.Now().Unix()))
-	valid, err := s.verifyCRKSignature(ctx, callerOrg, message, signature)
-	if err != nil {
-		return fmt.Errorf("failed to verify signature: %w", err)
-	}
-	if !valid {
-		return errors.NewAuthorizationError("invalid CRK signature for DEK rotation")
+	// Enforce CRK if workspace is CRK-protected
+	if err := s.requireCRK(ctx, ws, []byte(fmt.Sprintf("rotate-dek:%s", workspaceID)), signature); err != nil {
+		return err
 	}
 
 	if ws.Archived || ws.Status == models.WorkspaceStatusArchived {
@@ -784,16 +854,13 @@ func (s *productionService) ExtendExpiration(ctx context.Context, workspaceID st
 		return fmt.Errorf("get workspace: %w", err)
 	}
 
-	callerOrg, err := isParticipant(ctx, ws)
-	if err != nil {
+	if _, err := isParticipant(ctx, ws); err != nil {
 		return err
 	}
 
-	// Verify signature
-	message := []byte(fmt.Sprintf("extend-expiry:%s:%d", workspaceID, newExpiry.Unix()))
-	valid, err := s.verifyCRKSignature(ctx, callerOrg, message, signature)
-	if err != nil || !valid {
-		return errors.NewAuthorizationError("invalid signature for expiration extension")
+	// Enforce CRK if workspace is CRK-protected
+	if err := s.requireCRK(ctx, ws, []byte(fmt.Sprintf("extend-expiry:%s:%d", workspaceID, newExpiry.Unix())), signature); err != nil {
+		return err
 	}
 
 	ws.ExpiresAt = newExpiry

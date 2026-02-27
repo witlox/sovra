@@ -106,6 +106,41 @@ func TestAuditEvent(orgID, workspace string, eventType models.AuditEventType) *m
 	}
 }
 
+// TestWorkspaceRequest creates a test workspace request.
+func TestWorkspaceRequest(requesterID, orgID, groupID string) *models.WorkspaceRequest {
+	return &models.WorkspaceRequest{
+		ID:          "wreq-" + requesterID,
+		RequesterID: requesterID,
+		OrgID:       orgID,
+		GroupID:     groupID,
+		Status:      models.WorkspaceRequestStatusPending,
+		CreatedAt:   time.Now(),
+	}
+}
+
+// TestFederationRequest creates a test federation request.
+func TestFederationRequest(requesterID, orgID, targetOrgID string) *models.FederationRequest {
+	return &models.FederationRequest{
+		ID:          "freq-" + requesterID,
+		RequesterID: requesterID,
+		OrgID:       orgID,
+		TargetOrgID: targetOrgID,
+		Status:      models.FederationRequestStatusPending,
+		CreatedAt:   time.Now(),
+	}
+}
+
+// TestGroupFederationCoupling creates a test group-federation coupling.
+func TestGroupFederationCoupling(groupID, federationID, orgID string) *models.GroupFederationCoupling {
+	return &models.GroupFederationCoupling{
+		ID:           "gfc-" + groupID + "-" + federationID,
+		GroupID:      groupID,
+		FederationID: federationID,
+		OrgID:        orgID,
+		CreatedAt:    time.Now(),
+	}
+}
+
 // TestEdgeNode creates a test edge node.
 func TestEdgeNode(orgID, name string) *models.EdgeNode {
 	return &models.EdgeNode{

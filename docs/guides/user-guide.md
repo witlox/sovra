@@ -331,12 +331,19 @@ shred -u /tmp/samples.json /tmp/results.json
 Error: access denied to workspace 'restricted-data'
 ```
 
-This means you are not a member of the workspace's bound group, your access was revoked, or a policy restriction applies. Request access:
+This means one of the following:
+- You are not a member of the workspace's bound group
+- The workspace requires explicit admission (SECRET or CRK-protected) and you have not been granted one
+- Your access was revoked, or a policy restriction applies
+
+For CONFIDENTIAL workspaces, request access to the group:
 
 ```bash
 sovra workspace request-access restricted-data \
   --justification "Need access for project XYZ"
 ```
+
+For SECRET or CRK-protected workspaces, you also need an explicit admission grant from an administrator after joining the group.
 
 ### Session Expired
 

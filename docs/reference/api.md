@@ -236,6 +236,52 @@ Request access to a workspace (resolves via group membership).
 
 **Response:** `200` — Access result
 
+### Workspace Admissions
+
+Tiered admission control for workspace access. Admissions are required for SECRET and CRK-protected workspaces; CONFIDENTIAL workspaces auto-admit via group membership.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/workspaces/{id}/admissions` | Grant admission |
+| GET | `/api/v1/workspaces/{id}/admissions` | List admissions |
+| GET | `/api/v1/workspaces/{id}/admissions/{identityId}` | Get admission status |
+| DELETE | `/api/v1/workspaces/{id}/admissions/{identityId}` | Revoke admission |
+
+### POST /api/v1/workspaces/{id}/admissions
+
+Grant an identity explicit admission to a workspace.
+
+**Request:**
+```json
+{
+  "identity_id": "user-456",
+  "identity_type": "user",
+  "org_id": "org-a"
+}
+```
+
+Identity types: `admin`, `user`, `service`, `device`
+
+**Response:** `201` — WorkspaceAdmission object
+
+### GET /api/v1/workspaces/{id}/admissions
+
+List all admissions for a workspace.
+
+**Response:** `200` — `{"admissions": [...], "count": 3}`
+
+### GET /api/v1/workspaces/{id}/admissions/{identityId}
+
+Get admission status for a specific identity.
+
+**Response:** `200` — WorkspaceAdmission object
+
+### DELETE /api/v1/workspaces/{id}/admissions/{identityId}
+
+Revoke an identity's admission to a workspace.
+
+**Response:** `204`
+
 ### POST /api/v1/workspaces/{id}/archive
 
 Archive a workspace.
