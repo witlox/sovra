@@ -59,7 +59,7 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'sovra-api-gateway'
+  - job_name: 'api-gateway'
     kubernetes_sd_configs:
       - role: pod
         namespaces:
@@ -68,7 +68,7 @@ scrape_configs:
     relabel_configs:
       - source_labels: [__meta_kubernetes_pod_label_app]
         action: keep
-        regex: sovra-api-gateway
+        regex: api-gateway
       - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
         action: keep
         regex: true
@@ -334,13 +334,13 @@ kubectl apply -f infrastructure/kubernetes/monitoring/promtail/
 {app="sovra"} |= "error" | json
 
 # API gateway errors
-{app="sovra-api-gateway"} |= "error"
+{app="api-gateway"} |= "error"
 
 # Audit events
-{app="sovra-api-gateway"} | json | event_type="workspace.access"
+{app="api-gateway"} | json | event_type="workspace.access"
 
 # Failed authentication
-{app="sovra-api-gateway"} | json | status_code="401"
+{app="api-gateway"} | json | status_code="401"
 ```
 
 ## Performance Monitoring
@@ -388,7 +388,7 @@ kubectl top pods -n sovra
 # Look at container_memory_usage_bytes trend
 
 # Restart if needed
-kubectl rollout restart deployment/sovra-api-gateway -n sovra
+kubectl rollout restart deployment/api-gateway -n sovra
 ```
 
 ### Missing Metrics

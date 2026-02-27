@@ -123,7 +123,7 @@ The following services have operation-level spans:
 
 ```
 Trace: 4b3a9c2d-1e5f-4a8b-9c2d-1e5f4a8b9c2d
-├── sovra-api-gateway: POST /v1/workspace/{workspace}/encrypt (42ms)
+├── api-gateway: POST /v1/workspace/{workspace}/encrypt (42ms)
 │   ├── workspace.encrypt (35ms)
 │   │   ├── policy.evaluate (5ms)
 │   │   │   └── opa: query (3ms)
@@ -140,7 +140,7 @@ The Sovra API gateway exposes metrics at `/metrics`:
 
 ```bash
 # Control plane metrics
-curl http://sovra-api-gateway:9090/metrics
+curl http://api-gateway:9090/metrics
 
 # Edge node metrics
 curl http://vault:8200/v1/sys/metrics?format=prometheus
@@ -250,7 +250,7 @@ All Sovra services use structured JSON logging:
 {
   "timestamp": "2026-01-30T14:30:00.123Z",
   "level": "info",
-  "service": "sovra-api-gateway",
+  "service": "api-gateway",
   "trace_id": "4b3a9c2d1e5f4a8b",
   "span_id": "9c2d1e5f",
   "message": "request completed",
@@ -313,13 +313,13 @@ scrape_configs:
 {namespace="sovra"} |= "error" | json
 
 # Specific service errors
-{namespace="sovra", app="sovra-api-gateway"} |= "error"
+{namespace="sovra", app="api-gateway"} |= "error"
 
 # By trace ID
 {namespace="sovra"} | json | trace_id="4b3a9c2d1e5f4a8b"
 
 # Failed authentication
-{namespace="sovra", app="sovra-api-gateway"} | json | status=401
+{namespace="sovra", app="api-gateway"} | json | status=401
 
 # Slow requests (>500ms)
 {namespace="sovra"} | json | duration_ms > 500
@@ -474,7 +474,7 @@ kubectl run -it --rm debug --image=curlimages/curl -- \
 
 ```bash
 # Check metrics endpoint
-kubectl port-forward -n sovra svc/sovra-api-gateway 9090:9090
+kubectl port-forward -n sovra svc/api-gateway 9090:9090
 curl http://localhost:9090/metrics
 
 # Check Prometheus targets

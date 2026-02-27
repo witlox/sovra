@@ -90,7 +90,7 @@ kubectl apply -k ../../kubernetes/overlays/aws
 
 ```bash
 # Get load balancer DNS
-kubectl get svc sovra-api-gateway -n sovra
+kubectl get svc api-gateway -n sovra
 
 # Create Route53 record
 aws route53 change-resource-record-sets \

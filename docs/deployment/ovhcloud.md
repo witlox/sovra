@@ -201,7 +201,7 @@ OVHcloud Managed Kubernetes includes an integrated load balancer:
 apiVersion: v1
 kind: Service
 metadata:
-  name: sovra-api-gateway
+  name: api-gateway
   annotations:
     service.beta.kubernetes.io/ovh-loadbalancer-proxy-protocol: "v2"
 spec:
@@ -210,7 +210,7 @@ spec:
     - port: 443
       targetPort: 8443
   selector:
-    app: sovra-api-gateway
+    app: api-gateway
 ```
 
 ## Database

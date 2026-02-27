@@ -76,7 +76,7 @@ kubectl get pods -n sovra
 Expected output:
 ```
 NAME                              READY   STATUS
-sovra-api-gateway-0               1/1     Running
+api-gateway-0               1/1     Running
 ```
 
 The api-gateway is a single service that handles all control plane functionality including policy evaluation, key lifecycle, audit, and federation.
@@ -306,7 +306,7 @@ Both organizations see audit logs.
 
 ```bash
 # Check logs
-kubectl logs -n sovra -l app=sovra-api-gateway
+kubectl logs -n sovra -l app=api-gateway
 
 # Common issues:
 # - Database connection (check credentials)

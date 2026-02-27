@@ -181,7 +181,7 @@ SQLEOF
 
 ```bash
 # Create secrets
-kubectl create secret tls sovra-api-gateway-tls \
+kubectl create secret tls api-gateway-tls \
   --cert=certs/api-gateway.crt \
   --key=certs/api-gateway-key.pem \
   -n sovra
@@ -279,13 +279,13 @@ Certificates valid for 1 year must be rotated manually.
 
 ```bash
 # Update certificate secret
-kubectl create secret tls sovra-api-gateway-tls \
+kubectl create secret tls api-gateway-tls \
   --cert=new-api-gateway.crt \
   --key=new-api-gateway-key.pem \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # Restart pods
-kubectl rollout restart deployment/sovra-api-gateway -n sovra
+kubectl rollout restart deployment/api-gateway -n sovra
 ```
 
 ### Policy Updates

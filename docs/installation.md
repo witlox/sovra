@@ -268,5 +268,5 @@ kubectl get secret sovra-tls -n sovra -o yaml
 sudo netstat -tulpn | grep 8443
 
 # Update service port if needed
-kubectl edit svc sovra-api-gateway -n sovra
+kubectl edit svc api-gateway -n sovra
 ```

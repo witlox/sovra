@@ -141,7 +141,7 @@ kubectl apply -k ../../kubernetes/overlays/azure
 
 ```bash
 # Get load balancer IP
-kubectl get svc sovra-api-gateway -n sovra -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+kubectl get svc api-gateway -n sovra -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 
 # Create DNS record
 az network dns record-set a add-record \

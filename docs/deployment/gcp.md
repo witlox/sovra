@@ -174,7 +174,7 @@ EOF
 
 ```bash
 # Get load balancer IP
-LOAD_BALANCER_IP=$(kubectl get svc sovra-api-gateway -n sovra -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+LOAD_BALANCER_IP=$(kubectl get svc api-gateway -n sovra -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
 # Create Cloud DNS record
 gcloud dns record-sets create sovra.example.com. \

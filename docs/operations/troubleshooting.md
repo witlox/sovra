@@ -21,13 +21,13 @@ Common issues and solutions for Sovra deployment and operation.
 **Diagnosis:**
 ```bash
 # Check pods
-kubectl get pods -n sovra -l app=sovra-api-gateway
+kubectl get pods -n sovra -l app=api-gateway
 
 # Check logs
-kubectl logs -n sovra -l app=sovra-api-gateway --tail=50
+kubectl logs -n sovra -l app=api-gateway --tail=50
 
 # Check service
-kubectl get svc -n sovra sovra-api-gateway
+kubectl get svc -n sovra api-gateway
 ```
 
 **Solutions:**
@@ -46,11 +46,11 @@ kubectl describe pod -n sovra <pod-name>
 2. **Service not accessible:**
 ```bash
 # Check load balancer
-kubectl get svc -n sovra sovra-api-gateway
+kubectl get svc -n sovra api-gateway
 
 # Test from within cluster
 kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- \
-  curl -k https://sovra-api-gateway.sovra.svc:443/health
+  curl -k https://api-gateway.sovra.svc:443/health
 ```
 
 3. **Certificate issues:**
@@ -115,7 +115,7 @@ kubectl top pods -n sovra
 psql -U sovra -c "SELECT * FROM pg_stat_activity;"
 
 # Check API gateway logs for policy evaluation
-kubectl logs -n sovra -l app=sovra-api-gateway --tail=50
+kubectl logs -n sovra -l app=api-gateway --tail=50
 ```
 
 **Solutions:**
@@ -123,7 +123,7 @@ kubectl logs -n sovra -l app=sovra-api-gateway --tail=50
 1. **Resource constraints:**
 ```bash
 # Increase resources
-kubectl set resources deployment sovra-api-gateway \
+kubectl set resources deployment api-gateway \
   --limits=cpu=2,memory=4Gi \
   --requests=cpu=1,memory=2Gi \
   -n sovra
@@ -141,7 +141,7 @@ psql -U sovra sovra < scripts/optimize-db.sql
 3. **Policy evaluation slow:**
 ```bash
 # Increase policy cache
-kubectl set env deployment/sovra-api-gateway \
+kubectl set env deployment/api-gateway \
   POLICY_CACHE_SIZE=1000 \
   -n sovra
 ```
@@ -269,7 +269,7 @@ curl -k https://partner-sovra.example.org/health
 sovra federation cert-verify org-b
 
 # Check logs
-kubectl logs -n sovra -l app=sovra-api-gateway --tail=50
+kubectl logs -n sovra -l app=api-gateway --tail=50
 ```
 
 **Solutions:**
@@ -277,7 +277,7 @@ kubectl logs -n sovra -l app=sovra-api-gateway --tail=50
 1. **Network connectivity:**
 ```bash
 # Test from control plane pod
-kubectl exec -n sovra sovra-api-gateway-xxx -- \
+kubectl exec -n sovra api-gateway-xxx -- \
   curl -k https://partner-sovra.example.org/health
 
 # Check firewall rules
@@ -337,7 +337,7 @@ sovra workspace add-user \
 kubectl top pods -n sovra
 
 # Profile application
-kubectl exec -n sovra sovra-api-gateway-xxx -- \
+kubectl exec -n sovra api-gateway-xxx -- \
   curl localhost:6060/debug/pprof/profile?seconds=30 > cpu.prof
 ```
 
@@ -345,10 +345,10 @@ kubectl exec -n sovra sovra-api-gateway-xxx -- \
 
 ```bash
 # Scale horizontally
-kubectl scale deployment sovra-api-gateway --replicas=5 -n sovra
+kubectl scale deployment api-gateway --replicas=5 -n sovra
 
 # Increase resources
-kubectl set resources deployment sovra-api-gateway \
+kubectl set resources deployment api-gateway \
   --limits=cpu=4,memory=8Gi \
   -n sovra
 ```
@@ -361,7 +361,7 @@ kubectl set resources deployment sovra-api-gateway \
 kubectl top pods -n sovra
 
 # Check for memory leaks
-kubectl exec -n sovra sovra-api-gateway-xxx -- \
+kubectl exec -n sovra api-gateway-xxx -- \
   curl localhost:6060/debug/pprof/heap > heap.prof
 ```
 
@@ -371,12 +371,12 @@ kubectl exec -n sovra sovra-api-gateway-xxx -- \
 kubectl rollout restart deployment -n sovra
 
 # Increase memory limits
-kubectl set resources deployment sovra-api-gateway \
+kubectl set resources deployment api-gateway \
   --limits=memory=16Gi \
   -n sovra
 
 # Enable Go GC tuning
-kubectl set env deployment/sovra-api-gateway \
+kubectl set env deployment/api-gateway \
   GOGC=50 \
   -n sovra
 ```

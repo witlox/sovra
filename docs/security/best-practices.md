@@ -60,7 +60,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: sovra-api-gateway
+      app: api-gateway
   policyTypes:
   - Ingress
   ingress:
@@ -305,14 +305,14 @@ REVOKE CREATE, DROP, ALTER ON DATABASE sovra FROM sovra;
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: sovra-api-gateway
+  name: api-gateway
   namespace: sovra
 automountServiceAccountToken: true
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: sovra-api-gateway
+  name: api-gateway
 rules:
 - apiGroups: [""]
   resources: ["secrets"]
@@ -348,12 +348,12 @@ rules:
 **2. Forensics Preparation:**
 ```bash
 # Enable debug logging temporarily
-kubectl set env deployment/sovra-api-gateway \
+kubectl set env deployment/api-gateway \
   LOG_LEVEL=debug \
   -n sovra
 
 # Capture network traffic
-kubectl exec -n sovra sovra-api-gateway-xxx -- \
+kubectl exec -n sovra api-gateway-xxx -- \
   tcpdump -i any -w /tmp/capture.pcap
 ```
 

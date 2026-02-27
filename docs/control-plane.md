@@ -12,7 +12,7 @@ Deploy Sovra control plane on Kubernetes cluster (any cloud or on-premises).
 
 ```
 Kubernetes Cluster (3+ nodes)
-├── sovra-api-gateway (3 replicas)
+├── api-gateway (3 replicas)
 │   └── Unified service: workspace, federation, policy, audit, edge, CRK
 └── PostgreSQL (HA via operator)
 ```
@@ -118,7 +118,7 @@ kubectl get pods -n sovra
 kubectl get svc -n sovra
 
 # Test API
-kubectl port-forward svc/sovra-api-gateway 8443:443 -n sovra
+kubectl port-forward svc/api-gateway 8443:443 -n sovra
 curl -k https://localhost:8443/health
 ```
 
@@ -185,10 +185,10 @@ telemetry:
 
 ```bash
 # Scale the api-gateway
-kubectl scale deployment sovra-api-gateway --replicas=5 -n sovra
+kubectl scale deployment api-gateway --replicas=5 -n sovra
 
 # Autoscaling
-kubectl autoscale deployment sovra-api-gateway \
+kubectl autoscale deployment api-gateway \
   --cpu-percent=70 \
   --min=3 \
   --max=10 \
