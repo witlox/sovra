@@ -74,7 +74,8 @@ jobs:
           if [ "$CURRENT" != "$LATEST" ]; then
             echo "Bumping Go directive: $CURRENT -> $LATEST"
             sed -i "s/^go ${CURRENT}$/go ${LATEST}/" go.mod
-            go mod tidy
+            # Allow Go to auto-download the newer toolchain for mod tidy
+            GOTOOLCHAIN=auto go mod tidy
           else
             echo "Already on latest Go ${MINOR}.x ($CURRENT)"
           fi
@@ -91,6 +92,8 @@ jobs:
 
       - name: Verify fix
         if: steps.vulncheck.outputs.vulnerable == 'true' && steps.changes.outputs.changed == 'true'
+        env:
+          GOTOOLCHAIN: auto
         run: |
           go build ./...
           go test -short ./...
