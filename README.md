@@ -162,4 +162,19 @@ Apache-2.0 - See [LICENSE](LICENSE)
 
 ---
 
+## Citation
+
+If you use this in research, please cite:
+
+```bibtex
+@software{sovra,
+  title={Sovra: Federated Sovereign Key Management for Critical Infrastructure},
+  author={Pim Witlox},
+  year={2026},
+  url={https://github.com/witlox/sovra}
+}
+```
+
+---
+
 **Open Source | Community Driven | Digital Sovereignty**
